@@ -1,0 +1,10 @@
+[package]
+name = "rrustdoc"
+version = "0.1.0"
+edition = "2021"
+description = "A rustdoc wrapper"
+
+[dependencies]
+clap = { version = "4.3.8", features = ["derive"] }
+open = "5.0.0"
+owo-colors = "4.0.0-rc.1"
