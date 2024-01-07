@@ -61,7 +61,7 @@ struct Arguments {
     #[arg(short = 'W', long)]
     rustc_verbose: bool,
     /// Override `RUSTC_LOG` to be `debug`.
-    #[arg(short = 'l', long)]
+    #[arg(short, long)]
     log: bool,
     /// Override `RUST_BACKTRACE` to be `0`.
     #[arg(short = 'B', long)]
