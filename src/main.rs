@@ -37,10 +37,10 @@ struct Arguments {
     #[arg(short = 'N', long)]
     normalize: bool,
     /// The (base) name of the crate(s)
-    #[arg(short = 'n', long)]
+    #[arg(short = 'n', long, value_name("NAME"))]
     crate_name: Option<String>,
     /// The version of the (root) crate
-    #[arg(short = 'v', long)]
+    #[arg(short = 'v', long, value_name("VERSION"))]
     crate_version: Option<String>,
     /// Open the generated docs in a browser
     #[arg(short, long)]
