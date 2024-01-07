@@ -3,7 +3,7 @@
 A power tool for rustdoc devs that wrapps `rustdoc` and `rustc`.
 
 Its most useful features are the flags `-x`/`--cross-crate` and `-o`/`--open`.
-For reproducing or debugging a rustdoc *cross-crate re-exports* issue (https://github.com/rust-lang/rust/labels/A-cross-crate-reexports) `rrustdoc` reduces the number of steps from many to just two:
+For reproducing or debugging a [rustdoc *cross-crate re-exports* issue](https://github.com/rust-lang/rust/labels/A-cross-crate-reexports), `rrustdoc` reduces the number of steps from many to just two:
 
 1. Creating a single file `file.rs`.
 2. Executing `rrustdoc file.rs -xo`.
