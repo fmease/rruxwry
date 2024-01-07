@@ -48,6 +48,9 @@ struct Arguments {
     /// Document private items
     #[arg(short = 'P', long)]
     private: bool,
+    /// Pick up crate name from `#![crate_name]` if available.
+    #[arg(short = 'a', long)]
+    crate_name_attr: bool,
     /// Set the toolchain
     #[arg(short, long)]
     toolchain: Option<String>,
@@ -87,7 +90,15 @@ impl Application {
                 .find_map(|line| line.strip_prefix("#![crate_name = \""))
             && let Some(crate_name) = line.strip_suffix("\"]")
         {
-            crate_name_from_attribute = Some(crate_name.into());
+            if arguments.crate_name_attr {
+                crate_name_from_attribute = Some(crate_name.into());
+            } else {
+                warning();
+                eprintln!(
+                    "ignoring potential `#![crate_name]` attribute (setting crate name to `{crate_name}`); \
+                     pass `-a` / `--crate-name-attr` to pick it up"
+                );
+            }
         }
 
         let crate_name = match (arguments.crate_name.as_deref(), crate_name_from_attribute) {
