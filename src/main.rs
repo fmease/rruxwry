@@ -19,54 +19,54 @@ const EDITION: &str = "2021";
 #[derive(Parser)]
 #[command(about)]
 struct Arguments {
-    /// Path to the source file
+    /// Path to the source file.
     path: PathBuf,
-    /// Set the edition of the source files
+    /// Set the edition of the source files.
     #[arg(short, long, default_value = EDITION)]
     edition: String,
-    /// Document hidden items
+    /// Document hidden items.
     #[arg(short = 'H', long)]
     hidden: bool,
-    /// Output JSON instead of HTML
+    /// Output JSON instead of HTML.
     #[arg(short, long)]
     json: bool,
-    /// Document the memory layout of types
+    /// Document the memory layout of types.
     #[arg(short = 'L', long)]
     layout: bool,
-    /// Normalize the documentation
+    /// Normalize types and constants.
     #[arg(short = 'N', long)]
     normalize: bool,
-    /// The (base) name of the crate(s)
+    /// Set the (base) name of the crate(s).
     #[arg(short = 'n', long, value_name("NAME"))]
     crate_name: Option<String>,
-    /// The version of the (root) crate
+    /// Set the version of the (root) crate.
     #[arg(short = 'v', long, value_name("VERSION"))]
     crate_version: Option<String>,
-    /// Open the generated docs in a browser
+    /// Open the generated docs in a browser.
     #[arg(short, long)]
     open: bool,
-    /// Document private items
+    /// Document private items.
     #[arg(short = 'P', long)]
     private: bool,
-    /// Pick up crate name from `#![crate_name]` if available.
+    /// Pick up the crate name from `#![crate_name]` if available.
     #[arg(short = 'a', long)]
     crate_name_attr: bool,
-    /// Set the toolchain
+    /// Set the toolchain.
     #[arg(short, long)]
     toolchain: Option<String>,
-    /// Use verbose output
+    /// Use verbose output.
     #[arg(short = 'V', long)]
     verbose: bool,
-    /// Enable rustc's `-Zverbose`
+    /// Enable rustc's `-Zverbose`.
     #[arg(short = 'W', long)]
     rustc_verbose: bool,
-    /// Override `RUSTC_LOG` to be `debug`
+    /// Override `RUSTC_LOG` to be `debug`.
     #[arg(short = 'l', long)]
     log: bool,
-    /// Override `RUST_BACKTRACE` to be `0`
+    /// Override `RUST_BACKTRACE` to be `0`.
     #[arg(short = 'B', long)]
     no_backtrace: bool,
-    /// Cross-crate re-export mode
+    /// Enable the cross-crate re-export mode.
     #[arg(short = 'x', long)]
     cross_crate: bool,
 }
@@ -125,7 +125,7 @@ impl Application {
                 .unwrap()
                 .to_str()
                 .unwrap()
-                .replace("-", "_"),
+                .replace('-', "_"),
         };
 
         let dependent_crate_name = arguments.cross_crate.then(|| format!("u_{crate_name}"));
