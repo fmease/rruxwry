@@ -13,7 +13,6 @@ const EDITION: &str = "2021";
 
 // FIXME: Support `--crate-name=dependency/dependent`.
 // FIXME: Support passing additional arguments verbatim to `rustc` & `rustdoc`.
-// FIXME: Support convenience flag for setting `RUSTC_LOG`.
 // FIXME: Support non-auto-generated dependents (via `-x=path/to/file.rs`).
 // FIXME: Support convenience flag for setting the CSS theme.
 
@@ -58,6 +57,12 @@ struct Arguments {
     /// Enable rustc's `-Zverbose`
     #[arg(short = 'W', long)]
     rustc_verbose: bool,
+    /// Override `RUSTC_LOG` to be `debug`
+    #[arg(short = 'l', long)]
+    log: bool,
+    /// Override `RUST_BACKTRACE` to be `0`
+    #[arg(short = 'B', long)]
+    no_backtrace: bool,
     /// Cross-crate re-export mode
     #[arg(short = 'x', long)]
     cross_crate: bool,
@@ -128,6 +133,14 @@ impl Application {
 
         let mut command = Command::new("rustc");
 
+        if self.arguments.log {
+            command.env("RUSTC_LOG", "debug");
+        }
+
+        if self.arguments.no_backtrace {
+            command.env("RUST_BACKTRACE", "0");
+        }
+
         if let Some(toolchain) = &self.arguments.toolchain {
             command.arg(format!("+{}", expand_toolchain(toolchain)));
         }
@@ -159,6 +172,14 @@ impl Application {
     fn document(&self) -> io::Result<ExitStatus> {
         let mut command = Command::new("rustdoc");
         let mut uses_unstable_options = false;
+
+        if self.arguments.log {
+            command.env("RUSTC_LOG", "debug");
+        }
+
+        if self.arguments.no_backtrace {
+            command.env("RUST_BACKTRACE", "0");
+        }
 
         if let Some(toolchain) = &self.arguments.toolchain {
             command.arg(format!("+{}", expand_toolchain(toolchain)));
