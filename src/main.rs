@@ -57,9 +57,9 @@ struct Arguments {
     /// Use verbose output.
     #[arg(short = 'V', long)]
     verbose: bool,
-    /// Enable rustc's `-Zverbose`.
+    /// Enable rustc's `-Zverbose-internals`.
     #[arg(short = 'W', long)]
-    rustc_verbose: bool,
+    rustc_verbose_internals: bool,
     /// Override `RUSTC_LOG` to be `debug`.
     #[arg(short, long)]
     log: bool,
@@ -167,8 +167,8 @@ impl Application {
             command.arg(crate_name);
         }
 
-        if self.arguments.rustc_verbose {
-            command.arg("-Zverbose");
+        if self.arguments.rustc_verbose_internals {
+            command.arg("-Zverbose-internals");
         }
 
         if self.arguments.verbose {
@@ -264,8 +264,8 @@ impl Application {
             command.arg("-Zunstable-options");
         }
 
-        if self.arguments.rustc_verbose {
-            command.arg("-Zverbose");
+        if self.arguments.rustc_verbose_internals {
+            command.arg("-Zverbose-internals");
         }
 
         if self.arguments.verbose {
