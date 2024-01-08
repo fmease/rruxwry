@@ -1,12 +1,13 @@
-#![feature(let_chains)]
+#![feature(let_chains, exit_status_error)]
+#![deny(unused_must_use, rust_2018_idioms)]
 
 use clap::Parser;
 use owo_colors::OwoColorize;
 use std::{
     borrow::Cow,
-    io,
+    fmt, io,
     path::PathBuf,
-    process::{Command, ExitCode, ExitStatus},
+    process::{Command, ExitStatusError},
 };
 
 const EDITION: &str = "2021";
@@ -15,6 +16,14 @@ const EDITION: &str = "2021";
 // FIXME: Support passing additional arguments verbatim to `rustc` & `rustdoc`.
 // FIXME: Support non-auto-generated dependents (via `-x=path/to/file.rs`).
 // FIXME: Support convenience flag for setting the CSS theme.
+
+fn main() -> Result {
+    let application = Application::new();
+    application.compile()?;
+    application.document()?;
+    application.open()?;
+    Ok(())
+}
 
 #[derive(Parser)]
 #[command(about)]
@@ -137,9 +146,9 @@ impl Application {
         }
     }
 
-    fn compile(&self) -> io::Result<ExitStatus> {
+    fn compile(&self) -> Result {
         if !self.arguments.cross_crate {
-            return Ok(ExitStatus::default());
+            return Ok(());
         }
 
         let mut command = Command::new("rustc");
@@ -176,11 +185,11 @@ impl Application {
             eprintln!("running: {command:?}");
         }
 
-        command.status()
+        command.status()?.exit_ok()?;
+        Ok(())
     }
 
-    // @Task support passing additional arguments verbatim to rustdoc
-    fn document(&self) -> io::Result<ExitStatus> {
+    fn document(&self) -> Result {
         let mut command = Command::new("rustdoc");
         let mut uses_unstable_options = false;
 
@@ -273,10 +282,11 @@ impl Application {
             eprintln!("running: {command:?}");
         }
 
-        command.status()
+        command.status()?.exit_ok()?;
+        Ok(())
     }
 
-    fn open(&self) -> io::Result<()> {
+    fn open(&self) -> Result {
         if !self.arguments.open {
             return Ok(());
         }
@@ -295,7 +305,8 @@ impl Application {
             eprintln!("opening: {}", path.to_string_lossy());
         }
 
-        open::that(path)
+        open::that(path)?;
+        Ok(())
     }
 }
 
@@ -320,12 +331,30 @@ fn warning() {
     eprint!("{}: ", "warning".yellow());
 }
 
-fn main() -> io::Result<ExitCode> {
-    let application = Application::new();
+type Result<T = (), E = Error> = std::result::Result<T, E>;
 
-    application.compile()?;
-    application.document()?;
-    application.open()?;
+enum Error {
+    Io(io::Error),
+    Process(ExitStatusError),
+}
 
-    Ok(ExitCode::SUCCESS)
+impl From<io::Error> for Error {
+    fn from(error: io::Error) -> Self {
+        Self::Io(error)
+    }
+}
+
+impl From<ExitStatusError> for Error {
+    fn from(error: ExitStatusError) -> Self {
+        Self::Process(error)
+    }
+}
+
+impl fmt::Debug for Error {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Io(error) => error.fmt(f),
+            Self::Process(error) => error.fmt(f),
+        }
+    }
 }
