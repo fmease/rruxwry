@@ -60,6 +60,15 @@ struct Arguments {
     /// Pick up the crate name from `#![crate_name]` if available.
     #[arg(short = 'a', long)]
     crate_name_attr: bool,
+    /// Enable a `cfg`.
+    #[arg(long = "cfg", value_name("SPEC"))]
+    cfgs: Vec<String>,
+    /// Enable a Cargo-like feature.
+    #[arg(short, long = "feature", value_name("NAME"))]
+    features: Vec<String>,
+    /// Enable an experimental rustc library or language feature.
+    #[arg(short = 'F', long = "rustc-feature", value_name("NAME"))]
+    rustc_features: Vec<String>,
     /// Set the toolchain.
     #[arg(short, long)]
     toolchain: Option<String>,
@@ -67,7 +76,7 @@ struct Arguments {
     #[arg(short = 'V', long)]
     verbose: bool,
     /// Enable rustc's `-Zverbose-internals`.
-    #[arg(short = 'W', long)]
+    #[arg(short = '#', long = "internals")]
     rustc_verbose_internals: bool,
     /// Override `RUSTC_LOG` to be `debug`.
     #[arg(short, long)]
@@ -176,6 +185,9 @@ impl Application {
             command.arg(crate_name);
         }
 
+        self.add_cfgs(&mut command);
+        self.add_rustc_features(&mut command);
+
         if self.arguments.rustc_verbose_internals {
             command.arg("-Zverbose-internals");
         }
@@ -264,6 +276,11 @@ impl Application {
             command.arg(crate_version);
         }
 
+        if !self.arguments.cross_crate {
+            self.add_cfgs(&mut command);
+        }
+        self.add_rustc_features(&mut command);
+
         if self.arguments.cross_crate {
             command.arg("--extern");
             command.arg(format!("{0}=lib{0}.rlib", self.crate_name));
@@ -284,6 +301,24 @@ impl Application {
 
         command.status()?.exit_ok()?;
         Ok(())
+    }
+
+    fn add_cfgs(&self, command: &mut Command) {
+        for cfg in &self.arguments.cfgs {
+            command.arg("--cfg");
+            command.arg(cfg);
+        }
+        for feature in &self.arguments.features {
+            // FIXME: Warn on conflicts with `cfgs` from `self.arguments.cfgs`.
+            command.arg("--cfg");
+            command.arg(format!("feature=\"{feature}\""));
+        }
+    }
+
+    fn add_rustc_features(&self, command: &mut Command) {
+        for feature in &self.arguments.rustc_features {
+            command.arg(format!("-Zcrate-attr=feature({feature})"));
+        }
     }
 
     fn open(&self) -> Result {

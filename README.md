@@ -34,9 +34,12 @@ Options:
   -o, --open                     Open the generated docs in a browser
   -P, --private                  Document private items
   -a, --crate-name-attr          Pick up the crate name from `#![crate_name]` if available
+      --cfg <SPEC>               Enable a `cfg`
+  -f, --feature <NAME>           Enable a Cargo-like feature
+  -F, --rustc-feature <NAME>     Enable an experimental rustc library or language feature
   -t, --toolchain <TOOLCHAIN>    Set the toolchain
   -V, --verbose                  Use verbose output
-  -W, --rustc-verbose            Enable rustc's `-Zverbose`
+  -#, --internals                Enable rustc's `-Zverbose-internals`
   -l, --log                      Override `RUSTC_LOG` to be `debug`
   -B, --no-backtrace             Override `RUST_BACKTRACE` to be `0`
   -x, --cross-crate              Enable the cross-crate re-export mode
