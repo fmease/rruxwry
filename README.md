@@ -63,4 +63,4 @@ Options:
 
 ## License
 
-Except as otherwise noted, the contents of this repository are licensed under the MIT license (see the [license file][./LICENSE]). Some files include or are accompanied by explicit license notices.
+Except as otherwise noted, the contents of this repository are licensed under the MIT license (see the license file). Some files include or are accompanied by explicit license notices.
