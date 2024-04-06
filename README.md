@@ -79,7 +79,7 @@ This mode is entirely separate from the default & the cross-crate build mode.
 
 ### Features Common Across Build Modes
 
-Yu can pass the convenience flag `-f`/`--cargo-feature` `⟨NAME⟩` to enable a *Cargo*-like feature, i.e., a `cfg` that can be checked for with `#[cfg(feature = "⟨NAME⟩")]` and similar in the source code. `-f ⟨NAME⟩` just expands to `--cfg feature="⟨NAME⟩"` (modulo shell escaping).
+You can pass the convenience flag `-f`/`--cargo-feature` `⟨NAME⟩` to enable a *Cargo*-like feature, i.e., a `cfg` that can be checked for with `#[cfg(feature = "⟨NAME⟩")]` and similar in the source code. `-f ⟨NAME⟩` just expands to `--cfg feature="⟨NAME⟩"` (modulo shell escaping).
 
 You can pass the convenience flag `-F`/`--rustc-feature` `⟨NAME⟩` to enable an experimental rustc library or language feature. It just expands to `rust{c,doc}`'s `-Zcrate-attr=feature(⟨NAME⟩)` (modulo shell escaping). For example, you can pass `-Flazy_type_alias` to quickly enable *[lazy type aliases]*.
 
@@ -87,7 +87,7 @@ To set the *[rustup]* toolchain, you use `-t`. Examples: `rrustdoc file.rs -tnig
 
 If you'd like to know the precise commands *rrustdoc* runs under the hood for example to be able to open a rust-lang/rust GitHub issue with proper reproduction steps, pass `-V`/`--verbose` and look for output of the form `note: running `. *rrustdoc* tries very hard to minimize the amount of flags passed to `rust{c,doc}` exactly for the aforementioned use case. It's not perfect, you might be able to remove some flags for the reproducer (you can definitely get rid of `--default-theme=ayu` :D).
 
-Just like *Cargo*, *rrustdoc* recognizes the environment variables `RUSTFLAGS` and `RUSTDOCFLAGS`. The arguments / flags present in these flags get passed *verbatim* (modulo shell escaping) to `rustc` and `rustdoc` respectively. Be aware that the flags you pass *may conflict* with the ones added by *rrustdoc* but as mentioned in the paragraph above, it tries fiercely not to add flags unnecessarily. Note that your flags get added last. You can debug potential conflicts by passing `-V`/`--verbose` to `rrustdoc` and by looking for lines starting with `note: running ` in the output to get to know first hand what `rrustdoc` tried to pass to the underlying programs.
+Just like *Cargo*, *rrustdoc* recognizes the environment variables `RUSTFLAGS` and `RUSTDOCFLAGS`. The arguments / flags present in these flags get passed *verbatim* (modulo shell escaping) to `rustc` and `rustdoc` respectively. Be aware that the flags you pass *may conflict* with the ones added by *rrustdoc* but as mentioned in the paragraph above, it tries fiercely to not add flags unnecessarily. Note that your flags get added last. You can debug conflicts by passing `-V`/`--verbose` to `rrustdoc` and by looking for lines starting with `note: running ` in the output to get to know first hand what `rrustdoc` tried to pass to the underlying programs.
 
 ## Command-Line Interface
 
