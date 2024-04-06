@@ -40,7 +40,7 @@ pub(crate) fn build<'a>(
             build_flags,
             program_flags,
         ),
-        BuildMode::UiTest { query } => {
+        BuildMode::Compiletest { query } => {
             build_compiletest_mode(path, crate_name, edition, build_flags, program_flags, query)
         }
     }
@@ -265,7 +265,7 @@ fn build_compiletest_auxiliary<'a>(
 pub(crate) enum BuildMode {
     Default,
     CrossCrate,
-    UiTest { query: Option<QueryMode> },
+    Compiletest { query: Option<QueryMode> },
 }
 
 #[derive(Clone, Copy)]

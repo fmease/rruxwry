@@ -52,7 +52,7 @@ fn main() -> error::Result {
 
     let build_mode = match (cross_crate, compiletest) {
         (true, false) => BuildMode::CrossCrate,
-        (false, true) => BuildMode::UiTest {
+        (false, true) => BuildMode::Compiletest {
             query: match (query, build_flags.json) {
                 (true, false) => Some(QueryMode::Html),
                 (true, true) => Some(QueryMode::Json),
@@ -65,7 +65,7 @@ fn main() -> error::Result {
 
     let edition = edition.unwrap_or_else(|| match build_mode {
         BuildMode::Default | BuildMode::CrossCrate => Edition::LATEST_STABLE,
-        BuildMode::UiTest { .. } => Edition::default(),
+        BuildMode::Compiletest { .. } => Edition::default(),
     });
 
     let source;
@@ -89,7 +89,7 @@ fn main() -> error::Result {
 
                     (crate_name, crate_type.or(attributes.crate_type))
                 }
-                BuildMode::UiTest { .. } => (crate_name.map(Into::into), crate_type),
+                BuildMode::Compiletest { .. } => (crate_name.map(Into::into), crate_type),
             };
 
             // FIXME: unwrap
