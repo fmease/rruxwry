@@ -58,7 +58,7 @@ pub(crate) fn compile(
 
     command.set_verbatim_flags(verbatim_flags);
 
-    if let Some(flags) = &*environment::RUSTFLAGS {
+    if let Some(flags) = environment::rustc_flags() {
         command.args(flags);
     }
 
@@ -135,7 +135,7 @@ pub(crate) fn document(
 
     command.set_verbatim_flags(verbatim_flags);
 
-    if let Some(flags) = &*environment::RUSTDOCFLAGS {
+    if let Some(flags) = environment::rustdoc_flags() {
         command.args(flags);
     }
 
