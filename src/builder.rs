@@ -3,10 +3,9 @@
 //! The low-level build commands are defined in [`crate::command`].
 
 use crate::{
-    cli,
     command::{
-        self, CrateName, CrateNameCow, CrateNameRef, CrateType, Edition, ExternCrate, Strictness,
-        VerbatimFlags,
+        self, CrateName, CrateNameCow, CrateNameRef, CrateType, Edition, ExternCrate, Flags,
+        Strictness,
     },
     directive::Directives,
     error::Result,
@@ -14,7 +13,7 @@ use crate::{
 };
 use joinery::JoinableIterator;
 use rustc_hash::FxHashSet;
-use std::{borrow::Cow, cell::LazyCell, fmt, path::Path};
+use std::{borrow::Cow, cell::LazyCell, fmt, mem, path::Path};
 
 pub(crate) fn build<'a>(
     mode: BuildMode,
@@ -22,39 +21,23 @@ pub(crate) fn build<'a>(
     crate_name: CrateNameRef<'a>,
     crate_type: CrateType,
     edition: Edition,
-    build_flags: &cli::BuildFlags,
-    program_flags: &cli::ProgramFlags,
+    flags: Flags<'_>,
 ) -> Result<CrateNameCow<'a>> {
     match mode {
-        BuildMode::Default => build_default_mode(
-            path,
-            crate_name,
-            crate_type,
-            edition,
-            build_flags,
-            program_flags,
-        ),
-        BuildMode::CrossCrate => build_cross_crate_mode(
-            path,
-            crate_name,
-            crate_type,
-            edition,
-            build_flags,
-            program_flags,
-        ),
+        BuildMode::Default => build_default(path, crate_name, crate_type, edition, flags),
+        BuildMode::CrossCrate => build_cross_crate(path, crate_name, crate_type, edition, flags),
         BuildMode::Compiletest { query } => {
-            build_compiletest_mode(path, crate_name, edition, build_flags, program_flags, query)
+            build_compiletest(path, crate_name, edition, flags, query)
         }
     }
 }
 
-fn build_default_mode<'a>(
+fn build_default<'a>(
     path: &Path,
     crate_name: CrateNameRef<'a>,
     crate_type: CrateType,
     edition: Edition,
-    build_flags: &cli::BuildFlags,
-    program_flags: &cli::ProgramFlags,
+    flags: Flags<'_>,
 ) -> Result<CrateNameCow<'a>> {
     command::document(
         path,
@@ -62,22 +45,19 @@ fn build_default_mode<'a>(
         crate_type,
         edition,
         crate_type.crates(),
-        build_flags,
-        program_flags,
-        default(),
+        flags,
         Strictness::Lenient,
     )?;
 
     Ok(crate_name.map(Cow::Borrowed))
 }
 
-fn build_cross_crate_mode(
+fn build_cross_crate(
     path: &Path,
     crate_name: CrateNameRef<'_>,
     crate_type: CrateType,
     edition: Edition,
-    build_flags: &cli::BuildFlags,
-    program_flags: &cli::ProgramFlags,
+    flags: Flags<'_>,
 ) -> Result<CrateNameCow<'static>> {
     command::compile(
         path,
@@ -85,9 +65,7 @@ fn build_cross_crate_mode(
         crate_type.to_non_executable(),
         edition,
         crate_type.crates(),
-        build_flags,
-        program_flags,
-        default(),
+        flags,
         Strictness::Lenient,
     )?;
 
@@ -96,7 +74,7 @@ fn build_cross_crate_mode(
         .with_file_name(dependent_crate_name.as_str())
         .with_extension("rs");
 
-    if !program_flags.dry_run && !dependent_crate_path.exists() {
+    if !flags.program.dry_run && !dependent_crate_path.exists() {
         // While we could omit the `extern crate` declaration in `edition >= Edition::Edition2018`,
         // we would need to recreate the file on each rerun if the edition was 2015 instead of
         // skipping that step since we wouldn't know whether the existing file if applicable was
@@ -116,21 +94,18 @@ fn build_cross_crate_mode(
             name: crate_name.as_ref(),
             path: None,
         }],
-        build_flags,
-        program_flags,
-        default(),
+        flags,
         Strictness::Lenient,
     )?;
 
     Ok(dependent_crate_name.map(Cow::Owned))
 }
 
-fn build_compiletest_mode<'a>(
+fn build_compiletest<'a>(
     path: &Path,
     crate_name: CrateNameRef<'a>,
     _edition: Edition, // FIXME: should we respect the edition or should we reject it with `clap`?
-    build_flags: &cli::BuildFlags,
-    program_flags: &cli::ProgramFlags,
+    flags: Flags<'_>,
     query: Option<QueryMode>,
 ) -> Result<CrateNameCow<'a>> {
     // FIXME: Add a flag `--all-revs`.
@@ -143,7 +118,7 @@ fn build_compiletest_mode<'a>(
     // FIXME: Is it actually possible to write `//[feature="name"]@` and have compiletest understand it?
     let mut revisions = FxHashSet::default();
 
-    for revision in &build_flags.revisions {
+    for revision in &flags.build.revisions {
         if !directives.revisions.contains(revision.as_str()) {
             let error = Error::UnknownRevision {
                 unknown: revision.clone(),
@@ -159,9 +134,9 @@ fn build_compiletest_mode<'a>(
         revisions.insert(revision.as_str());
     }
 
-    revisions.extend(build_flags.cfgs.iter().map(String::as_str));
+    revisions.extend(flags.build.cfgs.iter().map(String::as_str));
 
-    let directives = directives.into_instantiated(&revisions);
+    let mut directives = directives.into_instantiated(&revisions);
 
     // FIXME: unwrap
     let auxiliary_base_path = LazyCell::new(|| path.parent().unwrap().join("auxiliary"));
@@ -174,11 +149,16 @@ fn build_compiletest_mode<'a>(
                 dependency,
                 &auxiliary_base_path,
                 directives.build_aux_docs,
-                build_flags,
-                program_flags,
+                flags,
             )
         })
         .collect::<Result<_>>()?;
+
+    let verbatim_flags = mem::take(&mut directives.verbatim_flags).extended(flags.verbatim);
+    let flags = Flags {
+        verbatim: verbatim_flags.as_ref(),
+        ..flags
+    };
 
     command::document(
         path,
@@ -186,13 +166,7 @@ fn build_compiletest_mode<'a>(
         default(), // FIXME: respect `@compile-flags: --crate-type`
         directives.edition.unwrap_or_default(),
         &dependencies,
-        build_flags,
-        program_flags,
-        VerbatimFlags {
-            compile_flags: &directives.compile_flags,
-            rustc_envs: &directives.rustc_env,
-            unset_rustc_env: &directives.unset_rustc_env,
-        },
+        flags,
         Strictness::Strict,
     )?;
 
@@ -204,8 +178,7 @@ fn build_compiletest_auxiliary<'a>(
     extern_crate: &ExternCrate<'a>,
     base_path: &Path,
     document: bool,
-    build_flags: &cli::BuildFlags,
-    program_flags: &cli::ProgramFlags,
+    flags: Flags<'_>,
 ) -> Result<ExternCrate<'a>> {
     let path = match extern_crate {
         ExternCrate::Unnamed { path } => base_path.join(path),
@@ -221,29 +194,28 @@ fn build_compiletest_auxiliary<'a>(
     let crate_name = CrateName::from_path(&path).unwrap();
 
     // FIXME: What about instantiation???
-    let directives = source
+    let mut directives = source
         .as_ref()
         .map(|source| Directives::parse(source, None))
         .unwrap_or_default();
 
     let edition = directives.edition.unwrap_or_default();
-    let verbatim_flags = VerbatimFlags {
-        compile_flags: &directives.compile_flags,
-        rustc_envs: &directives.rustc_env,
-        unset_rustc_env: &directives.unset_rustc_env,
+
+    let verbatim_flags = mem::take(&mut directives.verbatim_flags).extended(flags.verbatim);
+    let flags = Flags {
+        verbatim: verbatim_flags.as_ref(),
+        ..flags
     };
 
     command::compile(
         &path,
         crate_name.as_ref(),
-        // FIXME: Verify this works with `@compile-flags:--crate-type=proc_macro`
+        // FIXME: Verify this works with `@compile-flags:--crate-type=proc-macro`
         // FIXME: I don't think it works rn
         CrateType::Lib,
         edition,
         &[],
-        build_flags,
-        program_flags,
-        verbatim_flags,
+        flags,
         Strictness::Strict,
     )?;
 
@@ -257,9 +229,7 @@ fn build_compiletest_auxiliary<'a>(
             default(),
             edition,
             &[],
-            build_flags,
-            program_flags,
-            verbatim_flags,
+            flags,
             Strictness::Strict,
         )?;
     }

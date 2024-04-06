@@ -42,6 +42,7 @@ fn main() -> ExitCode {
 fn try_main() -> error::Result {
     let cli::Arguments {
         path,
+        verbatim_flags,
         open,
         crate_name,
         crate_type,
@@ -82,14 +83,23 @@ fn try_main() -> error::Result {
         &mut source,
     )?;
 
+    let verbatim_flags = command::VerbatimFlagsBuf {
+        arguments: verbatim_flags.iter().map(String::as_str).collect(),
+        environment: Vec::new(),
+    };
+    let flags = command::Flags {
+        build: &build_flags,
+        verbatim: verbatim_flags.as_ref(),
+        program: &program_flags,
+    };
+
     let crate_name = builder::build(
         build_mode,
         &path,
         crate_name.as_ref(),
         crate_type,
         edition,
-        &build_flags,
-        &program_flags,
+        flags,
     )?;
 
     if open {

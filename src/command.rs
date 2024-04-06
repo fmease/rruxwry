@@ -33,15 +33,13 @@ pub(crate) fn compile(
     crate_type: CrateType,
     edition: Edition,
     extern_crates: &[ExternCrate<'_>],
-    build_flags: &cli::BuildFlags,
-    program_flags: &cli::ProgramFlags,
-    verbatim_flags: VerbatimFlags<'_>,
+    flags: Flags<'_>,
     strictness: Strictness,
 ) -> Result {
-    let mut command = Command::new("rustc", program_flags, strictness);
+    let mut command = Command::new("rustc", flags.program, strictness);
 
-    command.set_env_vars(build_flags);
-    command.set_toolchain(build_flags);
+    command.set_env_vars(flags.build);
+    command.set_toolchain(flags.build);
 
     command.arg(path);
 
@@ -51,12 +49,12 @@ pub(crate) fn compile(
 
     command.set_extern_crates(extern_crates);
 
-    command.set_cfgs(build_flags);
-    command.set_rustc_features(build_flags);
-    command.set_cap_lints(build_flags);
-    command.set_internals_mode(build_flags);
+    command.set_cfgs(flags.build);
+    command.set_rustc_features(flags.build);
+    command.set_cap_lints(flags.build);
+    command.set_internals_mode(flags.build);
 
-    command.set_verbatim_flags(verbatim_flags);
+    command.set_verbatim_flags(flags.verbatim);
 
     if let Some(flags) = environment::rustc_flags() {
         command.args(flags);
@@ -71,15 +69,13 @@ pub(crate) fn document(
     crate_type: CrateType,
     edition: Edition,
     extern_crates: &[ExternCrate<'_>],
-    build_flags: &cli::BuildFlags,
-    program_flags: &cli::ProgramFlags,
-    verbatim_flags: VerbatimFlags<'_>,
+    flags: Flags<'_>,
     strictness: Strictness,
 ) -> Result {
-    let mut command = Command::new("rustdoc", program_flags, strictness);
+    let mut command = Command::new("rustdoc", flags.program, strictness);
 
-    command.set_env_vars(build_flags);
-    command.set_toolchain(build_flags);
+    command.set_env_vars(flags.build);
+    command.set_toolchain(flags.build);
 
     command.arg(path.as_os_str());
 
@@ -91,49 +87,49 @@ pub(crate) fn document(
 
     command.set_extern_crates(extern_crates);
 
-    if build_flags.json {
+    if flags.build.json {
         command.arg("--output-format");
         command.arg("json");
         command.uses_unstable_options = true;
     }
 
-    if build_flags.private {
+    if flags.build.private {
         command.arg("--document-private-items");
     }
 
-    if build_flags.hidden {
+    if flags.build.hidden {
         command.arg("--document-hidden-items");
         command.uses_unstable_options = true;
     }
 
-    if build_flags.layout {
+    if flags.build.layout {
         command.arg("--show-type-layout");
         command.uses_unstable_options = true;
     }
 
-    if build_flags.link_to_definition {
+    if flags.build.link_to_definition {
         command.arg("--generate-link-to-definition");
         command.uses_unstable_options = true;
     }
 
-    if build_flags.normalize {
+    if flags.build.normalize {
         command.arg("-Znormalize-docs");
     }
 
-    if let Some(crate_version) = &build_flags.crate_version {
+    if let Some(crate_version) = &flags.build.crate_version {
         command.arg("--crate-version");
         command.arg(crate_version);
     }
 
     command.arg("--default-theme");
-    command.arg(&build_flags.theme);
+    command.arg(&flags.build.theme);
 
-    command.set_cfgs(build_flags);
-    command.set_rustc_features(build_flags);
-    command.set_cap_lints(build_flags);
-    command.set_internals_mode(build_flags);
+    command.set_cfgs(flags.build);
+    command.set_rustc_features(flags.build);
+    command.set_cap_lints(flags.build);
+    command.set_internals_mode(flags.build);
 
-    command.set_verbatim_flags(verbatim_flags);
+    command.set_verbatim_flags(flags.verbatim);
 
     if let Some(flags) = environment::rustdoc_flags() {
         command.args(flags);
@@ -333,11 +329,13 @@ impl<'a> Command<'a> {
     }
 
     fn set_verbatim_flags(&mut self, flags: VerbatimFlags<'_>) {
-        self.envs(flags.rustc_envs.iter().copied());
-        for key in flags.unset_rustc_env {
-            self.env_remove(key);
+        for (key, value) in flags.environment {
+            match value {
+                Some(value) => self.env(key, value),
+                None => self.env_remove(key),
+            };
         }
-        self.args(flags.compile_flags);
+        self.args(flags.arguments);
     }
 }
 
@@ -574,11 +572,38 @@ impl LintLevel {
     }
 }
 
-#[derive(Clone, Copy, Default)]
+#[derive(Clone, Copy)]
+pub(crate) struct Flags<'a> {
+    pub(crate) build: &'a cli::BuildFlags,
+    pub(crate) verbatim: VerbatimFlags<'a>,
+    pub(crate) program: &'a cli::ProgramFlags,
+}
+
+#[derive(Clone, Copy)]
 pub(crate) struct VerbatimFlags<'a> {
-    pub(crate) compile_flags: &'a [&'a str],
-    pub(crate) rustc_envs: &'a [(&'a str, &'a str)],
-    pub(crate) unset_rustc_env: &'a [&'a str],
+    pub(crate) arguments: &'a [&'a str],
+    pub(crate) environment: &'a [(&'a str, Option<&'a str>)],
+}
+
+#[derive(Clone, Default)]
+pub(crate) struct VerbatimFlagsBuf<'a> {
+    pub(crate) arguments: Vec<&'a str>,
+    pub(crate) environment: Vec<(&'a str, Option<&'a str>)>,
+}
+
+impl<'a> VerbatimFlagsBuf<'a> {
+    pub(crate) fn extended(mut self, other: VerbatimFlags<'a>) -> Self {
+        self.arguments.extend_from_slice(other.arguments);
+        self.environment.extend_from_slice(other.environment);
+        self
+    }
+
+    pub(crate) fn as_ref(&self) -> VerbatimFlags<'_> {
+        VerbatimFlags {
+            arguments: &self.arguments,
+            environment: &self.environment,
+        }
+    }
 }
 
 pub(crate) enum Strictness {
