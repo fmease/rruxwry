@@ -30,7 +30,7 @@ This build mode can be used to debug *cross-crate re-export* tests found in `tes
 Presently this tool has no stability guarantees whatsoever. Anything may change in a new version without notice.
 
 The *default* and the *cross crate* build modes is pretty fleshed out and should be pretty stable.
-On the other hand, you might be experience some bugs in the *compiletest* build mode since it was added pretty recently and hasn't been thoroughly tested yet.
+On the other hand, you might experience some bugs in the *compiletest* build mode since it was added pretty recently and hasn't been thoroughly tested yet.
 
 The *compiletest+query* build mode (`-TQ`) has not been implemented yet. The plan is to provide useful output for quickly debugging tests that make use of [`htmldocck`] and [`jsondocck`] directives.
 
