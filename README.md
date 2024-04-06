@@ -53,27 +53,31 @@ Lastly, `rrustdoc` understands `#![crate_name]` and `#![crate_type]`. One might 
 
 ### Cross-Crate Build Mode
 
+This mode builds upon the default build mode and inherits its basic behavior.
+
 The way `rustdoc` documents user-written code in the local / root crate significantly differs from the way it documents *inlined* cross-crate re-exports. In the former case, it processes [HIR] data types, in the latter it processes `rustc_middle::ty` data types. Since `rustc_middle::ty` data types are even more removed from source code than the HIR, there's a lot of work involved inside `rustdoc` to “reconstruct” or “resugar” them to something that looks closer to source code (note that it's close to impossible to perfectly (losslessly) reconstruct the `rustc_middle::ty` to HIR-like data types). This has been and still is the source of a lot of `rustdoc` bugs.
 
 We can easily trigger this code path by creating a dependent crate containing `pub use krate::*;` re-exporting the crate `krate` we're actually interested in. `rrustdoc -X` does this step for us. It generates a dummy crate called `u_⟨name⟩` and invokes `rustc` & `rustdoc` for us.
 
-In summary, you don't need to do anything except to pass `-X`, your file can remain unchanged.
+In summary, you don't need to do anything except passing `-X`, your file can remain unchanged.
 
-If you have previously run the default build mode and passed `-o` to open the generated documentation, you need to pass `-o` “again” when you'd like run the cross-crate build mode and open the docs since you want to see the docs for crate `u_u_⟨name⟩`, *not* `⟨name⟩`. Just something to be aware of.
+NB: If you have previously run the default build mode and passed `-o` to open the generated documentation, you need to pass `-o` “again” when you'd like run the cross-crate build mode and open the docs since you want to see the docs for crate `u_u_⟨name⟩`, *not* `⟨name⟩`. Just something to be aware of.
 
-`--private` and `--hidden` aren't meaningful in cross-crate mode (FIXME: Would they meaningful if we did the same as `//@ build-aux-docs`, e.g. if the user passes `-XX`? Otherwise just reject those flags).
+`--private` and `--hidden` aren't meaningful in cross-crate mode (**FIXME**: Would they meaningful if we did the same as `//@ build-aux-docs`, e.g. if the user passes `-XX`? Otherwise just reject those flags).
 
 ### Compiletest Build Mode
 
-FIXME: Expand upon this section.
+This mode is entirely separate from the default & the cross-crate build mode.
 
-`rrustdoc` natively understands the following [`ui_test`]-style [`compiletest`] directives: `aux-build`, `aux-crate`, `build-aux-docs`, `compile-flags`, `edition`, `force-host` (FIXME: Well, we ignore it right now), `no-prefer-dynamic` (FIXME: Well, we ignore it right now), `revisions`, `rustc-env` and `unset-rustc-env`. Any other directives get skipped and `rrustdoc` emits a warning for the sake of transparency. This selection should suffice, it should cover the majority of use cases. We intentionally don't support `{unset-,}exec-env` since it's not meaningful.
+> **FIXME**: Expand upon this section.
+
+`rrustdoc` natively understands the following [`ui_test`]-style [`compiletest`] directives: `aux-build`, `aux-crate`, `build-aux-docs`, `compile-flags`, `edition`, `force-host` (**FIXME**: Well, we ignore it right now), `no-prefer-dynamic` (**FIXME**: Well, we ignore it right now), `revisions`, `rustc-env` and `unset-rustc-env`. Any other directives get skipped and `rrustdoc` emits a warning for the sake of transparency. This selection should suffice, it should cover the majority of use cases. We intentionally don't support `{unset-,}exec-env` since it's not meaningful.
 
 While *revisions* are not super useful, `rrustdoc` has *full* support for them. You can pass `--cfg` to enable individual revisions. In the future, `rrustdoc` will add support for `--rev` (the same as `--cfg` except that we check that the given revision was actually declared with `//@ revisions`) and `--all-revs` (executing `rrustdoc` (incl. `--open`) for all declared revisions; useful for swiftly comparing minor changes).
 
 ### Features Common Across Build Modes
 
-FIXME: Expand upon this section.
+> **FIXME**: Expand upon this section.
 
 For convenience, you can pass `-f`/`--cargo-feature` `⟨NAME⟩` to enable a Cargo-like feature, i.e., a `cfg` that can be checked for with `#[cfg(feature = "⟨NAME⟩")]` and similar in the source code. `-f ⟨NAME⟩` just expands to `--cfg feature="⟨NAME⟩"` (modulo shell escaping).
 
