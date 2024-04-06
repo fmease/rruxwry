@@ -4,7 +4,8 @@
     exit_status_error,
     type_alias_impl_trait,
     lazy_cell,
-    byte_slice_trim_ascii
+    byte_slice_trim_ascii,
+    os_str_display
 )]
 
 use crate::utility::Tag;
@@ -23,8 +24,6 @@ mod parser;
 mod utility;
 
 // FIXME: respect `compile-flags: --test`
-// FIXME: Support passing additional arguments verbatim to `rustc` & `rustdoc`
-//        via `RUSTFLAGS`/`RUSTDOCFLAGS`.
 // FIXME: Add `--all-revs`.
 
 fn main() -> ExitCode {

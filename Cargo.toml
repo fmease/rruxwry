@@ -13,6 +13,7 @@ open = "5.0.0"
 owo-colors = { version = "4.0.0-rc.1", features = ["supports-colors"] }
 ra-ap-rustc_lexer = "0.34.0"
 rustc-hash = "1.1.0"
+shlex = "1.3.0"
 smallvec = { version = "1.13.1", features = ["const_generics"] }
 
 [profile.release]
