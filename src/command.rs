@@ -43,9 +43,9 @@ pub(crate) fn compile(
 
     command.arg(path);
 
-    command.set_edition(edition);
     command.set_crate_type(crate_type);
     command.set_crate_name(crate_name, path);
+    command.set_edition(edition);
 
     command.set_extern_crates(extern_crates);
 
@@ -80,9 +80,7 @@ pub(crate) fn document(
     command.arg(path.as_os_str());
 
     command.set_crate_name(crate_name, path);
-    if crate_type != default() {
-        command.set_crate_type(crate_type);
-    }
+    command.set_crate_type(crate_type);
     command.set_edition(edition);
 
     command.set_extern_crates(extern_crates);
@@ -245,18 +243,24 @@ impl<'a> Command<'a> {
     }
 
     fn set_crate_type(&mut self, crate_type: CrateType) {
+        if crate_type == default() {
+            return;
+        }
+
         self.arg("--crate-type");
         self.arg(crate_type.to_str());
     }
 
     fn set_edition(&mut self, edition: Edition) {
-        if edition != default() {
-            self.arg("--edition");
-            self.arg(edition.to_str());
+        if edition == default() {
+            return;
         }
         if !edition.is_stable() {
             self.uses_unstable_options = true;
         }
+
+        self.arg("--edition");
+        self.arg(edition.to_str());
     }
 
     fn set_extern_crates(&mut self, extern_crates: &[ExternCrate<'_>]) {

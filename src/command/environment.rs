@@ -59,7 +59,7 @@ fn parse_flags(
     let Some(flags) = flags.to_str() else {
         eprintln!(
             "{}the environment variable `{}` does not contain valid UTF-8; \
-                ignoring all potential flags",
+             ignoring all potential flags",
             Tag::Warning,
             key.display(),
         );
