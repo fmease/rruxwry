@@ -314,7 +314,7 @@ impl<'src> DirectiveParser<'src> {
                 let variable = self.take_remaining_line();
                 DirectiveKind::UnsetRustcEnv(variable)
             }
-            // NB: We don't support `exec-env` since it's not meaningful to rrustdoc.
+            // NB: We don't support `{unset-,}exec-env` since it's not meaningful to rrustdoc.
             directive => return Err(Error::new(ErrorKind::UnknownDirective(directive))),
         };
 
