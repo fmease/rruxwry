@@ -30,7 +30,7 @@ impl<'src> SourceFileParser<'src> {
 
     pub(crate) fn span(&mut self) -> Span {
         Span {
-            start: self.index as _,
+            start: self.index.try_into().unwrap(),
             length: self.peek().map_or(0, |token| token.len),
         }
     }

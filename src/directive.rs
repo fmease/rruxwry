@@ -43,29 +43,34 @@ impl<'src> Directives<'src> {
         }
     }
 
-    pub(crate) fn into_instantiated(mut self, cfgs: &[String]) -> Self {
+    /// Instantiate all directives that are conditional on a revision.
+    pub(crate) fn into_instantiated(mut self, revs: &FxHashSet<&str>) -> Self {
         let uninstantiated = std::mem::take(&mut self.uninstantiated);
-        Self::instantiate(&mut self, &uninstantiated, cfgs);
+        Self::instantiate(&mut self, &uninstantiated, revs);
         self
     }
 
+    /// Instantiate all directives that are conditional on a revision.
     #[allow(dead_code)] // FIXME: use this when impl'ing `--all-revs`
-    pub(crate) fn instantiated(&self, cfgs: &[String]) -> Self {
+    pub(crate) fn instantiated(&self, revs: &FxHashSet<&str>) -> Self {
         let mut instantiated = Self {
             instantiated: self.instantiated.clone(),
             uninstantiated: default(),
         };
-        Self::instantiate(&mut instantiated, &self.uninstantiated, cfgs);
+        Self::instantiate(&mut instantiated, &self.uninstantiated, revs);
         instantiated
     }
 
     fn instantiate(
         instantiated: &mut InstantiatedDirectives<'src>,
         uninstantiated: &UninstantiatedDirectives<'src>,
-        cfgs: &[String],
+        revisions: &FxHashSet<&str>,
     ) {
-        for cfg in cfgs {
-            if let Some(directives) = uninstantiated.get(cfg.as_str()) {
+        // In the most common case, the user doesn't enable any revisions. Therefore we
+        // iterate over the `revisions` instead of the `uninstantiated` directives and
+        // can avoid performing unnecessary work.
+        for revision in revisions {
+            if let Some(directives) = uninstantiated.get(revision) {
                 for directive in directives {
                     instantiated.adjoin(directive.clone());
                 }
@@ -149,7 +154,7 @@ impl<'src> InstantiatedDirectives<'src> {
     fn adjoin(&mut self, directive: DirectiveKind<'src>) {
         match directive {
             DirectiveKind::AuxBuild { path } => {
-                self.dependencies.push(ExternCrate::Unnamed { path })
+                self.dependencies.push(ExternCrate::Unnamed { path });
             }
             DirectiveKind::AuxCrate { name, path } => self.dependencies.push(ExternCrate::Named {
                 name,

@@ -5,7 +5,6 @@ use std::fmt;
 pub(crate) enum Tag {
     Note,
     Warning,
-    #[allow(dead_code)] // FIXME
     Error,
 }
 

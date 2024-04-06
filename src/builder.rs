@@ -12,7 +12,9 @@ use crate::{
     error::Result,
     utility::default,
 };
-use std::{borrow::Cow, cell::LazyCell, path::Path};
+use joinery::JoinableIterator;
+use rustc_hash::FxHashSet;
+use std::{borrow::Cow, cell::LazyCell, fmt, path::Path};
 
 pub(crate) fn build<'a>(
     mode: BuildMode,
@@ -136,10 +138,30 @@ fn build_compiletest_mode<'a>(
     let source = std::fs::read_to_string(path)?;
     let directives = Directives::parse(&source, query);
 
-    // Theoretically speaking we should also pass Cargo-like features here after
-    // having converted them to cfg specs but practically speaking it's not worth
-    // the effort. // FIXME: This will be fixed once we eagerly expand `-f` to `--cfg`
-    let directives = directives.into_instantiated(&build_flags.cfgs);
+    // FIXME: We should also store Cargo-like features here after having converted them to
+    // cfg specs NOTE: This will be fixed once we eagerly expand `-f` to `--cfg`.
+    // FIXME: Is it actually possible to write `//[feature="name"]@` and have compiletest understand it?
+    let mut revisions = FxHashSet::default();
+
+    for revision in &build_flags.revisions {
+        if !directives.revisions.contains(revision.as_str()) {
+            let error = Error::UnknownRevision {
+                unknown: revision.clone(),
+                available: directives
+                    .revisions
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect(),
+            };
+            return Err(error.into());
+        }
+
+        revisions.insert(revision.as_str());
+    }
+
+    revisions.extend(build_flags.cfgs.iter().map(String::as_str));
+
+    let directives = directives.into_instantiated(&revisions);
 
     // FIXME: unwrap
     let auxiliary_base_path = LazyCell::new(|| path.parent().unwrap().join("auxiliary"));
@@ -272,4 +294,26 @@ pub(crate) enum BuildMode {
 pub(crate) enum QueryMode {
     Html,
     Json,
+}
+
+pub(crate) enum Error {
+    UnknownRevision {
+        unknown: String,
+        available: FxHashSet<String>,
+    },
+}
+
+impl fmt::Display for Error {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::UnknownRevision { unknown, available } => write!(
+                f,
+                "unknown revision `{unknown}`; available revisions are: {}",
+                available
+                    .iter()
+                    .map(|revision| format!("`{revision}`"))
+                    .join_with(", "),
+            ),
+        }
+    }
 }

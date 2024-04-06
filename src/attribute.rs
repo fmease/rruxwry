@@ -109,9 +109,9 @@ impl<'src> Attributes<'src> {
                         // FIXME: Unescape escape sequences.
                         let name = source
                             .at(*span)
-                            .strip_prefix("\"")
+                            .strip_prefix('"')
                             .unwrap()
-                            .strip_suffix("\"")
+                            .strip_suffix('"')
                             .unwrap();
                         // FIXME: Validate the crate name first.
                         crate_name = Some(CrateName::new(name));
@@ -131,9 +131,9 @@ impl<'src> Attributes<'src> {
                         // FIXME: Unescape Rust escape sequences.
                         let type_ = source
                             .at(*span)
-                            .strip_prefix("\"")
+                            .strip_prefix('"')
                             .unwrap()
-                            .strip_suffix("\"")
+                            .strip_suffix('"')
                             .unwrap();
                         // FIXME: this only parses "lib", "rlib" and "proc-macro" but we should probably parse & warn/error
                         // if it's a type not supported by rrustdoc?
@@ -516,9 +516,7 @@ trait Output<'src> {
 }
 
 impl<'src> Output<'src> for () {
-    fn output(_: &mut SourceFileParser<'src>) -> Self {
-        ()
-    }
+    fn output(_: &mut SourceFileParser<'src>) -> Self {}
 }
 
 impl<'src> Output<'src> for &'src str {

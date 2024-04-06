@@ -8,7 +8,7 @@ Its most useful features are the flags `-o`/`--open`, `-X`/`--cross-crate` and `
 
 ### `--cross-crate`
 
-Very useful for rapidly reproducing or debugging [rustdoc *cross-crate re-exports* issues][x-crate-reexport-bugs].
+Very useful for rapidly reproducing and debugging [rustdoc *cross-crate re-exports* issues][x-crate-reexport-bugs].
 *rrustdoc* reduces the number of steps from many to just two:
 
 1. Creating a single file `file.rs`,
@@ -29,12 +29,12 @@ This build mode can be used to debug *cross-crate re-export* tests found in `tes
 
 Presently this tool has no stability guarantees whatsoever. Anything may change in a new version without notice.
 
-The *default* and the *cross crate* build modes is pretty fleshed out and should be pretty stable.
+The *default* and the *cross crate* build modes are pretty fleshed out and should be pretty stable.
 On the other hand, you might experience some bugs in the *compiletest* build mode since it was added pretty recently and hasn't been thoroughly tested yet.
 
 The *compiletest+query* build mode (`-TQ`) has not been implemented yet. The plan is to provide useful output for quickly debugging tests that make use of [`htmldocck`] and [`jsondocck`] directives.
 
-Feel free to report any bugs or other unpleasantries on [the issue tracker][bugs].
+Feel free to report any bugs and other unpleasantries on [the issue tracker][bugs].
 If `rrustdoc -T` fails to build a `tests/rustdoc{,-ui,-json}/` file, e.g., due to unsupported directives, that's definitely a bug.
 
 ## Explainer & Tutorial
@@ -75,7 +75,7 @@ This mode is entirely separate from the default & the cross-crate build mode.
 
 *rrustdoc* natively understands the following [`ui_test`]-style [`compiletest`] directives: `aux-build`, `aux-crate`, `build-aux-docs`, `compile-flags`, `edition`, `force-host` (**FIXME**: Well, we ignore it right now), `no-prefer-dynamic` (**FIXME**: Well, we ignore it right now), `revisions`, `rustc-env` and `unset-rustc-env`. Any other directives get skipped and *rrustdoc* emits a warning for the sake of transparency. This selection should suffice, it should cover the majority of use cases. We intentionally don't support `{unset-,}exec-env` since it's not meaningful.
 
-*rrustdoc* has *full* support for *revisions*. You can pass `--cfg` to enable individual revisions. In the future, *rrustdoc* will have support for `--rev` (the same as `--cfg` except that we check that the given revision was actually declared with `//@ revisions`) and `--all-revs` (executing `rrustdoc` (incl. `--open`) for all declared revisions; useful for swiftly comparing minor changes to the source code).
+*rrustdoc* has *full* support for *revisions*. You can pass `--rev ⟨NAME⟩` or `--cfg ⟨SPEC⟩` to enable individual revisions. The former is checked against the revisions declared by `//@ revisions`, the latter is *not*. In the future, *rrustdoc* will have support for `--all-revs` (executing `rrustdoc` (incl. `--open`) for all declared revisions; useful for swiftly comparing minor changes to the source code).
 
 ### Features Common Across Build Modes
 
@@ -106,6 +106,7 @@ Options:
   -e, --edition <EDITION>        Set the edition of the source files [possible values: 2015, 2018, 2021, 2024]
   -t, --toolchain <NAME>         Set the toolchain
       --cfg <SPEC>               Enable a `cfg`
+      --rev <NAME>               Enable a compiletest revision
   -f, --cargo-feature <NAME>     Enable a Cargo-like feature
   -F, --rustc-feature <NAME>     Enable an experimental rustc library or language feature
   -j, --json                     Output JSON instead of HTML

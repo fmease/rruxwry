@@ -7,9 +7,11 @@
     byte_slice_trim_ascii
 )]
 
+use crate::utility::Tag;
 use attribute::Attributes;
 use builder::{BuildMode, QueryMode};
 use command::{CrateNameBuf, CrateNameCow, Edition};
+use std::process::ExitCode;
 
 mod attribute;
 mod builder;
@@ -23,11 +25,22 @@ mod utility;
 // FIXME: respect `compile-flags: --test`
 // FIXME: Support passing additional arguments verbatim to `rustc` & `rustdoc`
 //        via `RUSTFLAGS`/`RUSTDOCFLAGS`.
-// FIXME: Should we add `--rev` for `--ui-test` that's basically `--cfg` but checked against `//@ revisions`?
-//        Or should we just warn if a cfg key is similar to a revision name?
 // FIXME: Add `--all-revs`.
 
-fn main() -> error::Result {
+fn main() -> ExitCode {
+    let result = try_main();
+
+    match result {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(error) => {
+            eprintln!("{}{error}", Tag::Error);
+
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn try_main() -> error::Result {
     let cli::Arguments {
         path,
         open,

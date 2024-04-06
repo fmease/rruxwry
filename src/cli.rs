@@ -33,7 +33,7 @@ pub(crate) struct Arguments {
     /// Enable ui_test-style compiletest directives: `//@`.
     #[arg(short = 'T', long, conflicts_with("cross_crate"))]
     pub(crate) compiletest: bool,
-    /// Enable XPath / JsonPath queries (depending on `--json`).
+    /// Enable XPath / JsonPath queries.
     #[arg(
         short = 'Q',
         long,
@@ -48,6 +48,7 @@ pub(crate) struct Arguments {
     pub(crate) color: ColorChoice,
 }
 
+/// Flags that get passed to `rustc` and `rustdoc` in a lowered form.
 #[derive(Parser)]
 pub(crate) struct BuildFlags {
     /// Set the toolchain.
@@ -56,6 +57,9 @@ pub(crate) struct BuildFlags {
     /// Enable a `cfg`.
     #[arg(long = "cfg", value_name("SPEC"))]
     pub(crate) cfgs: Vec<String>,
+    /// Enable a compiletest revision.
+    #[arg(long = "rev", value_name("NAME"), requires("compiletest"))]
+    pub(crate) revisions: Vec<String>,
     /// Enable a Cargo-like feature.
     #[arg(short = 'f', long = "cargo-feature", value_name("NAME"))]
     pub(crate) cargo_features: Vec<String>,
@@ -100,6 +104,7 @@ pub(crate) struct BuildFlags {
     pub(crate) no_backtrace: bool,
 }
 
+/// Flags that are specific to `rrustdoc` itself.
 #[derive(Parser)]
 pub(crate) struct ProgramFlags {
     /// Use verbose output.
