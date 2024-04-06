@@ -63,7 +63,9 @@ In summary, you don't need to do anything except passing `-X`, your file can rem
 
 NB: If you have previously run the default build mode and passed `-o` to open the generated documentation, you need to pass `-o` “again” when you'd like run the cross-crate build mode and open the generated docs since you want to see the docs for crate `u_⟨name⟩`, *not* `⟨name⟩`. Just something to be aware of.
 
-`--private` and `--hidden` aren't meaningful in cross-crate mode (**FIXME**: Would they meaningful if we did the same as `//@ build-aux-docs`, e.g. if the user passes `-XX`? Otherwise just reject those flags).
+`--private` and `--hidden` aren't meaningful in cross-crate mode (**FIXME**: Would they be meaningful if we did the same as `//@ build-aux-docs`, e.g. if the user passes `-XX`? Otherwise just reject those flags).
+
+Lastly, *rrustdoc* defaults to the CSS theme *Ayu* because it's a dark theme and it looks very nice :P
 
 ### Compiletest Build Mode
 
@@ -79,9 +81,11 @@ This mode is entirely separate from the default & the cross-crate build mode.
 
 For convenience, you can pass `-f`/`--cargo-feature` `⟨NAME⟩` to enable a *Cargo*-like feature, i.e., a `cfg` that can be checked for with `#[cfg(feature = "⟨NAME⟩")]` and similar in the source code. `-f ⟨NAME⟩` just expands to `--cfg feature="⟨NAME⟩"` (modulo shell escaping).
 
-For convenience, you can pass `-F`/`--rustc-feature` `⟨NAME⟩` to enable an experimental rustc library or language feature. It just expands to `-Zcrate-attr=feature(⟨NAME⟩)` (modulo shell escaping). For example, you can add `-Flazy_type_alias` to quickly enable *[lazy type aliases]*.
+For convenience, you can pass `-F`/`--rustc-feature` `⟨NAME⟩` to enable an experimental rustc library or language feature. It just expands to `rust{c,doc}`'s `-Zcrate-attr=feature(⟨NAME⟩)` (modulo shell escaping). For example, you can pass `-Flazy_type_alias` to quickly enable *[lazy type aliases]*.
 
 To set the *[rustup]* toolchain, you use `-t`. Examples: `rrustdoc file.rs -tnightly`, `rrustdoc file.rs -tstage2`. Currently, you *cannot* use the *rustup*-style `+⟨TOOLCHAIN⟩` flag unfortunately. I plan on adding support for that if there's an easy way to do it with `clap` (the CLI parser we use).
+
+If you'd like to know the precise commands *rrustdoc* runs under the hood for example to be able to open a rust-lang/rust GitHub issue with proper reproduction steps, pass `-V`/`--verbose` and look for output of the form `note: running `. *rrustdoc* tries very hard to minimize the amount of flags passed to `rust{c,doc}` exactly for the aforementioned use case. It's not perfect, you might be able to remove some flags for the reproducer (you can definitely get rid of `--default-theme=ayu` :D).
 
 ## Command-Line Interface
 
