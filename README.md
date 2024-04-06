@@ -71,21 +71,23 @@ Lastly, *rrustdoc* defaults to the CSS theme *Ayu* because it's a dark theme and
 
 This mode is entirely separate from the default & the cross-crate build mode.
 
-> **FIXME**: Expand upon this section.
+<!-- FIXME: Expand upon this section. -->
 
-*rrustdoc* natively understands the following [`ui_test`]-style [`compiletest`] directives: `aux-build`, `aux-crate`, `build-aux-docs`, `compile-flags`, `edition`, `force-host` (**FIXME**: Well, we ignore it right now), `no-prefer-dynamic` (**FIXME**: Well, we ignore it right now), `revisions`, `rustc-env` and `unset-rustc-env`. Any other directives get skipped and *rrustdoc* emits a warning for the sake of transparency. This selection should suffice, it should cover the majority of use cases. We intentionally don't support `{unset-,}exec-env` since it's not meaningful.
+*rrustdoc* natively understands the following [`ui_test`]-style [`compiletest`] directives: `aux-build`, `aux-crate`, `build-aux-docs`, `compile-flags`, `edition`, `force-host`<!-- FIXME: Well, we ignore it right now -->, `no-prefer-dynamic`<!-- FIXME: Well, we ignore it right now -->, `revisions`, `rustc-env` and `unset-rustc-env`. Any other directives get skipped and *rrustdoc* emits a warning for the sake of transparency. This selection should suffice, it should cover the majority of use cases. We intentionally don't support `{,unset-}exec-env` since it's not meaningful.
 
 *rrustdoc* has *full* support for *revisions*. You can pass `--rev ⟨NAME⟩` or `--cfg ⟨SPEC⟩` to enable individual revisions. The former is checked against the revisions declared by `//@ revisions`, the latter is *not*. In the future, *rrustdoc* will have support for `--all-revs` (executing `rrustdoc` (incl. `--open`) for all declared revisions; useful for swiftly comparing minor changes to the source code).
 
 ### Features Common Across Build Modes
 
-For convenience, you can pass `-f`/`--cargo-feature` `⟨NAME⟩` to enable a *Cargo*-like feature, i.e., a `cfg` that can be checked for with `#[cfg(feature = "⟨NAME⟩")]` and similar in the source code. `-f ⟨NAME⟩` just expands to `--cfg feature="⟨NAME⟩"` (modulo shell escaping).
+Yu can pass the convenience flag `-f`/`--cargo-feature` `⟨NAME⟩` to enable a *Cargo*-like feature, i.e., a `cfg` that can be checked for with `#[cfg(feature = "⟨NAME⟩")]` and similar in the source code. `-f ⟨NAME⟩` just expands to `--cfg feature="⟨NAME⟩"` (modulo shell escaping).
 
-For convenience, you can pass `-F`/`--rustc-feature` `⟨NAME⟩` to enable an experimental rustc library or language feature. It just expands to `rust{c,doc}`'s `-Zcrate-attr=feature(⟨NAME⟩)` (modulo shell escaping). For example, you can pass `-Flazy_type_alias` to quickly enable *[lazy type aliases]*.
+You can pass the convenience flag `-F`/`--rustc-feature` `⟨NAME⟩` to enable an experimental rustc library or language feature. It just expands to `rust{c,doc}`'s `-Zcrate-attr=feature(⟨NAME⟩)` (modulo shell escaping). For example, you can pass `-Flazy_type_alias` to quickly enable *[lazy type aliases]*.
 
-To set the *[rustup]* toolchain, you use `-t`. Examples: `rrustdoc file.rs -tnightly`, `rrustdoc file.rs -tstage2`. Currently, you *cannot* use the *rustup*-style `+⟨TOOLCHAIN⟩` flag unfortunately. I plan on adding support for that if there's an easy way to do it with `clap` (the CLI parser we use).
+To set the *[rustup]* toolchain, you use `-t`. Examples: `rrustdoc file.rs -tnightly`, `rrustdoc file.rs -tstage2`. Currently, you *cannot* use the *rustup*-style `+⟨TOOLCHAIN⟩` flag unfortunately. I plan on adding support for that if there's an easy way to do it with *clap* (the CLI parser we use).
 
 If you'd like to know the precise commands *rrustdoc* runs under the hood for example to be able to open a rust-lang/rust GitHub issue with proper reproduction steps, pass `-V`/`--verbose` and look for output of the form `note: running `. *rrustdoc* tries very hard to minimize the amount of flags passed to `rust{c,doc}` exactly for the aforementioned use case. It's not perfect, you might be able to remove some flags for the reproducer (you can definitely get rid of `--default-theme=ayu` :D).
+
+Just like *Cargo*, *rrustdoc* recognizes the environment variables `RUSTFLAGS` and `RUSTDOCFLAGS`. The arguments / flags present in these flags get passed *verbatim* (modulo shell escaping) to `rustc` and `rustdoc` respectively. Be aware that the flags you pass *may conflict* with the ones added by *rrustdoc* but as mentioned in the paragraph above, it tries fiercely not to add flags unnecessarily. Note that your flags get added last. You can debug potential conflicts by passing `-V`/`--verbose` to `rrustdoc` and by looking for lines starting with `note: running ` in the output to get to know first hand what `rrustdoc` tried to pass to the underlying programs.
 
 ## Command-Line Interface
 
@@ -129,6 +131,8 @@ Options:
       --color <WHEN>             Control when to use color [default: auto] [possible values: auto, always, never]
   -h, --help                     Print help
 ```
+
+Additionally, *rrustdoc* recognizes the environment variables `RUSTFLAGS` and `RUSTDOCFLAGS`.
 
 ## License
 

@@ -7,6 +7,7 @@
 // the commands printed by `--verbose` for use in GitHub discussions without requiring any
 // manual minimization.
 // FIXME: Also mention to reduce conflicts with compile flags passed via `compiletest`
+//        as well as those passed via the `RUST{,DOC}FLAGS` env vars.
 
 use crate::{
     cli,
@@ -23,6 +24,8 @@ use std::{
     process,
     str::FromStr,
 };
+
+mod environment;
 
 pub(crate) fn compile(
     path: &Path,
@@ -54,6 +57,11 @@ pub(crate) fn compile(
     command.set_internals_mode(build_flags);
 
     command.set_verbatim_flags(verbatim_flags);
+
+    if let Some(flags) = &*environment::RUSTFLAGS {
+        command.args(flags);
+    }
+
     command.execute()
 }
 
@@ -126,6 +134,11 @@ pub(crate) fn document(
     command.set_internals_mode(build_flags);
 
     command.set_verbatim_flags(verbatim_flags);
+
+    if let Some(flags) = &*environment::RUSTDOCFLAGS {
+        command.args(flags);
+    }
+
     command.execute()
 }
 
