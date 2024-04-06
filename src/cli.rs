@@ -13,6 +13,9 @@ use std::{ffi::OsStr, path::PathBuf};
 pub(crate) struct Arguments {
     /// Path to the source file.
     pub(crate) path: PathBuf,
+    /// Flags passed to `rustc` and `rustdoc` verbatim.
+    #[arg(last(true), value_name("VERBATIM"))]
+    pub(crate) verbatim_flags: Vec<String>,
     /// Open the generated docs in a browser.
     #[arg(short, long)]
     pub(crate) open: bool,
