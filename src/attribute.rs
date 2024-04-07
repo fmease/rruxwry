@@ -116,7 +116,7 @@ impl<'src> Attributes<'src> {
 
                         crate_name = Some(match CrateName::parse(name) {
                             Ok(name) => name,
-                            Err(_) => break,
+                            Err(_) => break, // like in rustc, an invalid crate name is fatal
                         });
                     }
                 }
@@ -138,12 +138,12 @@ impl<'src> Attributes<'src> {
                             .unwrap()
                             .strip_suffix('"')
                             .unwrap();
-                        // FIXME: this only parses "lib", "rlib" and "proc-macro" but we should probably parse & warn/error
-                        // if it's a type not supported by rrustdoc?
-                        let Ok(type_) = type_.parse() else {
-                            continue;
-                        };
-                        crate_type = Some(type_);
+                        // Note this only accepts `lib`, `rlib`, `bin` and `proc-macro` at the time of writing.
+                        // FIXME: At least warn on types unsupported by rrustdoc.
+                        crate_type = Some(match type_.parse() {
+                            Ok(type_) => type_,
+                            Err(_) => continue, // like in rustc, an invalid crate type is non-fatal
+                        });
                     }
                 }
                 "cfg_attr" => {
