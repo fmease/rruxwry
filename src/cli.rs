@@ -1,12 +1,9 @@
 //! The command-line interface.
 
-use crate::data::{CrateNameBuf, CrateType, Edition, LintLevel};
-use clap::{
-    builder::{PossibleValue, TypedValueParser},
-    error::ErrorKind,
-    Arg, ColorChoice, Command, Error, Parser, ValueEnum,
-};
-use std::{ffi::OsStr, path::PathBuf};
+use crate::data::{CrateNameBuf, CrateType, Edition};
+use clap::{ColorChoice, Parser};
+use joinery::JoinableIterator;
+use std::path::PathBuf;
 
 #[derive(Parser)]
 #[command(about)]
@@ -20,13 +17,13 @@ pub(crate) struct Arguments {
     #[arg(short, long)]
     pub(crate) open: bool,
     /// Set the name of the (base) crate.
-    #[arg(short = 'n', long, value_name("NAME"), value_parser = CrateNameParser)]
+    #[arg(short = 'n', long, value_name("NAME"), value_parser = CrateNameBuf::parse_cli_style)]
     pub(crate) crate_name: Option<CrateNameBuf>,
     /// Set the type of the (base) crate.
-    #[arg(short = 'y', long, value_name("TYPE"), value_parser = CrateTypeParser)]
+    #[arg(short = 'y', long, value_name("TYPE"), value_parser = CrateType::parse_cli_style)]
     pub(crate) crate_type: Option<CrateType>,
     /// Set the edition of the source files.
-    #[arg(short, long, value_enum)]
+    #[arg(short, long, value_parser = Edition::parse_cli_style)]
     pub(crate) edition: Option<Edition>,
     #[command(flatten)]
     pub(crate) build_flags: BuildFlags,
@@ -94,8 +91,8 @@ pub(crate) struct BuildFlags {
     #[arg(long, default_value("ayu"))]
     pub(crate) theme: String,
     /// Cap lints at a level.
-    #[arg(long, value_name("LEVEL"), value_enum)]
-    pub(crate) cap_lints: Option<LintLevel>,
+    #[arg(long, value_name("LEVEL"))]
+    pub(crate) cap_lints: Option<String>,
     /// Enable rustc's `-Zverbose-internals`.
     #[arg(short = '#', long = "internals")]
     pub(crate) rustc_verbose_internals: bool,
@@ -119,66 +116,38 @@ pub(crate) struct ProgramFlags {
     pub(crate) dry_run: bool,
 }
 
-impl ValueEnum for Edition {
-    fn value_variants<'a>() -> &'a [Self] {
-        Self::elements()
-    }
-
-    fn to_possible_value(&self) -> Option<PossibleValue> {
-        Some(PossibleValue::new(self.to_str()))
-    }
-}
-
-#[derive(Clone)]
-struct CrateNameParser;
-
-impl TypedValueParser for CrateNameParser {
-    type Value = CrateNameBuf;
-
-    fn parse_ref(
-        &self,
-        command: &Command,
-        _argument: Option<&Arg>,
-        source: &OsStr,
-    ) -> Result<Self::Value, Error> {
-        let error = |kind| Error::new(kind).with_cmd(command);
-        let source = source
-            .to_str()
-            .ok_or_else(|| error(ErrorKind::InvalidUtf8))?;
-
-        CrateNameBuf::adjust_and_parse(source).map_err(|()| error(ErrorKind::InvalidValue))
+impl Edition {
+    fn parse_cli_style(source: &str) -> Result<Self, String> {
+        match source {
+            "D" => Ok(Self::default()),
+            "S" => Ok(Self::LATEST_STABLE),
+            "U" => Ok(Self::BLEEDING_EDGE),
+            source => source.parse(),
+        }
+        .map_err(|()| possible_values(Self::elements().map(Self::to_str).chain(["D", "S", "U"])))
     }
 }
 
-#[derive(Clone)]
-struct CrateTypeParser;
-
-impl TypedValueParser for CrateTypeParser {
-    type Value = CrateType;
-
-    fn parse_ref(
-        &self,
-        command: &Command,
-        _argument: Option<&Arg>,
-        source: &OsStr,
-    ) -> Result<Self::Value, Error> {
-        let error = |kind| Error::new(kind).with_cmd(command);
-        let source = source
-            .to_str()
-            .ok_or_else(|| error(ErrorKind::InvalidUtf8))?;
-
-        source.parse().map_err(|()| error(ErrorKind::InvalidValue))
+impl CrateNameBuf {
+    fn parse_cli_style(source: &str) -> Result<Self, &'static str> {
+        Self::adjust_and_parse(source).map_err(|()| "not a non-empty alphanumeric string")
     }
-
-    // FIXME: possible values: bin, lib, rlib, proc-macro
 }
 
-impl ValueEnum for LintLevel {
-    fn value_variants<'a>() -> &'a [Self] {
-        Self::elements()
+impl CrateType {
+    fn parse_cli_style(source: &str) -> Result<Self, String> {
+        source
+            .parse()
+            .map_err(|()| possible_values(["bin", "lib", "rlib", "proc-macro"]))
     }
+}
 
-    fn to_possible_value(&self) -> Option<PossibleValue> {
-        Some(PossibleValue::new(self.to_str()))
-    }
+fn possible_values(values: impl IntoIterator<Item: std::fmt::Display, IntoIter: Clone>) -> String {
+    format!(
+        "possible values: {}",
+        values
+            .into_iter()
+            .map(|value| format!("`{value}`"))
+            .join_with(", ")
+    )
 }

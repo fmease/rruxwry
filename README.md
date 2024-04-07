@@ -49,7 +49,7 @@ Moreover, you don't need to “pass `-Zunstable-options`” (that flag is not ev
 
 If you are documenting a proc-macro crate, *rrustdoc* automatically adds `proc_macro` to the *extern prelude* similar to *Cargo* so you should never need to write `extern crate proc_macro;` in Rust ≥2018 crates.
 
-Lastly, `rrustdoc` understands `#![crate_name]` and `#![crate_type]`. One might think that that's a given but there's a significant amount of work involved to support these attributes. *Cargo* for example doesn't understand them requiring you to categorize your crates in `Cargo.toml` via the sections `[lib]`, `[[bin]]` etc. (obviously that's not the actual reason; it's an intentional design decision).
+Lastly, `rrustdoc` understands `#![crate_name]` and `#![crate_type]`. One might think that that's a given but there's a significant amount of work involved to support these attributes. *Cargo* for example doesn't understand them requiring you to categorize your crates in `Cargo.toml` via the sections `[lib]`, `[[bin]]` etc. (obviously that's not the actual reason; it's an intentional design decision). In the unlikely case of *rrustdoc* not recognizing the crate name or crate type from the crate attributes, you can set them explicitly with `-n`/`--crate-name` and `-y`/`--crate-type` respectively.
 
 ### Cross-Crate Build Mode
 
@@ -91,6 +91,8 @@ Just like *Cargo*, *rrustdoc* recognizes the environment variables `RUSTFLAGS` a
 
 However if that's too wordy for you and you don't care about passing arguments / flags to *both* `rustc` *and* `rustdoc`, you can simply provide them inline after `--`. Example: `rrustdoc file.rs -X -- -Ztreat-err-as-bug`. Here, the `-Z` flag gets passed to both `rustc file.rs` and `rustdoc u_file.rs` (remember, `-X` enables the cross-crate build mode).
 
+`-e`/`--edition` supports the following edition *aliases*: `D` (default edition), `S` (latest stable edition) and `U` (latest edition, no matter if stable or unstable).
+
 ## Command-Line Interface
 
 `rrustdoc -h`:
@@ -108,7 +110,7 @@ Options:
   -o, --open                     Open the generated docs in a browser
   -n, --crate-name <NAME>        Set the name of the (base) crate
   -y, --crate-type <TYPE>        Set the type of the (base) crate
-  -e, --edition <EDITION>        Set the edition of the source files [possible values: 2015, 2018, 2021, 2024]
+  -e, --edition <EDITION>        Set the edition of the source files
   -t, --toolchain <NAME>         Set the toolchain
       --cfg <SPEC>               Enable a `cfg`
       --rev <NAME>               Enable a compiletest revision
@@ -122,7 +124,7 @@ Options:
   -D, --link-to-definition       Generate links to definitions
       --normalize                Normalize types and constants
       --theme <THEME>            Set the theme [default: ayu]
-      --cap-lints <LEVEL>        Cap lints at a level [possible values: allow, warn, deny, forbid]
+      --cap-lints <LEVEL>        Cap lints at a level
   -#, --internals                Enable rustc's `-Zverbose-internals`
       --log                      Override `RUSTC_LOG` to be `debug`
   -B, --no-backtrace             Override `RUST_BACKTRACE` to be `0`

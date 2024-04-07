@@ -306,9 +306,9 @@ impl<'a> Command<'a> {
     }
 
     fn set_cap_lints(&mut self, flags: &cli::BuildFlags) {
-        if let Some(level) = flags.cap_lints {
+        if let Some(level) = &flags.cap_lints {
             self.arg("--cap-lints");
-            self.arg(level.to_str());
+            self.arg(level);
         }
     }
 
