@@ -81,9 +81,10 @@ mod warning {
 
     pub(super) fn malformed_environment_variable(key: &OsStr, note: &'static str) -> Diagnostic {
         Diagnostic::warning(format!(
-            "the environment variable `{}` is malformed: {note}",
+            "the environment variable `{}` is malformed",
             key.display()
         ))
+        .note(note)
         .note("ignoring all flags potentially contained within it")
     }
 }
