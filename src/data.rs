@@ -11,6 +11,7 @@ pub(crate) enum Edition {
 
 impl Edition {
     pub(crate) const LATEST_STABLE: Self = Self::Edition2021;
+    pub(crate) const BLEEDING_EDGE: Self = Self::Edition2024;
 
     pub(crate) fn is_stable(self) -> bool {
         self <= Self::LATEST_STABLE
@@ -26,13 +27,14 @@ impl Edition {
     }
 
     // FIXME: Derive this.
-    pub(crate) const fn elements() -> &'static [Self] {
-        &[
+    pub(crate) fn elements() -> impl Iterator<Item = Self> + Clone {
+        [
             Self::Edition2015,
             Self::Edition2018,
             Self::Edition2021,
             Self::Edition2024,
         ]
+        .into_iter()
     }
 }
 
@@ -178,29 +180,5 @@ impl<'a> From<CrateNameRef<'a>> for CrateNameCow<'a> {
 impl<T: AsRef<str>> fmt::Display for CrateName<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(self.as_str())
-    }
-}
-
-#[derive(Clone, Copy)]
-pub(crate) enum LintLevel {
-    Allow,
-    Warn,
-    Deny,
-    Forbid,
-}
-
-impl LintLevel {
-    pub(crate) const fn to_str(self) -> &'static str {
-        match self {
-            Self::Allow => "allow",
-            Self::Warn => "warn",
-            Self::Deny => "deny",
-            Self::Forbid => "forbid",
-        }
-    }
-
-    // FIXME: Derive this.
-    pub(crate) const fn elements() -> &'static [Self] {
-        &[Self::Allow, Self::Warn, Self::Deny, Self::Forbid]
     }
 }
