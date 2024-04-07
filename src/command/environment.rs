@@ -1,4 +1,3 @@
-use crate::utility::Tag;
 use rustc_hash::FxHashMap;
 use std::{
     ffi::{OsStr, OsString},
@@ -44,25 +43,14 @@ fn parse_flags(
 ) -> Option<Vec<String>> {
     for &confusable in confusables {
         if environment.contains_key(confusable) {
-            eprintln!(
-                "{}rrustdoc does not read the `{}` environment variable; \
-                 you might have meant `{}`",
-                Tag::Warning,
-                confusable.display(),
-                key.display(),
-            );
+            warning::environment_contains_confusable_variable(confusable, key).emit()
         }
     }
 
     let flags = environment.get(key)?;
 
     let Some(flags) = flags.to_str() else {
-        eprintln!(
-            "{}the environment variable `{}` does not contain valid UTF-8; \
-             ignoring all potential flags",
-            Tag::Warning,
-            key.display(),
-        );
+        warning::malformed_environment_variable(key, "its content is not valid UTF-8").emit();
 
         return None;
     };
@@ -70,13 +58,32 @@ fn parse_flags(
     let flags = shlex::split(&flags);
 
     if flags.is_none() {
-        eprintln!(
-            "{}the environment variable `{}` is not well-formed; \
-             ignoring all potential flags",
-            Tag::Warning,
-            key.display(),
-        );
+        warning::malformed_environment_variable(key, "its content is not properly escaped").emit();
     }
 
     flags
+}
+
+mod warning {
+    use crate::error::Diagnostic;
+    use std::ffi::OsStr;
+
+    pub(super) fn environment_contains_confusable_variable(
+        confusable: &OsStr,
+        suggestion: &OsStr,
+    ) -> Diagnostic {
+        Diagnostic::warning(format!(
+            "rrustdoc does not read the environment variable `{}`",
+            confusable.display()
+        ))
+        .note(format!("you might have meant `{}`", suggestion.display()))
+    }
+
+    pub(super) fn malformed_environment_variable(key: &OsStr, note: &'static str) -> Diagnostic {
+        Diagnostic::warning(format!(
+            "the environment variable `{}` is malformed: {note}",
+            key.display()
+        ))
+        .note("ignoring all flags potentially contained within it")
+    }
 }

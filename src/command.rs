@@ -11,8 +11,8 @@
 
 use crate::{
     cli,
-    error::Result,
-    utility::{default, Tag},
+    error::{Diagnostic, Result},
+    utility::default,
 };
 use owo_colors::OwoColorize;
 use std::{
@@ -143,14 +143,12 @@ pub(crate) fn open(crate_name: CrateNameRef<'_>, flags: &cli::ProgramFlags) -> R
         .join("index.html");
 
     if flags.verbose {
-        eprint!("{}", Tag::Note);
-
-        let title = match flags.dry_run {
+        let verb = match flags.dry_run {
             false => "opening",
-            true => "skipping opening", // FIXME: awkward wording!
+            true => "skipping the opening of",
         };
 
-        eprintln!("{title} {}", path.to_string_lossy().green());
+        Diagnostic::info(format!("{verb} {}", path.to_string_lossy().green())).emit();
     }
 
     if !flags.dry_run {
@@ -197,33 +195,16 @@ impl<'a> Command<'a> {
             return;
         }
 
-        eprint!("{}", Tag::Note);
-
-        let title = if !self.flags.dry_run {
+        let verb = if !self.flags.dry_run {
             "running"
         } else {
             "skipping"
         };
+        let mut message = String::from(verb);
+        message += " ";
+        render_command(self, &mut message).unwrap();
 
-        eprint!("{title} ");
-
-        for (var, value) in self.get_envs() {
-            // FIXME: Print `env -u VAR` for removed vars before
-            // added vars just like `Command`'s `Debug` impl.
-            let Some(value) = value else { continue };
-
-            eprint!(
-                "{}{}{} ",
-                var.to_string_lossy().yellow().bold(),
-                "=".yellow(),
-                value.to_string_lossy().yellow()
-            );
-        }
-        eprint!("{}", self.get_program().to_string_lossy().purple().bold());
-        for arg in self.get_args() {
-            eprint!(" {}", arg.to_string_lossy().green());
-        }
-        eprintln!();
+        Diagnostic::info(message).emit();
     }
 
     fn set_toolchain(&mut self, flags: &cli::BuildFlags) {
@@ -355,6 +336,37 @@ impl DerefMut for Command<'_> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.command
     }
+}
+
+// This is very close to `<process::Command as fmt::Debug>::fmt` but prettier.
+fn render_command(command: &process::Command, buffer: &mut String) -> fmt::Result {
+    use std::fmt::Write;
+
+    for (key, value) in command.get_envs() {
+        // FIXME: Print `env -u VAR` for removed vars before
+        // added vars just like `Command`'s `Debug` impl.
+        let Some(value) = value else { continue };
+
+        write!(
+            buffer,
+            "{}{}{} ",
+            key.to_string_lossy().yellow().bold(),
+            "=".yellow(),
+            value.to_string_lossy().yellow()
+        )?;
+    }
+
+    write!(
+        buffer,
+        "{}",
+        command.get_program().to_string_lossy().purple().bold()
+    )?;
+
+    for argument in command.get_args() {
+        write!(buffer, " {}", argument.to_string_lossy().green())?;
+    }
+
+    Ok(())
 }
 
 #[derive(Clone)]

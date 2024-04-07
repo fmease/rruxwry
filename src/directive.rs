@@ -3,8 +3,9 @@
 use crate::{
     builder::QueryMode,
     command::{CrateNameRef, Edition, ExternCrate, VerbatimFlagsBuf},
+    error::Diagnostic,
     parser,
-    utility::{default, Tag},
+    utility::default,
 };
 use joinery::JoinableIterator;
 use ra_ap_rustc_lexer::TokenKind;
@@ -413,19 +414,18 @@ struct Report<'src> {
 impl Report<'_> {
     fn publish(self) {
         if !self.unknowns.is_empty() {
-            eprintln!(
-                "{}unknown directive{}: {}",
-                Tag::Warning,
-                if self.unknowns.len() == 1 { "" } else { "s" },
-                self.unknowns
-                    .into_iter()
-                    .map(|unknown| format!("`{unknown}`"))
-                    .join_with(", "),
-            );
+            let s = if self.unknowns.len() == 1 { "" } else { "s" };
+            let unknowns = self
+                .unknowns
+                .into_iter()
+                .map(|unknown| format!("`{unknown}`"))
+                .join_with(", ");
+            Diagnostic::warning(format!("unknown directive{s}: {unknowns}")).emit();
         }
 
         for error in self.errors {
-            eprintln!("{}{error}", Tag::Warning);
+            // FIXME: Make `Error` impl `IntoDiagnostic`
+            Diagnostic::warning(error.to_string()).emit();
         }
     }
 }

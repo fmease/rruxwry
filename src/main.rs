@@ -8,10 +8,10 @@
     os_str_display
 )]
 
-use crate::utility::Tag;
 use attribute::Attributes;
 use builder::{BuildMode, QueryMode};
 use command::{CrateNameBuf, CrateNameCow, CrateType, Edition};
+use error::IntoDiagnostic;
 use std::{path::Path, process::ExitCode};
 
 mod attribute;
@@ -32,8 +32,7 @@ fn main() -> ExitCode {
     match result {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
-            eprintln!("{}{error}", Tag::Error);
-
+            error.into_diagnostic().emit();
             ExitCode::FAILURE
         }
     }

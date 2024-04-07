@@ -8,12 +8,12 @@ use crate::{
         Strictness,
     },
     directive::Directives,
-    error::Result,
+    error::{Diagnostic, IntoDiagnostic, Result},
     utility::default,
 };
 use joinery::JoinableIterator;
 use rustc_hash::FxHashSet;
-use std::{borrow::Cow, cell::LazyCell, fmt, mem, path::Path};
+use std::{borrow::Cow, cell::LazyCell, mem, path::Path};
 
 pub(crate) fn build<'a>(
     mode: BuildMode,
@@ -273,17 +273,21 @@ pub(crate) enum Error {
     },
 }
 
-impl fmt::Display for Error {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+impl IntoDiagnostic for Error {
+    fn into_diagnostic(self) -> Diagnostic {
         match self {
-            Self::UnknownRevision { unknown, available } => write!(
-                f,
-                "unknown revision `{unknown}`; available revisions are: {}",
-                available
+            Error::UnknownRevision { unknown, available } => {
+                let available = available
                     .iter()
                     .map(|revision| format!("`{revision}`"))
-                    .join_with(", "),
-            ),
+                    .join_with(", ");
+
+                Diagnostic::error(format!("unknown revision `{unknown}`"))
+                    .note(format!("available revisions are: {available}"))
+                    .note(format!(
+                        "you can use `--cfg` over `--rev` to suppress this check"
+                    ))
+            }
         }
     }
 }

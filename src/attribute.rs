@@ -1,7 +1,8 @@
 use crate::{
     command::{CrateName, CrateNameRef, CrateType, Edition},
+    error::Diagnostic,
     parser::{At, SourceFileParser, Span},
-    utility::{SmallVec, Tag},
+    utility::SmallVec,
 };
 use ra_ap_rustc_lexer::{DocStyle, LiteralKind, Token, TokenKind};
 use std::ops::ControlFlow;
@@ -46,28 +47,27 @@ impl<'src> Attributes<'src> {
         let attributes = AttributeParser::new(source, edition).execute();
 
         if verbose {
-            eprintln!(
-                "{}parser: found {} inner attribute{}",
-                Tag::Note,
-                attributes.len(),
-                if attributes.len() == 1 { "" } else { "s" },
-            );
+            let n = attributes.len();
+            let s = if n == 1 { "" } else { "s" };
+            Diagnostic::info(format!("parser: found {n} inner attribute{s}")).emit();
         }
 
         let attributes = Self::lower(attributes, cfgs, source);
 
         if verbose {
-            let prefix = |present| if present { "found" } else { "did not find" };
-            eprintln!(
-                "{}lowerer: {} a well-formed `#![crate_name]`",
-                Tag::Note,
-                prefix(attributes.crate_name.is_some())
-            );
-            eprintln!(
-                "{}lowerer: {} a well-formed `#![crate_type]`",
-                Tag::Note,
-                prefix(attributes.crate_type.is_some())
-            );
+            let verb = |present| if present { "found" } else { "did not find" };
+
+            Diagnostic::info(format!(
+                "lowerer: {} a well-formed `#![crate_name]`",
+                verb(attributes.crate_name.is_some()),
+            ))
+            .emit();
+
+            Diagnostic::info(format!(
+                "lowerer: {} a well-formed `#![crate_type]`",
+                verb(attributes.crate_type.is_some()),
+            ))
+            .emit();
         }
 
         attributes
