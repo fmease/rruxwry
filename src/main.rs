@@ -11,13 +11,14 @@
 use attribute::Attributes;
 use builder::{BuildMode, QueryMode};
 use command::{CrateNameBuf, CrateNameCow, CrateType, Edition};
-use error::IntoDiagnostic;
+use diagnostic::IntoDiagnostic;
 use std::{path::Path, process::ExitCode};
 
 mod attribute;
 mod builder;
 mod cli;
 mod command;
+mod diagnostic;
 mod directive;
 mod error;
 mod parser;

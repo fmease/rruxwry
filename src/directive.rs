@@ -3,7 +3,7 @@
 use crate::{
     builder::QueryMode,
     command::{CrateNameRef, Edition, ExternCrate, VerbatimFlagsBuf},
-    error::Diagnostic,
+    diagnostic::Diagnostic,
     parser,
     utility::default,
 };

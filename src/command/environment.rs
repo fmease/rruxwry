@@ -65,7 +65,7 @@ fn parse_flags(
 }
 
 mod warning {
-    use crate::error::Diagnostic;
+    use crate::diagnostic::Diagnostic;
     use std::ffi::OsStr;
 
     pub(super) fn environment_contains_confusable_variable(

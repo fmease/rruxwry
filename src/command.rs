@@ -9,11 +9,7 @@
 // FIXME: Also mention to reduce conflicts with compile flags passed via `compiletest`
 //        as well as those passed via the `RUST{,DOC}FLAGS` env vars.
 
-use crate::{
-    cli,
-    error::{Diagnostic, Result},
-    utility::default,
-};
+use crate::{cli, diagnostic::Diagnostic, error::Result, utility::default};
 use owo_colors::OwoColorize;
 use std::{
     borrow::Cow,
@@ -144,11 +140,16 @@ pub(crate) fn open(crate_name: CrateNameRef<'_>, flags: &cli::ProgramFlags) -> R
 
     if flags.verbose {
         let verb = match flags.dry_run {
-            false => "opening",
-            true => "skipping the opening of",
+            false => "running",
+            true => "skipping",
         };
 
-        Diagnostic::info(format!("{verb} {}", path.to_string_lossy().green())).emit();
+        Diagnostic::info(format!(
+            "{verb} {} {}",
+            "⟨browser⟩".color(palette::COMMAND).bold(),
+            path.to_string_lossy().green()
+        ))
+        .emit();
     }
 
     if !flags.dry_run {
@@ -202,7 +203,7 @@ impl<'a> Command<'a> {
         };
         let mut message = String::from(verb);
         message += " ";
-        render_command(self, &mut message).unwrap();
+        self.render_into(&mut message).unwrap();
 
         Diagnostic::info(message).emit();
     }
@@ -338,35 +339,56 @@ impl DerefMut for Command<'_> {
     }
 }
 
-// This is very close to `<process::Command as fmt::Debug>::fmt` but prettier.
-fn render_command(command: &process::Command, buffer: &mut String) -> fmt::Result {
-    use std::fmt::Write;
+trait CommandExt {
+    fn render_into(&self, buffer: &mut String) -> fmt::Result;
+}
 
-    for (key, value) in command.get_envs() {
-        // FIXME: Print `env -u VAR` for removed vars before
-        // added vars just like `Command`'s `Debug` impl.
-        let Some(value) = value else { continue };
+// This is very close to `<process::Command as fmt::Debug>::fmt` but prettier.
+impl CommandExt for process::Command {
+    fn render_into(&self, buffer: &mut String) -> fmt::Result {
+        use std::fmt::Write;
+
+        for (key, value) in self.get_envs() {
+            // FIXME: Print `env -u VAR` for removed vars before
+            // added vars just like `Command`'s `Debug` impl.
+            let Some(value) = value else { continue };
+
+            write!(
+                buffer,
+                "{}{}{} ",
+                key.to_string_lossy().color(palette::VARIABLE).bold(),
+                "=".color(palette::VARIABLE),
+                value.to_string_lossy().color(palette::VARIABLE)
+            )?;
+        }
 
         write!(
             buffer,
-            "{}{}{} ",
-            key.to_string_lossy().yellow().bold(),
-            "=".yellow(),
-            value.to_string_lossy().yellow()
+            "{}",
+            self.get_program()
+                .to_string_lossy()
+                .color(palette::COMMAND)
+                .bold()
         )?;
+
+        for argument in self.get_args() {
+            write!(
+                buffer,
+                " {}",
+                argument.to_string_lossy().color(palette::ARGUMENT)
+            )?;
+        }
+
+        Ok(())
     }
+}
 
-    write!(
-        buffer,
-        "{}",
-        command.get_program().to_string_lossy().purple().bold()
-    )?;
+mod palette {
+    use owo_colors::AnsiColors;
 
-    for argument in command.get_args() {
-        write!(buffer, " {}", argument.to_string_lossy().green())?;
-    }
-
-    Ok(())
+    pub(super) const VARIABLE: AnsiColors = AnsiColors::Yellow;
+    pub(super) const COMMAND: AnsiColors = AnsiColors::Magenta;
+    pub(super) const ARGUMENT: AnsiColors = AnsiColors::Green;
 }
 
 #[derive(Clone)]

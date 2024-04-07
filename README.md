@@ -89,7 +89,7 @@ If you'd like to know the precise commands *rrustdoc* runs under the hood for ex
 
 Just like *Cargo*, *rrustdoc* recognizes the environment variables `RUSTFLAGS` and `RUSTDOCFLAGS`. The arguments / flags present in these flags get passed *verbatim* (modulo shell escaping) to `rustc` and `rustdoc` respectively. Be aware that the flags you pass *may conflict* with the ones added by *rrustdoc* but as mentioned in the paragraph above, it tries fiercely to not add flags unnecessarily. Note that your flags get added last. You can debug conflicts by passing `-V`/`--verbose` to `rrustdoc` and by looking for lines starting with `info: running ` in the output to get to know first hand what `rrustdoc` tried to pass to the underlying programs.
 
-However if that's too wordy for you and you don't care about passing arguments / flags to *both* `rustc` *and* `rustdoc`, you can simply provide them inline after `--`. Example: `rrustdoc file.rs -X -- -Ztreat-err-as-bug`. Here, the `-Z` flag gets passed to both `file` and `u_file` (remember, `-X` enables the cross-crate build mode).
+However if that's too wordy for you and you don't care about passing arguments / flags to *both* `rustc` *and* `rustdoc`, you can simply provide them inline after `--`. Example: `rrustdoc file.rs -X -- -Ztreat-err-as-bug`. Here, the `-Z` flag gets passed to both `rustc file.rs` and `rustdoc u_file.rs` (remember, `-X` enables the cross-crate build mode).
 
 ## Command-Line Interface
 

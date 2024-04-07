@@ -7,8 +7,9 @@ use crate::{
         self, CrateName, CrateNameCow, CrateNameRef, CrateType, Edition, ExternCrate, Flags,
         Strictness,
     },
+    diagnostic::{Diagnostic, IntoDiagnostic},
     directive::Directives,
-    error::{Diagnostic, IntoDiagnostic, Result},
+    error::Result,
     utility::default,
 };
 use joinery::JoinableIterator;

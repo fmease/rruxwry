@@ -1,6 +1,6 @@
 use crate::{
     command::{CrateName, CrateNameRef, CrateType, Edition},
-    error::Diagnostic,
+    diagnostic::Diagnostic,
     parser::{At, SourceFileParser, Span},
     utility::SmallVec,
 };
