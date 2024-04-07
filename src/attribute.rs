@@ -45,16 +45,16 @@ impl<'src> Attributes<'src> {
         verbose: bool,
     ) -> Self {
         let attributes = AttributeParser::new(source, edition).execute();
+        let amount = attributes.len();
 
         if verbose {
-            let n = attributes.len();
-            let s = if n == 1 { "" } else { "s" };
-            info(format!("parser: found {n} inner attribute{s}")).emit();
+            let s = if amount == 1 { "" } else { "s" };
+            info(format!("parser: found {amount} crate attribute{s}")).emit();
         }
 
         let attributes = Self::lower(attributes, cfgs, source);
 
-        if verbose {
+        if amount != 0 && verbose {
             let verb = |present| if present { "found" } else { "did not find" };
 
             info(format!(
