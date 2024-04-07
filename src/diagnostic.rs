@@ -2,6 +2,18 @@ use crate::utility::Str;
 use owo_colors::{AnsiColors, OwoColorize};
 use std::fmt;
 
+pub(crate) fn error(message: impl Into<Str>) -> Diagnostic {
+    Diagnostic::new(Severity::Error, message)
+}
+
+pub(crate) fn warning(message: impl Into<Str>) -> Diagnostic {
+    Diagnostic::new(Severity::Warning, message)
+}
+
+pub(crate) fn info(message: impl Into<Str>) -> Diagnostic {
+    Diagnostic::new(Severity::Info, message)
+}
+
 /// Just like [`Into<Diagnostic>`] but leads to nicer call sites.
 pub(crate) trait IntoDiagnostic {
     fn into_diagnostic(self) -> Diagnostic;
@@ -14,18 +26,6 @@ pub(crate) struct Diagnostic {
 }
 
 impl Diagnostic {
-    pub(crate) fn error(message: impl Into<Str>) -> Self {
-        Self::new(Severity::Error, message)
-    }
-
-    pub(crate) fn warning(message: impl Into<Str>) -> Self {
-        Self::new(Severity::Warning, message)
-    }
-
-    pub(crate) fn info(message: impl Into<Str>) -> Self {
-        Self::new(Severity::Info, message)
-    }
-
     fn new(severity: Severity, message: impl Into<Str>) -> Self {
         Self {
             severity,

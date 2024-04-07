@@ -7,7 +7,7 @@ use crate::{
         self, CrateName, CrateNameCow, CrateNameRef, CrateType, Edition, ExternCrate, Flags,
         Strictness,
     },
-    diagnostic::{Diagnostic, IntoDiagnostic},
+    diagnostic::{error, Diagnostic, IntoDiagnostic},
     directive::Directives,
     error::Result,
     utility::default,
@@ -283,7 +283,7 @@ impl IntoDiagnostic for Error {
                     .map(|revision| format!("`{revision}`"))
                     .join_with(", ");
 
-                Diagnostic::error(format!("unknown revision `{unknown}`"))
+                error(format!("unknown revision `{unknown}`"))
                     .note(format!("available revisions are: {available}"))
                     .note(format!(
                         "you can use `--cfg` over `--rev` to suppress this check"

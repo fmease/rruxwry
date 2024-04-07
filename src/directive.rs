@@ -3,7 +3,7 @@
 use crate::{
     builder::QueryMode,
     command::{CrateNameRef, Edition, ExternCrate, VerbatimFlagsBuf},
-    diagnostic::Diagnostic,
+    diagnostic::warning,
     parser,
     utility::default,
 };
@@ -420,12 +420,12 @@ impl Report<'_> {
                 .into_iter()
                 .map(|unknown| format!("`{unknown}`"))
                 .join_with(", ");
-            Diagnostic::warning(format!("unknown directive{s}: {unknowns}")).emit();
+            warning(format!("unknown directive{s}: {unknowns}")).emit();
         }
 
         for error in self.errors {
             // FIXME: Make `Error` impl `IntoDiagnostic`
-            Diagnostic::warning(error.to_string()).emit();
+            warning(error.to_string()).emit();
         }
     }
 }

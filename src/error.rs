@@ -1,4 +1,4 @@
-use crate::diagnostic::{Diagnostic, IntoDiagnostic};
+use crate::diagnostic::{error, Diagnostic, IntoDiagnostic};
 
 pub(crate) type Result<T = (), E = Error> = std::result::Result<T, E>;
 
@@ -29,8 +29,8 @@ impl From<crate::builder::Error> for Error {
 impl IntoDiagnostic for Error {
     fn into_diagnostic(self) -> Diagnostic {
         match self {
-            Self::Io(error) => Diagnostic::error(error.to_string()),
-            Self::Process(error) => Diagnostic::error(error.to_string()),
+            Self::Io(error) => self::error(error.to_string()),
+            Self::Process(error) => self::error(error.to_string()),
             Self::Build(error) => error.into_diagnostic(),
         }
     }

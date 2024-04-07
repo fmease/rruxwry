@@ -9,7 +9,7 @@
 // FIXME: Also mention to reduce conflicts with compile flags passed via `compiletest`
 //        as well as those passed via the `RUST{,DOC}FLAGS` env vars.
 
-use crate::{cli, diagnostic::Diagnostic, error::Result, utility::default};
+use crate::{cli, diagnostic::info, error::Result, utility::default};
 use owo_colors::OwoColorize;
 use std::{
     borrow::Cow,
@@ -144,7 +144,7 @@ pub(crate) fn open(crate_name: CrateNameRef<'_>, flags: &cli::ProgramFlags) -> R
             true => "skipping",
         };
 
-        Diagnostic::info(format!(
+        info(format!(
             "{verb} {} {}",
             "⟨browser⟩".color(palette::COMMAND).bold(),
             path.to_string_lossy().green()
@@ -205,7 +205,7 @@ impl<'a> Command<'a> {
         message += " ";
         self.render_into(&mut message).unwrap();
 
-        Diagnostic::info(message).emit();
+        info(message).emit();
     }
 
     fn set_toolchain(&mut self, flags: &cli::BuildFlags) {

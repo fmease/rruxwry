@@ -65,14 +65,14 @@ fn parse_flags(
 }
 
 mod warning {
-    use crate::diagnostic::Diagnostic;
+    use crate::diagnostic::{warning, Diagnostic};
     use std::ffi::OsStr;
 
     pub(super) fn environment_contains_confusable_variable(
         confusable: &OsStr,
         suggestion: &OsStr,
     ) -> Diagnostic {
-        Diagnostic::warning(format!(
+        warning(format!(
             "rrustdoc does not read the environment variable `{}`",
             confusable.display()
         ))
@@ -80,7 +80,7 @@ mod warning {
     }
 
     pub(super) fn malformed_environment_variable(key: &OsStr, note: &'static str) -> Diagnostic {
-        Diagnostic::warning(format!(
+        warning(format!(
             "the environment variable `{}` is malformed",
             key.display()
         ))
