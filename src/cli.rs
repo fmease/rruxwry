@@ -1,6 +1,6 @@
 //! The command-line interface.
 
-use crate::command::{CrateNameBuf, CrateType, Edition, LintLevel};
+use crate::data::{CrateNameBuf, CrateType, Edition, LintLevel};
 use clap::{
     builder::{PossibleValue, TypedValueParser},
     error::ErrorKind,
@@ -146,7 +146,7 @@ impl TypedValueParser for CrateNameParser {
             .to_str()
             .ok_or_else(|| error(ErrorKind::InvalidUtf8))?;
 
-        CrateNameBuf::parse_lenient(source).map_err(|()| error(ErrorKind::InvalidValue))
+        CrateNameBuf::adjust_and_parse(source).map_err(|()| error(ErrorKind::InvalidValue))
     }
 }
 

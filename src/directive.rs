@@ -2,7 +2,8 @@
 
 use crate::{
     builder::QueryMode,
-    command::{CrateNameRef, Edition, ExternCrate, VerbatimFlagsBuf},
+    command::{ExternCrate, VerbatimFlagsBuf},
+    data::{CrateNameRef, Edition},
     diagnostic::warning,
     parser,
     utility::default,
@@ -256,7 +257,7 @@ impl<'src> DirectiveParser<'src> {
                 // We're doing this two-step process — (greedy) lexing followed by validation —
                 // to be able to provide a better error message.
                 let name = self.take_while(|char| char != '=' && !char.is_ascii_whitespace());
-                let Ok(name) = CrateNameRef::parse_strict(name) else {
+                let Ok(name) = CrateNameRef::parse(name) else {
                     return Err(Error::new(ErrorKind::InvalidValue(name)).context(context));
                 };
 

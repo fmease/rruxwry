@@ -1,5 +1,5 @@
 use crate::{
-    command::{CrateName, CrateNameRef, CrateType, Edition},
+    data::{CrateName, CrateNameRef, CrateType, Edition},
     diagnostic::info,
     parser::{At, SourceFileParser, Span},
     utility::SmallVec,
@@ -113,8 +113,11 @@ impl<'src> Attributes<'src> {
                             .unwrap()
                             .strip_suffix('"')
                             .unwrap();
-                        // FIXME: Validate the crate name first.
-                        crate_name = Some(CrateName::new(name));
+
+                        crate_name = Some(match CrateName::parse(name) {
+                            Ok(name) => name,
+                            Err(_) => break,
+                        });
                     }
                 }
                 "crate_type" => {

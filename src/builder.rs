@@ -3,10 +3,8 @@
 //! The low-level build commands are defined in [`crate::command`].
 
 use crate::{
-    command::{
-        self, CrateName, CrateNameCow, CrateNameRef, CrateType, Edition, ExternCrate, Flags,
-        Strictness,
-    },
+    command::{self, ExternCrate, Flags, Strictness},
+    data::{CrateName, CrateNameCow, CrateNameRef, CrateType, Edition},
     diagnostic::{error, Diagnostic, IntoDiagnostic},
     directive::Directives,
     error::Result,
@@ -45,7 +43,7 @@ fn build_default<'a>(
         crate_name,
         crate_type,
         edition,
-        crate_type.crates(),
+        extern_prelude_for(crate_type),
         flags,
         Strictness::Lenient,
     )?;
@@ -65,12 +63,12 @@ fn build_cross_crate(
         crate_name,
         crate_type.to_non_executable(),
         edition,
-        crate_type.crates(),
+        extern_prelude_for(crate_type),
         flags,
         Strictness::Lenient,
     )?;
 
-    let dependent_crate_name = CrateName::new(format!("u_{crate_name}"));
+    let dependent_crate_name = CrateName::new_unchecked(format!("u_{crate_name}"));
     let dependent_crate_path = path
         .with_file_name(dependent_crate_name.as_str())
         .with_extension("rs");
@@ -100,6 +98,17 @@ fn build_cross_crate(
     )?;
 
     Ok(dependent_crate_name.map(Cow::Owned))
+}
+
+fn extern_prelude_for(crate_type: CrateType) -> &'static [ExternCrate<'static>] {
+    match crate_type {
+        // For convenience and just like Cargo we add `libproc_macro` to the external prelude.
+        CrateType::ProcMacro => &[ExternCrate::Named {
+            name: const { CrateName::new_unchecked("proc_macro") },
+            path: None,
+        }],
+        _ => [].as_slice(),
+    }
 }
 
 fn build_compiletest<'a>(
@@ -192,7 +201,7 @@ fn build_compiletest_auxiliary<'a>(
     let source = std::fs::read_to_string(&path);
 
     // FIXME: unwrap
-    let crate_name = CrateName::from_path(&path).unwrap();
+    let crate_name = CrateName::adjust_and_parse_file_path(&path).unwrap();
 
     // FIXME: What about instantiation???
     let mut directives = source
@@ -242,7 +251,7 @@ fn build_compiletest_auxiliary<'a>(
         // FIXME: For some reason `compiletest` doesn't support `//@ aux-crate: name=../`
         ExternCrate::Named { name, .. } => {
             // FIXME: unwrap
-            let crate_name = CrateName::from_path(&path).unwrap();
+            let crate_name = CrateName::adjust_and_parse_file_path(&path).unwrap();
 
             ExternCrate::Named {
                 name,

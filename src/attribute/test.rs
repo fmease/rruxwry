@@ -1,9 +1,5 @@
 use super::Attributes;
-use crate::command::{CrateName, CrateType, Edition};
-
-// FIXME: check that we successfully detect the name even if leading inner attrs
-// have the form `#![path::to::attr = GARBAGE_TT]` (overapprox, should be expr),
-// `#![path::to::attr ( GARBAGE_TT )]`
+use crate::data::{CrateName, CrateType, Edition};
 
 // FIXME: Test that we detect `#![crate_name = "0"]` (leading digits) to match rustc's behavior.
 
@@ -16,7 +12,7 @@ fn crate_name() {
     assert_eq!(
         parse(r#"#![crate_name = "name"]"#),
         Attributes {
-            crate_name: Some(CrateName::new("name")),
+            crate_name: Some(CrateName::new_unchecked("name")),
             crate_type: None
         }
     );
@@ -27,7 +23,7 @@ fn crate_type_crate_name() {
     assert_eq!(
         parse(r#"#![crate_type = "proc-macro"]#![crate_name = "alias"]"#),
         Attributes {
-            crate_name: Some(CrateName::new("alias")),
+            crate_name: Some(CrateName::new_unchecked("alias")),
             crate_type: Some(CrateType::ProcMacro),
         }
     );
@@ -38,7 +34,7 @@ fn crate_name_spaced() {
     assert_eq!(
         parse(r#" # ! [ crate_name = "name" ] "#),
         Attributes {
-            crate_name: Some(CrateName::new("name")),
+            crate_name: Some(CrateName::new_unchecked("name")),
             crate_type: None,
         }
     );
@@ -60,7 +56,7 @@ fn crate_name_interleaved_trivia() {
 "#
         ),
         Attributes {
-            crate_name: Some(CrateName::new("alias")),
+            crate_name: Some(CrateName::new_unchecked("alias")),
             crate_type: None,
         }
     );
@@ -78,7 +74,7 @@ fn crate_name_leading_inner_attributes() {
 "#,
         ),
         Attributes {
-            crate_name: Some(CrateName::new("name")),
+            crate_name: Some(CrateName::new_unchecked("name")),
             crate_type: None
         }
     );
@@ -121,7 +117,7 @@ fn crate_name_red_herrings() {
 "#
         ),
         Attributes {
-            crate_name: Some(CrateName::new("yes")),
+            crate_name: Some(CrateName::new_unchecked("yes")),
             crate_type: None,
         }
     );
@@ -141,7 +137,7 @@ fn crate_name_semantically_malformed_leading_attributes() {
 "#
         ),
         Attributes {
-            crate_name: Some(CrateName::new("krate")),
+            crate_name: Some(CrateName::new_unchecked("krate")),
             crate_type: None,
         }
     );
@@ -161,7 +157,24 @@ fn crate_name_multiple() {
     assert_eq!(
         parse(r#"#![crate_name = "first"]#![crate_name = "second"]"#),
         Attributes {
-            crate_name: Some(CrateName::new("first")),
+            crate_name: Some(CrateName::new_unchecked("first")),
+            crate_type: None,
+        }
+    );
+}
+
+#[test]
+fn crate_name_garbage() {
+    assert_eq!(parse(r#"#![crate_name = "?"]"#), Attributes::default());
+}
+
+#[test]
+fn crate_name_leading_digit() {
+    // Yes, this matches the behavior of rustc (with an without `--print=crate-name`).
+    assert_eq!(
+        parse(r#"#![crate_name = "0"]"#),
+        Attributes {
+            crate_name: Some(CrateName::new_unchecked("0")),
             crate_type: None,
         }
     );

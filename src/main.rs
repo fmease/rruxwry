@@ -5,12 +5,13 @@
     type_alias_impl_trait,
     lazy_cell,
     byte_slice_trim_ascii,
-    os_str_display
+    os_str_display,
+    inline_const
 )]
 
 use attribute::Attributes;
 use builder::{BuildMode, QueryMode};
-use command::{CrateNameBuf, CrateNameCow, CrateType, Edition};
+use data::{CrateNameBuf, CrateNameCow, CrateType, Edition};
 use diagnostic::IntoDiagnostic;
 use std::{path::Path, process::ExitCode};
 
@@ -18,6 +19,7 @@ mod attribute;
 mod builder;
 mod cli;
 mod command;
+mod data;
 mod diagnostic;
 mod directive;
 mod error;
@@ -160,8 +162,11 @@ fn compute_crate_name_and_type<'src>(
             };
 
             // FIXME: unwrap
-            let crate_name =
-                crate_name.unwrap_or_else(|| CrateNameBuf::from_path(path).unwrap().into());
+            let crate_name = crate_name.unwrap_or_else(|| {
+                CrateNameBuf::adjust_and_parse_file_path(path)
+                    .unwrap()
+                    .into()
+            });
             let crate_type = crate_type.unwrap_or_default();
 
             (crate_name, crate_type)
