@@ -1,6 +1,7 @@
 use std::{borrow::Cow, fmt, path::Path, str::FromStr};
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default)]
+#[cfg_attr(test, derive(Debug))]
 pub(crate) enum Edition {
     #[default]
     Edition2015,

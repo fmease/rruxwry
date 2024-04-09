@@ -18,6 +18,9 @@ use std::{
     str::CharIndices,
 };
 
+#[cfg(test)]
+mod test;
+
 #[derive(Default)]
 pub(crate) struct Directives<'src> {
     instantiated: InstantiatedDirectives<'src>,
@@ -180,22 +183,23 @@ impl<'src> InstantiatedDirectives<'src> {
 
 type UninstantiatedDirectives<'src> = FxHashMap<&'src str, Vec<DirectiveKind<'src>>>;
 
+#[cfg_attr(test, derive(PartialEq, Eq, Debug))]
 struct Directive<'src> {
     revision: Option<&'src str>,
     kind: DirectiveKind<'src>,
 }
 
 #[derive(Clone)]
+#[cfg_attr(test, derive(PartialEq, Eq, Debug))]
 enum DirectiveKind<'src> {
     AuxBuild {
         path: &'src str,
     },
-    // FIXME: Double-check that the path is indeed optional.
     AuxCrate {
         name: CrateNameRef<'src>,
+        // FIXME: `compiletest` doesn't consider the path to be optional.
         path: Option<&'src str>,
     },
-    // FIXME: This is relevant for rrustdoc, right?
     BuildAuxDocs,
     CompileFlags(Vec<&'src str>),
     Edition(Edition),
@@ -229,7 +233,7 @@ impl<'src> DirectiveParser<'src> {
 
         let revision = if self.consume(|char| char == '[') {
             // FIXME: How does `compiletest` deal with empty revision conditions (`//@[] ...`)?
-            let revision = self.take_while(|char| char != ']');
+            let revision = self.take_while(|char| char != ']').unwrap_or_default();
             self.expect(']')?;
             Some(revision)
         } else {
@@ -238,7 +242,9 @@ impl<'src> DirectiveParser<'src> {
 
         self.parse_whitespace();
 
-        let directive = self.take_while(|char| char == '-' || char.is_ascii_alphabetic());
+        // FIXME: Consider using Unicode-alphabetic for better error messages.
+        //        How does `compiletest` handle this?
+        let directive = self.take_while(|char| char == '-' || char.is_ascii_alphabetic())?;
         let context = ErrorContext::Directive(directive);
         let kind = match directive {
             "aux-build" => {
@@ -256,7 +262,7 @@ impl<'src> DirectiveParser<'src> {
 
                 // We're doing this two-step process — (greedy) lexing followed by validation —
                 // to be able to provide a better error message.
-                let name = self.take_while(|char| char != '=' && !char.is_ascii_whitespace());
+                let name = self.take_while(|char| char != '=' && !char.is_ascii_whitespace())?;
                 let Ok(name) = CrateNameRef::parse(name) else {
                     return Err(Error::new(ErrorKind::InvalidValue(name)).context(context));
                 };
@@ -285,7 +291,7 @@ impl<'src> DirectiveParser<'src> {
 
                 // We're doing this two-step process — (greedy) lexing followed by validation —
                 // to be able to provide a better error message.
-                let edition = self.take_while(|char| !char.is_ascii_whitespace());
+                let edition = self.take_while(|char| !char.is_ascii_whitespace())?;
                 let Ok(edition) = edition.parse() else {
                     return Err(Error::new(ErrorKind::InvalidValue(edition)).context(context));
                 };
@@ -370,7 +376,8 @@ impl<'src> DirectiveParser<'src> {
     }
 
     fn parse_whitespace(&mut self) {
-        self.advance_while(|char| char.is_ascii_whitespace());
+        // FIXME: Check that `compiletest` does indeed skip Unicode whitespace, not just ASCII whitespace.
+        self.advance_while(|char| char.is_whitespace());
     }
 
     fn parse_separator(&mut self, padding: Padding) -> Result<(), Error<'src>> {
@@ -384,7 +391,7 @@ impl<'src> DirectiveParser<'src> {
         Ok(())
     }
 
-    fn take_while(&mut self, predicate: impl Fn(char) -> bool) -> &'src str {
+    fn take_while(&mut self, predicate: impl Fn(char) -> bool) -> Result<&'src str, Error<'src>> {
         if let Some(&(start, char)) = self.chars.peek() {
             let mut end = start + char.len_utf8();
             while let Some(char) = self.peek() {
@@ -395,15 +402,26 @@ impl<'src> DirectiveParser<'src> {
                     end = index + char.len_utf8();
                 }
             }
-            return &self.source[start..end];
+            return Ok(&self.source[start..end]);
         }
 
-        ""
+        Err(Error {
+            kind: ErrorKind::UnexpectedEndOfInput,
+            context: None, // FIXME: supply the context as a parameter?
+        })
     }
 
     fn take_remaining_line(&mut self) -> &'src str {
-        self.take_while(|char| char != '\n')
+        // FIXME: Should we instead error only empty lines?
+        self.take_while(|char| char != '\n').unwrap_or_default()
     }
+}
+
+pub(crate) enum Grammar {
+    /// XXX
+    Quirky,
+    /// XXX
+    Strict,
 }
 
 #[derive(Default)]
@@ -431,6 +449,7 @@ impl Report<'_> {
     }
 }
 
+#[cfg_attr(test, derive(PartialEq, Eq, Debug))]
 struct Error<'src> {
     kind: ErrorKind<'src>,
     context: Option<ErrorContext<'src>>,
@@ -462,6 +481,7 @@ impl fmt::Display for Error<'_> {
     }
 }
 
+#[cfg_attr(test, derive(PartialEq, Eq, Debug))]
 enum ErrorKind<'src> {
     UnknownDirective(&'src str),
     UnexpectedToken { found: char, expected: char },
@@ -483,6 +503,7 @@ impl fmt::Display for ErrorKind<'_> {
 }
 
 #[derive(Clone, Copy)]
+#[cfg_attr(test, derive(PartialEq, Eq, Debug))]
 enum ErrorContext<'src> {
     Directive(&'src str),
 }
