@@ -1,4 +1,3 @@
-use crate::utility::Captures;
 use ra_ap_rustc_lexer::{strip_shebang, tokenize, Token};
 use std::iter::Peekable;
 
@@ -43,7 +42,8 @@ impl<'src> SourceFileParser<'src> {
     }
 }
 
-type Tokens<'src> = impl Iterator<Item = Token> + Captures<'src>;
+#[rustfmt::skip]
+type Tokens<'src> = impl use<'src> Iterator<Item = Token>;
 
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct Span {

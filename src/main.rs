@@ -1,4 +1,3 @@
-#![deny(unused_must_use, rust_2018_idioms)]
 #![feature(
     let_chains,
     exit_status_error,
@@ -6,8 +5,11 @@
     lazy_cell,
     byte_slice_trim_ascii,
     os_str_display,
-    inline_const
+    inline_const,
+    precise_capturing
 )]
+#![deny(unused_must_use, rust_2018_idioms)]
+#![allow(incomplete_features)] // precise_capturing
 
 use attribute::Attributes;
 use builder::{BuildMode, QueryMode};

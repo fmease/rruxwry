@@ -7,7 +7,3 @@ pub(crate) fn default<T: Default>() -> T {
 }
 
 pub(crate) type SmallVec<T, const N: usize> = smallvec::SmallVec<[T; N]>;
-
-pub(crate) trait Captures<'a> {}
-
-impl<'a, T: ?Sized> Captures<'a> for T {}
