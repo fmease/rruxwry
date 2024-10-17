@@ -122,7 +122,7 @@ impl<'src> Attributes<'src> {
                         let type_ =
                             source.at(*span).strip_prefix('"').unwrap().strip_suffix('"').unwrap();
                         // Note this only accepts `lib`, `rlib`, `bin` and `proc-macro` at the time of writing.
-                        // FIXME: At least warn on types unsupported by rrustdoc.
+                        // FIXME: At least warn on types unsupported by rruxwry.
                         crate_type = Some(match type_.parse() {
                             Ok(type_) => type_,
                             Err(_) => continue, // like in rustc, an invalid crate type is non-fatal

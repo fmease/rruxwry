@@ -217,7 +217,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "rrustdoc"
+name = "rruxwry"
 version = "0.1.0"
 dependencies = [
  "clap",

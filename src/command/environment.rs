@@ -65,7 +65,7 @@ mod warning {
         suggestion: &OsStr,
     ) -> Diagnostic {
         warning(format!(
-            "rrustdoc does not read the environment variable `{}`",
+            "rruxwry does not read the environment variable `{}`",
             confusable.display()
         ))
         .note(format!("you might have meant `{}`", suggestion.display()))

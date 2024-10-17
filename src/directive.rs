@@ -179,13 +179,13 @@ enum DirectiveKind<'src> {
     AuxBuild { path: &'src str },
     // FIXME: Double-check that the path is indeed optional.
     AuxCrate { name: CrateNameRef<'src>, path: Option<&'src str> },
-    // FIXME: This is relevant for rrustdoc, right?
+    // FIXME: This is relevant for rruxwry, right?
     BuildAuxDocs,
     CompileFlags(Vec<&'src str>),
     Edition(Edition),
-    // FIXME: Is this actually relevant for rrustdoc?
+    // FIXME: Is this actually relevant for rruxwry?
     ForceHost,
-    // FIXME: Is this actually relevant for rrustdoc?
+    // FIXME: Is this actually relevant for rruxwry?
     NoPreferDynamic,
     Revisions(Vec<&'src str>),
     RustcEnv { key: &'src str, value: &'src str },
@@ -284,7 +284,7 @@ impl<'src> DirectiveParser<'src> {
                 let variable = self.take_remaining_line();
                 DirectiveKind::UnsetRustcEnv(variable)
             }
-            // NB: We don't support `{unset-,}exec-env` since it's not meaningful to rrustdoc.
+            // NB: We don't support `{unset-,}exec-env` since it's not meaningful to rruxwry.
             directive => return Err(Error::new(ErrorKind::UnknownDirective(directive))),
         };
 

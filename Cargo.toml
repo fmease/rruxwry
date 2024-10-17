@@ -1,8 +1,8 @@
 [package]
-name = "rrustdoc"
+name = "rruxwry"
 version = "0.1.0"
 edition = "2021"
-description = "A rustdoc wrapper for rustdoc devs"
+description = "A wrapper around rust{c,doc} for rust{c,doc} devs"
 license = "MIT"
 publish = false
 

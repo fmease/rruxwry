@@ -99,7 +99,7 @@ pub(crate) struct BuildFlags {
     pub(crate) no_backtrace: bool,
 }
 
-/// Flags that are specific to `rrustdoc` itself.
+/// Flags that are specific to `rruxwry` itself.
 #[derive(Parser)]
 pub(crate) struct ProgramFlags {
     /// Use verbose output.
