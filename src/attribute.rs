@@ -107,12 +107,8 @@ impl<'src> Attributes<'src> {
                         } = token
                     {
                         // FIXME: Unescape escape sequences.
-                        let name = source
-                            .at(*span)
-                            .strip_prefix('"')
-                            .unwrap()
-                            .strip_suffix('"')
-                            .unwrap();
+                        let name =
+                            source.at(*span).strip_prefix('"').unwrap().strip_suffix('"').unwrap();
 
                         crate_name = Some(match CrateName::parse(name) {
                             Ok(name) => name,
@@ -132,12 +128,8 @@ impl<'src> Attributes<'src> {
                         } = token
                     {
                         // FIXME: Unescape Rust escape sequences.
-                        let type_ = source
-                            .at(*span)
-                            .strip_prefix('"')
-                            .unwrap()
-                            .strip_suffix('"')
-                            .unwrap();
+                        let type_ =
+                            source.at(*span).strip_prefix('"').unwrap().strip_suffix('"').unwrap();
                         // Note this only accepts `lib`, `rlib`, `bin` and `proc-macro` at the time of writing.
                         // FIXME: At least warn on types unsupported by rrustdoc.
                         crate_type = Some(match type_.parse() {
@@ -160,10 +152,7 @@ impl<'src> Attributes<'src> {
             }
         }
 
-        Self {
-            crate_name,
-            crate_type,
-        }
+        Self { crate_name, crate_type }
     }
 }
 
@@ -174,10 +163,7 @@ struct AttributeParser<'src> {
 
 impl<'src> AttributeParser<'src> {
     fn new(source: &'src str, edition: Edition) -> Self {
-        Self {
-            parser: SourceFileParser::new(source),
-            edition,
-        }
+        Self { parser: SourceFileParser::new(source), edition }
     }
 
     fn execute(mut self) -> Vec<Attribute<'src>> {
@@ -188,13 +174,10 @@ impl<'src> AttributeParser<'src> {
         {
             let token = Token { ..*token }; // `Token` doesn't impl `Copy` for no apparent reason.
             match token.kind {
-                TokenKind::LineComment {
-                    doc_style: Some(DocStyle::Inner),
+                TokenKind::LineComment { doc_style: Some(DocStyle::Inner) }
+                | TokenKind::BlockComment { doc_style: Some(DocStyle::Inner), terminated: true } => {
+                    self.parser.advance()
                 }
-                | TokenKind::BlockComment {
-                    doc_style: Some(DocStyle::Inner),
-                    terminated: true,
-                } => self.parser.advance(),
                 TokenKind::Pound => {
                     self.parser.advance();
                     match self.finish_parsing_inner_attribute() {
@@ -282,10 +265,7 @@ impl<'src> AttributeParser<'src> {
             segments.push(self.parse_path_segment_ident()?);
         }
 
-        ControlFlow::Continue(Path {
-            is_absolute,
-            segments,
-        })
+        ControlFlow::Continue(Path { is_absolute, segments })
     }
 
     // FIXME: If this encounters `:T` where `T` stands for any token other than `:`, this advances the iterator
@@ -379,10 +359,9 @@ impl<'src> AttributeParser<'src> {
             match token.kind {
                 TokenKind::Whitespace
                 | TokenKind::LineComment { doc_style: None }
-                | TokenKind::BlockComment {
-                    doc_style: None,
-                    terminated: _,
-                } => self.parser.advance(),
+                | TokenKind::BlockComment { doc_style: None, terminated: _ } => {
+                    self.parser.advance()
+                }
                 _ => break,
             }
         }
@@ -432,13 +411,8 @@ impl<'src> Path<'src> {
 
 #[derive(Debug)]
 enum Meta {
-    Parenthesized {
-        delimiter: Delimiter,
-        tokens: Vec<(TokenKind, Span)>,
-    },
-    Assignment {
-        value: SmallVec<(TokenKind, Span), 1>,
-    },
+    Parenthesized { delimiter: Delimiter, tokens: Vec<(TokenKind, Span)> },
+    Assignment { value: SmallVec<(TokenKind, Span), 1> },
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]

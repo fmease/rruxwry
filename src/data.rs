@@ -28,13 +28,7 @@ impl Edition {
 
     // FIXME: Derive this.
     pub(crate) fn elements() -> impl Iterator<Item = Self> + Clone {
-        [
-            Self::Edition2015,
-            Self::Edition2018,
-            Self::Edition2021,
-            Self::Edition2024,
-        ]
-        .into_iter()
+        [Self::Edition2015, Self::Edition2018, Self::Edition2021, Self::Edition2024].into_iter()
     }
 }
 
@@ -125,11 +119,7 @@ impl<'src> CrateNameRef<'src> {
         // to be ASCII-only Rust identifiers.
         //
         // However, we don't really need to care about the latter case.
-        if !source.is_empty()
-            && source
-                .chars()
-                .all(|char| char.is_alphanumeric() || char == '_')
-        {
+        if !source.is_empty() && source.chars().all(|char| char.is_alphanumeric() || char == '_') {
             Ok(Self::new_unchecked(source))
         } else {
             Err(())
@@ -148,9 +138,7 @@ impl CrateNameBuf {
     pub(crate) fn adjust_and_parse(source: &str) -> Result<Self, ()> {
         // NB: See the comment over in `CrateNameRef::parse` for why this makes sense.
         if !source.is_empty()
-            && source
-                .chars()
-                .all(|char| char.is_alphanumeric() || char == '_' || char == '-')
+            && source.chars().all(|char| char.is_alphanumeric() || char == '_' || char == '-')
         {
             Ok(Self::new_unchecked(source.replace('-', "_")))
         } else {

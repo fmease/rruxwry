@@ -88,14 +88,8 @@ fn try_main() -> error::Result {
         program: &program_flags,
     };
 
-    let crate_name = builder::build(
-        build_mode,
-        &path,
-        crate_name.as_ref(),
-        crate_type,
-        edition,
-        flags,
-    )?;
+    let crate_name =
+        builder::build(build_mode, &path, crate_name.as_ref(), crate_type, edition, flags)?;
 
     if open {
         command::open(crate_name.as_ref(), &program_flags)?;
@@ -155,11 +149,8 @@ fn compute_crate_name_and_type<'src>(
             };
 
             // FIXME: unwrap
-            let crate_name = crate_name.unwrap_or_else(|| {
-                CrateNameBuf::adjust_and_parse_file_path(path)
-                    .unwrap()
-                    .into()
-            });
+            let crate_name = crate_name
+                .unwrap_or_else(|| CrateNameBuf::adjust_and_parse_file_path(path).unwrap().into());
             let crate_type = crate_type.unwrap_or_default();
 
             (crate_name, crate_type)

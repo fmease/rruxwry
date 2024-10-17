@@ -8,11 +8,7 @@ impl<'src> SourceFileParser<'src> {
     pub(crate) fn new(source: &'src str) -> Self {
         let (index, tokens) = lexer::lex(source);
 
-        Self {
-            tokens,
-            source,
-            index,
-        }
+        Self { tokens, source, index }
     }
 
     pub(crate) fn peek(&mut self) -> Option<&lexer::Token> {
@@ -39,8 +35,8 @@ impl<'src> SourceFileParser<'src> {
 }
 
 mod lexer {
-    use ra_ap_rustc_lexer::strip_shebang;
     pub(super) use ra_ap_rustc_lexer::Token;
+    use ra_ap_rustc_lexer::strip_shebang;
     use std::iter::Peekable;
 
     pub(super) type PeekableTokens<'src> = Peekable<Tokens<'src>>;

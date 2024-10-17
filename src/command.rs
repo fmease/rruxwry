@@ -138,10 +138,7 @@ pub(crate) fn document(
 }
 
 pub(crate) fn open(crate_name: CrateNameRef<'_>, flags: &cli::ProgramFlags) -> Result {
-    let path = std::env::current_dir()?
-        .join("doc")
-        .join(crate_name.as_str())
-        .join("index.html");
+    let path = std::env::current_dir()?.join("doc").join(crate_name.as_str()).join("index.html");
 
     if flags.verbose {
         let verb = match flags.dry_run {
@@ -201,11 +198,7 @@ impl<'a> Command<'a> {
             return;
         }
 
-        let verb = if !self.flags.dry_run {
-            "running"
-        } else {
-            "skipping"
-        };
+        let verb = if !self.flags.dry_run { "running" } else { "skipping" };
         let mut message = String::from(verb);
         message += " ";
         self.render_into(&mut message).unwrap();
@@ -368,21 +361,10 @@ impl CommandExt for process::Command {
             )?;
         }
 
-        write!(
-            buffer,
-            "{}",
-            self.get_program()
-                .to_string_lossy()
-                .color(palette::COMMAND)
-                .bold()
-        )?;
+        write!(buffer, "{}", self.get_program().to_string_lossy().color(palette::COMMAND).bold())?;
 
         for argument in self.get_args() {
-            write!(
-                buffer,
-                " {}",
-                argument.to_string_lossy().color(palette::ARGUMENT)
-            )?;
+            write!(buffer, " {}", argument.to_string_lossy().color(palette::ARGUMENT))?;
         }
 
         Ok(())
@@ -399,13 +381,8 @@ mod palette {
 
 #[derive(Clone)]
 pub(crate) enum ExternCrate<'src> {
-    Unnamed {
-        path: &'src str,
-    },
-    Named {
-        name: CrateNameRef<'src>,
-        path: Option<Cow<'src, str>>,
-    },
+    Unnamed { path: &'src str },
+    Named { name: CrateNameRef<'src>, path: Option<Cow<'src, str>> },
 }
 
 #[derive(Clone, Copy)]
@@ -435,10 +412,7 @@ impl<'a> VerbatimFlagsBuf<'a> {
     }
 
     pub(crate) fn as_ref(&self) -> VerbatimFlags<'_> {
-        VerbatimFlags {
-            arguments: &self.arguments,
-            environment: &self.environment,
-        }
+        VerbatimFlags { arguments: &self.arguments, environment: &self.environment }
     }
 }
 

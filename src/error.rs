@@ -1,4 +1,4 @@
-use crate::diagnostic::{error, Diagnostic, IntoDiagnostic};
+use crate::diagnostic::{Diagnostic, IntoDiagnostic, error};
 
 pub(crate) type Result<T = (), E = Error> = std::result::Result<T, E>;
 

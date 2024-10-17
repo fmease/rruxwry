@@ -10,11 +10,7 @@ pub(crate) fn rustc_flags<'a>() -> Option<&'a [String]> {
     static RUSTFLAGS: LazyLock<Option<Vec<String>>> = LazyLock::new(|| {
         parse_flags(
             OsStr::new("RUSTFLAGS"),
-            &[
-                OsStr::new("RUST_FLAGS"),
-                OsStr::new("RUSTCFLAGS"),
-                OsStr::new("RUSTC_FLAGS"),
-            ],
+            &[OsStr::new("RUST_FLAGS"), OsStr::new("RUSTCFLAGS"), OsStr::new("RUSTC_FLAGS")],
             &ENVIRONMENT,
         )
     });
@@ -24,11 +20,7 @@ pub(crate) fn rustc_flags<'a>() -> Option<&'a [String]> {
 
 pub(crate) fn rustdoc_flags<'a>() -> Option<&'a [String]> {
     static RUSTDOCFLAGS: LazyLock<Option<Vec<String>>> = LazyLock::new(|| {
-        parse_flags(
-            OsStr::new("RUSTDOCFLAGS"),
-            &[OsStr::new("RUSTDOC_FLAGS")],
-            &ENVIRONMENT,
-        )
+        parse_flags(OsStr::new("RUSTDOCFLAGS"), &[OsStr::new("RUSTDOC_FLAGS")], &ENVIRONMENT)
     });
 
     RUSTDOCFLAGS.as_deref()
@@ -65,7 +57,7 @@ fn parse_flags(
 }
 
 mod warning {
-    use crate::diagnostic::{warning, Diagnostic};
+    use crate::diagnostic::{Diagnostic, warning};
     use std::ffi::OsStr;
 
     pub(super) fn environment_contains_confusable_variable(
@@ -80,11 +72,8 @@ mod warning {
     }
 
     pub(super) fn malformed_environment_variable(key: &OsStr, note: &'static str) -> Diagnostic {
-        warning(format!(
-            "the environment variable `{}` is malformed",
-            key.display()
-        ))
-        .note(note)
-        .note("ignoring all flags potentially contained within it")
+        warning(format!("the environment variable `{}` is malformed", key.display()))
+            .note(note)
+            .note("ignoring all flags potentially contained within it")
     }
 }

@@ -34,12 +34,7 @@ pub(crate) struct Arguments {
     #[arg(short = 'T', long, conflicts_with("cross_crate"))]
     pub(crate) compiletest: bool,
     /// Enable XPath / JsonPath queries.
-    #[arg(
-        short = 'Q',
-        long,
-        conflicts_with("cross_crate"),
-        requires("compiletest")
-    )]
+    #[arg(short = 'Q', long, conflicts_with("cross_crate"), requires("compiletest"))]
     pub(crate) query: bool,
     #[command(flatten)]
     pub(crate) program_flags: ProgramFlags,
@@ -136,18 +131,13 @@ impl CrateNameBuf {
 
 impl CrateType {
     fn parse_cli_style(source: &str) -> Result<Self, String> {
-        source
-            .parse()
-            .map_err(|()| possible_values(["bin", "lib", "rlib", "proc-macro"]))
+        source.parse().map_err(|()| possible_values(["bin", "lib", "rlib", "proc-macro"]))
     }
 }
 
 fn possible_values(values: impl IntoIterator<Item: std::fmt::Display, IntoIter: Clone>) -> String {
     format!(
         "possible values: {}",
-        values
-            .into_iter()
-            .map(|value| format!("`{value}`"))
-            .join_with(", ")
+        values.into_iter().map(|value| format!("`{value}`")).join_with(", ")
     )
 }

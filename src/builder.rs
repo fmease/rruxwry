@@ -5,7 +5,7 @@
 use crate::{
     command::{self, ExternCrate, Flags, Strictness},
     data::{CrateName, CrateNameCow, CrateNameRef, CrateType, Edition},
-    diagnostic::{error, Diagnostic, IntoDiagnostic},
+    diagnostic::{Diagnostic, IntoDiagnostic, error},
     directive::Directives,
     error::Result,
     utility::default,
@@ -69,9 +69,8 @@ fn build_cross_crate(
     )?;
 
     let dependent_crate_name = CrateName::new_unchecked(format!("u_{crate_name}"));
-    let dependent_crate_path = path
-        .with_file_name(dependent_crate_name.as_str())
-        .with_extension("rs");
+    let dependent_crate_path =
+        path.with_file_name(dependent_crate_name.as_str()).with_extension("rs");
 
     if !flags.program.dry_run && !dependent_crate_path.exists() {
         // While we could omit the `extern crate` declaration in `edition >= Edition::Edition2018`,
@@ -89,10 +88,7 @@ fn build_cross_crate(
         dependent_crate_name.as_ref(),
         default(),
         edition,
-        &[ExternCrate::Named {
-            name: crate_name.as_ref(),
-            path: None,
-        }],
+        &[ExternCrate::Named { name: crate_name.as_ref(), path: None }],
         flags,
         Strictness::Lenient,
     )?;
@@ -132,11 +128,7 @@ fn build_compiletest<'a>(
         if !directives.revisions.contains(revision.as_str()) {
             let error = Error::UnknownRevision {
                 unknown: revision.clone(),
-                available: directives
-                    .revisions
-                    .iter()
-                    .map(ToString::to_string)
-                    .collect(),
+                available: directives.revisions.iter().map(ToString::to_string).collect(),
             };
             return Err(error.into());
         }
@@ -165,10 +157,7 @@ fn build_compiletest<'a>(
         .collect::<Result<_>>()?;
 
     let verbatim_flags = mem::take(&mut directives.verbatim_flags).extended(flags.verbatim);
-    let flags = Flags {
-        verbatim: verbatim_flags.as_ref(),
-        ..flags
-    };
+    let flags = Flags { verbatim: verbatim_flags.as_ref(), ..flags };
 
     command::document(
         path,
@@ -204,18 +193,13 @@ fn build_compiletest_auxiliary<'a>(
     let crate_name = CrateName::adjust_and_parse_file_path(&path).unwrap();
 
     // FIXME: What about instantiation???
-    let mut directives = source
-        .as_ref()
-        .map(|source| Directives::parse(source, None))
-        .unwrap_or_default();
+    let mut directives =
+        source.as_ref().map(|source| Directives::parse(source, None)).unwrap_or_default();
 
     let edition = directives.edition.unwrap_or_default();
 
     let verbatim_flags = mem::take(&mut directives.verbatim_flags).extended(flags.verbatim);
-    let flags = Flags {
-        verbatim: verbatim_flags.as_ref(),
-        ..flags
-    };
+    let flags = Flags { verbatim: verbatim_flags.as_ref(), ..flags };
 
     command::compile(
         &path,
@@ -277,26 +261,19 @@ pub(crate) enum QueryMode {
 }
 
 pub(crate) enum Error {
-    UnknownRevision {
-        unknown: String,
-        available: FxHashSet<String>,
-    },
+    UnknownRevision { unknown: String, available: FxHashSet<String> },
 }
 
 impl IntoDiagnostic for Error {
     fn into_diagnostic(self) -> Diagnostic {
         match self {
             Error::UnknownRevision { unknown, available } => {
-                let available = available
-                    .iter()
-                    .map(|revision| format!("`{revision}`"))
-                    .join_with(", ");
+                let available =
+                    available.iter().map(|revision| format!("`{revision}`")).join_with(", ");
 
                 error(format!("unknown revision `{unknown}`"))
                     .note(format!("available revisions are: {available}"))
-                    .note(format!(
-                        "you can use `--cfg` over `--rev` to suppress this check"
-                    ))
+                    .note(format!("you can use `--cfg` over `--rev` to suppress this check"))
             }
         }
     }

@@ -27,11 +27,7 @@ pub(crate) struct Diagnostic {
 
 impl Diagnostic {
     fn new(severity: Severity, message: impl Into<Str>) -> Self {
-        Self {
-            severity,
-            message: message.into(),
-            notes: Vec::new(),
-        }
+        Self { severity, message: message.into(), notes: Vec::new() }
     }
 
     pub(crate) fn note(mut self, note: impl Into<Str>) -> Self {
