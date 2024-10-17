@@ -1,13 +1,4 @@
-#![feature(
-    let_chains,
-    exit_status_error,
-    type_alias_impl_trait,
-    lazy_cell,
-    byte_slice_trim_ascii,
-    os_str_display,
-    inline_const,
-    precise_capturing
-)]
+#![feature(let_chains, exit_status_error, type_alias_impl_trait, os_str_display)]
 #![deny(unused_must_use, rust_2018_idioms)]
 #![allow(incomplete_features)] // precise_capturing
 

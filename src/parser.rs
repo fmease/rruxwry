@@ -1,16 +1,12 @@
-use ra_ap_rustc_lexer::{strip_shebang, tokenize, Token};
-use std::iter::Peekable;
-
 pub(crate) struct SourceFileParser<'src> {
-    tokens: Peekable<Tokens<'src>>,
+    tokens: lexer::PeekableTokens<'src>,
     source: &'src str,
     index: usize,
 }
 
 impl<'src> SourceFileParser<'src> {
     pub(crate) fn new(source: &'src str) -> Self {
-        let index = strip_shebang(source).unwrap_or_default();
-        let tokens = tokenize(&source[index..]).peekable();
+        let (index, tokens) = lexer::lex(source);
 
         Self {
             tokens,
@@ -19,7 +15,7 @@ impl<'src> SourceFileParser<'src> {
         }
     }
 
-    pub(crate) fn peek(&mut self) -> Option<&Token> {
+    pub(crate) fn peek(&mut self) -> Option<&lexer::Token> {
         self.tokens.peek()
     }
 
@@ -42,8 +38,21 @@ impl<'src> SourceFileParser<'src> {
     }
 }
 
-#[rustfmt::skip]
-type Tokens<'src> = impl use<'src> Iterator<Item = Token>;
+mod lexer {
+    use ra_ap_rustc_lexer::strip_shebang;
+    pub(super) use ra_ap_rustc_lexer::Token;
+    use std::iter::Peekable;
+
+    pub(super) type PeekableTokens<'src> = Peekable<Tokens<'src>>;
+
+    pub(super) type Tokens<'src> = impl Iterator<Item = Token>;
+
+    pub(super) fn lex<'src>(source: &'src str) -> (usize, PeekableTokens<'src>) {
+        let index = strip_shebang(source).unwrap_or_default();
+        let tokens = ra_ap_rustc_lexer::tokenize(&source[index..]).peekable();
+        (index, tokens)
+    }
+}
 
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct Span {

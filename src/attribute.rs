@@ -388,11 +388,10 @@ impl<'src> AttributeParser<'src> {
         }
     }
 
-    fn parse<O: Output<'src>>(&mut self, predicate: impl Predicate) -> ControlFlow<(), O> {
+    fn parse(&mut self, predicate: impl Predicate) -> ControlFlow<()> {
         if predicate.execute(self.peek()?.kind) {
-            let output = O::output(&mut self.parser);
             self.parser.advance();
-            ControlFlow::Continue(output)
+            ControlFlow::Continue(())
         } else {
             ControlFlow::Break(())
         }
@@ -511,19 +510,5 @@ impl<F: FnOnce(TokenKind) -> bool> Predicate for F {
 impl Predicate for TokenKind {
     fn execute(self, query: TokenKind) -> bool {
         self == query
-    }
-}
-
-trait Output<'src> {
-    fn output(parser: &mut SourceFileParser<'src>) -> Self;
-}
-
-impl<'src> Output<'src> for () {
-    fn output(_: &mut SourceFileParser<'src>) -> Self {}
-}
-
-impl<'src> Output<'src> for &'src str {
-    fn output(parser: &mut SourceFileParser<'src>) -> Self {
-        parser.source()
     }
 }
