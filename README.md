@@ -1,8 +1,6 @@
-# rruxwry
+<h1 align="center">——— rruxwry ———</h1>
 
-A power tool for rustc & rustdoc devs that wraps `rustc` and `rustdoc`.
-
-Its most useful features are the flags `-X`/`--cross-crate` and `-T`/`--compiletest`.
+<p align="center">A power tool for rustc & rustdoc devs that wraps <code>rustc</code> and <code>rustdoc</code>.</p>
 
 > [!IMPORTANT]
 > This project is undergoing major reworks and is not yet suitable for general use.
