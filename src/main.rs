@@ -1,6 +1,5 @@
 #![feature(let_chains, exit_status_error, type_alias_impl_trait, os_str_display)]
 #![deny(unused_must_use, rust_2018_idioms)]
-#![allow(incomplete_features)] // precise_capturing
 
 use attribute::Attributes;
 use builder::{BuildMode, QueryMode};

@@ -10,25 +10,17 @@ use std::ops::ControlFlow;
 #[cfg(test)]
 mod test;
 
-// FIXME: add comment why we need this!
+// FIXME: Add comment why we need this! Something like:
+//
+//   Looking at the “dynamic” crate name makes the most sense I think and
+//   is probably what the user intended. Alternatively, we could compute
+//   the crate name from the file path and use it in `-o lib$NAME.rlib`
+//   and `--extern=$NAME=lib$NAME.rlib`.
+//   There is no `rustc --print=crate-type`.
+//   Very useful so users don't need to manually specify `--crate-type/-y`
 
-/* reuse
-
-// Looking at the “dynamic” crate name makes the most sense I think and
-// is probably what the user intended. Alternatively, we could compute
-// the crate name from the file path and use it in `-o lib$NAME.rlib`
-// and `--extern=$NAME=lib$NAME.rlib`.
-
-// there is no `rustc --print=crate-type`.
-// Very useful so users don't need to manually specify `--crate-type/-y`
-
-// No need to pass along the active `cfg`s since `rustc` cannot properly deal with
-// `#[cfg_attr(SPEC, crate_name = "NAME")]` anyway (rust-lang/rust#91632).
-// FIXME: mention that that form is deprecated
-
-*/
-
-// FIXME: check if we parse `c"crate_name"` (edition 2021) and `b"crate_name"` & skip them during lowering.
+// FIXME: Check if we parse `c"crate_name"` (edition 2021) and `b"crate_name"`
+//        & skip them during lowering.
 
 #[derive(Default)]
 #[cfg_attr(test, derive(PartialEq, Eq, Debug))]
@@ -88,16 +80,15 @@ impl<'src> Attributes<'src> {
                 continue;
             };
 
-            // We don't support `crate_{name,type}` inside `cfg_attr` for now because it's deprecated.
-            // See rust-lang/rust#91632 (deny-by-default lint `deprecated_cfg_attr_crate_type_name`).
+            // We don't need to support `crate_{name,type}` inside `cfg_attr` because that's a hard error since 1.83.
             match ident {
                 "crate_name" => {
-                    // `#![crate_name]` used to support macro calls as the expression — by accident, I think.
-                    // PR rust-lang/rust#117584 accidentally broke this. Tracked in issue rust-lang/rust#122001.
-                    // We will never support macro expansion in rrustdoc.
-                    // If rust starts supporting them again, issue a warning here.
                     // We don't need to care about anything other than string literals since everything else
                     // gets rejected semantically by rustc.
+                    // `#![crate_name]` used to support macro calls as the expression — by accident, I think.
+                    // PR rust-lang/rust#117584 accidentally broke this. Tracked in issue rust-lang/rust#122001.
+                    // T-lang has rules to make it a semantic error. Implemented in PR rust-lang/rust#127581
+                    // (to be approved and merged).
                     if crate_name.is_none()
                         && let Some(Meta::Assignment { value: expression }) = attribute.meta
                         && let [(token, span)] = &*expression
@@ -136,16 +127,6 @@ impl<'src> Attributes<'src> {
                             Ok(type_) => type_,
                             Err(_) => continue, // like in rustc, an invalid crate type is non-fatal
                         });
-                    }
-                }
-                "cfg_attr" => {
-                    // FIXME: get the general cfgs via `rustc --print=cfg`
-                    if let Some(Meta::Parenthesized {
-                        delimiter: Delimiter::Parenthesis,
-                        tokens: _tokens,
-                    }) = attribute.meta
-                    {
-                        // FIXME: Implement this.
                     }
                 }
                 _ => {}
@@ -229,7 +210,7 @@ impl<'src> AttributeParser<'src> {
                 };
                 self.parser.advance();
 
-                let tokens = self.parse_token_stream_until(delimiter)?.to_vec();
+                let _tokens = self.parse_token_stream_until(delimiter)?;
 
                 self.parse(match delimiter {
                     Delimiter::Parenthesis => TokenKind::CloseParen,
@@ -237,7 +218,7 @@ impl<'src> AttributeParser<'src> {
                     Delimiter::Brace => TokenKind::CloseBrace,
                 })?;
 
-                Some(Meta::Parenthesized { delimiter, tokens })
+                Some(Meta::Parenthesized)
             }
             _ => return ControlFlow::Break(()),
         };
@@ -411,7 +392,7 @@ impl<'src> Path<'src> {
 
 #[derive(Debug)]
 enum Meta {
-    Parenthesized { delimiter: Delimiter, tokens: Vec<(TokenKind, Span)> },
+    Parenthesized,
     Assignment { value: SmallVec<(TokenKind, Span), 1> },
 }
 
