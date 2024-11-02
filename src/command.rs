@@ -40,7 +40,7 @@ pub(crate) fn compile(
     let mut command = Command::new("rustc", flags.program, strictness);
 
     command.set_env_vars(flags.build);
-    command.set_toolchain(flags.build);
+    command.set_toolchain(flags);
 
     command.arg(path);
 
@@ -76,7 +76,7 @@ pub(crate) fn document(
     let mut command = Command::new("rustdoc", flags.program, strictness);
 
     command.set_env_vars(flags.build);
-    command.set_toolchain(flags.build);
+    command.set_toolchain(flags);
 
     command.arg(path.as_os_str());
 
@@ -206,9 +206,9 @@ impl<'a> Command<'a> {
         info(message).emit();
     }
 
-    fn set_toolchain(&mut self, flags: &cli::BuildFlags) {
-        if let Some(toolchain) = &flags.toolchain {
-            self.arg(format!("+{toolchain}"));
+    fn set_toolchain(&mut self, flags: Flags<'_>) {
+        if let Some(toolchain) = flags.toolchain {
+            self.arg(toolchain);
         }
     }
 
@@ -387,6 +387,7 @@ pub(crate) enum ExternCrate<'src> {
 
 #[derive(Clone, Copy)]
 pub(crate) struct Flags<'a> {
+    pub(crate) toolchain: Option<&'a OsStr>,
     pub(crate) build: &'a cli::BuildFlags,
     pub(crate) verbatim: VerbatimFlags<'a>,
     pub(crate) program: &'a cli::ProgramFlags,

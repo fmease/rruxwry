@@ -84,7 +84,7 @@ You can pass the convenience flag `-f`/`--cargo-feature` `⟨NAME⟩` to enable 
 
 You can pass the convenience flag `-F`/`--rustc-feature` `⟨NAME⟩` to enable an experimental rustc library or language feature. It just expands to `rust{c,doc}`'s `-Zcrate-attr=feature(⟨NAME⟩)` (modulo shell escaping). For example, you can pass `-Flazy_type_alias` to quickly enable *[lazy type aliases]*.
 
-To set the *[rustup]* toolchain, you use `-t`. Examples: `rruxwry file.rs -tnightly`, `rruxwry file.rs -tstage2`. Currently, you *cannot* use the *rustup*-style `+⟨TOOLCHAIN⟩` flag unfortunately. I plan on adding support for that if there's an easy way to do it with *clap* (the CLI parser we use).
+As one would expect, if the first argument begins with a `+`, it will be interpreted as a *[rustup]* toolchain name. Examples: `rruxwry +nightly file.rs`, `rruxwry +stage2 file.rs`.
 
 If you'd like to know the precise commands *rruxwry* runs under the hood for example to be able to open a rust-lang/rust GitHub issue with proper reproduction steps, pass `-V`/`--verbose` and look for output of the form `info: running `. *rruxwry* tries very hard to minimize the amount of flags passed to `rust{c,doc}` exactly for the aforementioned use case. It's not perfect, you might be able to remove some flags for the reproducer (you can definitely get rid of `--default-theme=ayu` :D).
 
@@ -112,7 +112,6 @@ Options:
   -n, --crate-name <NAME>        Set the name of the (base) crate
   -y, --crate-type <TYPE>        Set the type of the (base) crate
   -e, --edition <EDITION>        Set the edition of the source files
-  -t, --toolchain <NAME>         Set the toolchain
       --cfg <SPEC>               Enable a `cfg`
       --rev <NAME>               Enable a compiletest revision
   -f, --cargo-feature <NAME>     Enable a Cargo-like feature

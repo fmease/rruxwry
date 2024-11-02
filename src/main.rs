@@ -34,20 +34,23 @@ fn main() -> ExitCode {
 }
 
 fn try_main() -> error::Result {
-    let cli::Arguments {
-        path,
-        verbatim_flags,
-        open,
-        crate_name,
-        crate_type,
-        edition,
-        build_flags,
-        cross_crate,
-        compiletest,
-        query,
-        program_flags,
-        color,
-    } = clap::Parser::parse();
+    let (
+        cli::Arguments {
+            path,
+            verbatim_flags,
+            open,
+            crate_name,
+            crate_type,
+            edition,
+            build_flags,
+            cross_crate,
+            compiletest,
+            query,
+            program_flags,
+            color,
+        },
+        toolchain,
+    ) = cli::parse();
 
     match color {
         clap::ColorChoice::Always => owo_colors::set_override(true),
@@ -82,6 +85,7 @@ fn try_main() -> error::Result {
         environment: Vec::new(),
     };
     let flags = command::Flags {
+        toolchain: toolchain.as_deref(),
         build: &build_flags,
         verbatim: verbatim_flags.as_ref(),
         program: &program_flags,
