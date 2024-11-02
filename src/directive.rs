@@ -138,6 +138,8 @@ pub(crate) struct InstantiatedDirectives<'src> {
     pub(crate) no_prefer_dynamic: bool,
     pub(crate) revisions: FxHashSet<&'src str>,
     pub(crate) verbatim_flags: VerbatimFlagsBuf<'src>,
+    pub(crate) htmldocck: Vec<(HtmlDocCkDirectiveKind, Polarity)>,
+    pub(crate) jsondocck: Vec<(JsonDocCkDirectiveKind, Polarity)>,
 }
 
 impl<'src> InstantiatedDirectives<'src> {
@@ -163,6 +165,12 @@ impl<'src> InstantiatedDirectives<'src> {
                 self.verbatim_flags.environment.push((key, Some(value)))
             }
             DirectiveKind::UnsetRustcEnv(key) => self.verbatim_flags.environment.push((key, None)),
+            DirectiveKind::HtmlDocCk(directive, polarity) => {
+                self.htmldocck.push((directive, polarity))
+            }
+            DirectiveKind::JsonDocCk(directive, polarity) => {
+                self.jsondocck.push((directive, polarity))
+            }
         }
     }
 }
@@ -190,6 +198,38 @@ enum DirectiveKind<'src> {
     Revisions(Vec<&'src str>),
     RustcEnv { key: &'src str, value: &'src str },
     UnsetRustcEnv(&'src str),
+    HtmlDocCk(HtmlDocCkDirectiveKind, Polarity),
+    JsonDocCk(JsonDocCkDirectiveKind, Polarity),
+}
+
+#[derive(Clone)]
+pub(crate) enum HtmlDocCkDirectiveKind {
+    Count,
+    Files,
+    Has,
+    HasDir,
+    HasRaw,
+    Matches,
+    MatchesRaw,
+    Snapshot,
+}
+
+// FIXME: Populate payloads
+#[derive(Clone)]
+pub(crate) enum JsonDocCkDirectiveKind {
+    #[allow(dead_code)] // FIXME
+    Count,
+    #[allow(dead_code)] // FIXME
+    Has,
+    Is,
+    IsMany,
+    Set,
+}
+
+#[derive(Clone, Copy)]
+pub(crate) enum Polarity {
+    Negative,
+    Positive,
 }
 
 struct DirectiveParser<'src> {
@@ -205,6 +245,7 @@ impl<'src> DirectiveParser<'src> {
     fn execute(mut self) -> Result<Directive<'src>, Error<'src>> {
         self.parse_whitespace();
 
+        // FIXME: Non-standard: Support multiple revisions inside `[`,`]`, e.g. `[a,b]`
         let revision = if self.consume(|char| char == '[') {
             // FIXME: How does `compiletest` deal with empty revision conditions (`//@[] ...`)?
             let revision = self.take_while(|char| char != ']');
@@ -216,7 +257,8 @@ impl<'src> DirectiveParser<'src> {
 
         self.parse_whitespace();
 
-        let directive = self.take_while(|char| char == '-' || char.is_ascii_alphabetic());
+        let directive =
+            self.take_while(|char| matches!(char, '-' | '!') || char.is_ascii_alphabetic());
         let context = ErrorContext::Directive(directive);
         let kind = match directive {
             "aux-build" => {
@@ -284,6 +326,63 @@ impl<'src> DirectiveParser<'src> {
                 let variable = self.take_remaining_line();
                 DirectiveKind::UnsetRustcEnv(variable)
             }
+            // <> FIXME: Only accept these if mode==Rustdoc/Html...
+            //    FIXME: Actually parse these correctly (payload...)
+            "count" => DirectiveKind::HtmlDocCk(HtmlDocCkDirectiveKind::Count, Polarity::Positive),
+            "!count" => DirectiveKind::HtmlDocCk(HtmlDocCkDirectiveKind::Count, Polarity::Negative),
+            "files" => DirectiveKind::HtmlDocCk(HtmlDocCkDirectiveKind::Files, Polarity::Positive),
+            "!files" => DirectiveKind::HtmlDocCk(HtmlDocCkDirectiveKind::Files, Polarity::Negative),
+            "has" => DirectiveKind::HtmlDocCk(HtmlDocCkDirectiveKind::Has, Polarity::Positive),
+            "!has" => DirectiveKind::HtmlDocCk(HtmlDocCkDirectiveKind::Has, Polarity::Negative),
+            "has-dir" => {
+                DirectiveKind::HtmlDocCk(HtmlDocCkDirectiveKind::HasDir, Polarity::Positive)
+            }
+            "!has-dir" => {
+                DirectiveKind::HtmlDocCk(HtmlDocCkDirectiveKind::HasDir, Polarity::Negative)
+            }
+            "hasraw" => {
+                DirectiveKind::HtmlDocCk(HtmlDocCkDirectiveKind::HasRaw, Polarity::Positive)
+            }
+            "!hasraw" => {
+                DirectiveKind::HtmlDocCk(HtmlDocCkDirectiveKind::HasRaw, Polarity::Negative)
+            }
+            "matches" => {
+                DirectiveKind::HtmlDocCk(HtmlDocCkDirectiveKind::Matches, Polarity::Positive)
+            }
+            "!matches" => {
+                DirectiveKind::HtmlDocCk(HtmlDocCkDirectiveKind::Matches, Polarity::Negative)
+            }
+            "matchesraw" => {
+                DirectiveKind::HtmlDocCk(HtmlDocCkDirectiveKind::MatchesRaw, Polarity::Positive)
+            }
+            "!matchesraw" => {
+                DirectiveKind::HtmlDocCk(HtmlDocCkDirectiveKind::MatchesRaw, Polarity::Negative)
+            }
+            "snapshot" => {
+                DirectiveKind::HtmlDocCk(HtmlDocCkDirectiveKind::Snapshot, Polarity::Positive)
+            }
+            "!snapshot" => {
+                DirectiveKind::HtmlDocCk(HtmlDocCkDirectiveKind::Snapshot, Polarity::Negative)
+            }
+            // </>
+            // <> FIXME: Only accept these if mode==Rustdoc/Json...
+            //    FIXME: Actually parse these correctly (payload...)
+            // FIXME: actually parse directices correctly that "are both html & json"
+            // "count" => DirectiveKind::JsonDocCk(JsonDocCkDirectiveKind::Count, Polarity::Positive),
+            // "!count" => DirectiveKind::JsonDocCk(JsonDocCkDirectiveKind::Count, Polarity::Positive),
+            // "has" => DirectiveKind::JsonDocCk(JsonDocCkDirectiveKind::Count, Polarity::Positive),
+            // "!has" => DirectiveKind::JsonDocCk(JsonDocCkDirectiveKind::Count, Polarity::Positive),
+            "is" => DirectiveKind::JsonDocCk(JsonDocCkDirectiveKind::Is, Polarity::Positive),
+            "!is" => DirectiveKind::JsonDocCk(JsonDocCkDirectiveKind::Is, Polarity::Negative),
+            "ismany" => {
+                DirectiveKind::JsonDocCk(JsonDocCkDirectiveKind::IsMany, Polarity::Positive)
+            }
+            "!ismany" => {
+                DirectiveKind::JsonDocCk(JsonDocCkDirectiveKind::IsMany, Polarity::Negative)
+            }
+            "set" => DirectiveKind::JsonDocCk(JsonDocCkDirectiveKind::Set, Polarity::Positive),
+            "!set" => DirectiveKind::JsonDocCk(JsonDocCkDirectiveKind::Set, Polarity::Negative),
+            // </>
             // NB: We don't support `{unset-,}exec-env` since it's not meaningful to rruxwry.
             directive => return Err(Error::new(ErrorKind::UnknownDirective(directive))),
         };
@@ -373,8 +472,11 @@ struct Report<'src> {
 }
 
 impl Report<'_> {
-    fn publish(self) {
+    fn publish(mut self) {
         if !self.unknowns.is_empty() {
+            self.unknowns.sort_unstable();
+            self.unknowns.dedup();
+
             let s = if self.unknowns.len() == 1 { "" } else { "s" };
             let unknowns =
                 self.unknowns.into_iter().map(|unknown| format!("`{unknown}`")).join_with(", ");

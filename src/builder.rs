@@ -247,13 +247,17 @@ fn build_compiletest_auxiliary<'a>(
     })
 }
 
+// FIXME: generalize to rustc vs rustdoc
 #[derive(Clone, Copy)]
 pub(crate) enum BuildMode {
     Default,
+    // FIXME make compatible with "-T"
     CrossCrate,
+    // FIXME: remove/make default
     Compiletest { query: Option<QueryMode> },
 }
 
+// FIXME: remove
 #[derive(Clone, Copy)]
 pub(crate) enum QueryMode {
     Html,
