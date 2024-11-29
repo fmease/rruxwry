@@ -2,7 +2,7 @@
 name = "rruxwry"
 version = "0.1.0"
 edition = "2021"
-description = "A wrapper around rust{c,doc} for rust{c,doc} devs"
+description = "A wrapper around rust{,do}c for rust{,do}c devs"
 license = "MIT"
 publish = false
 

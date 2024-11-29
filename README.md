@@ -80,11 +80,11 @@ This mode is entirely separate from the default & the cross-crate build mode.
 
 You can pass the convenience flag `-f`/`--cargo-feature` `⟨NAME⟩` to enable a *Cargo*-like feature, i.e., a `cfg` that can be checked for with `#[cfg(feature = "⟨NAME⟩")]` and similar in the source code. `-f ⟨NAME⟩` just expands to `--cfg feature="⟨NAME⟩"` (modulo shell escaping).
 
-You can pass the convenience flag `-F`/`--rustc-feature` `⟨NAME⟩` to enable an experimental rustc library or language feature. It just expands to `rust{c,doc}`'s `-Zcrate-attr=feature(⟨NAME⟩)` (modulo shell escaping). For example, you can pass `-Flazy_type_alias` to quickly enable *[lazy type aliases]*.
+You can pass the convenience flag `-F`/`--rustc-feature` `⟨NAME⟩` to enable an experimental rustc library or language feature. It just expands to `rust{,do}c`'s `-Zcrate-attr=feature(⟨NAME⟩)` (modulo shell escaping). For example, you can pass `-Flazy_type_alias` to quickly enable *[lazy type aliases]*.
 
 As one would expect, if the first argument begins with a `+`, it will be interpreted as a *[rustup]* toolchain name. Examples: `rruxwry +nightly file.rs`, `rruxwry +stage2 file.rs`.
 
-If you'd like to know the precise commands *rruxwry* runs under the hood for example to be able to open a rust-lang/rust GitHub issue with proper reproduction steps, pass `-V`/`--verbose` and look for output of the form `info: running `. *rruxwry* tries very hard to minimize the amount of flags passed to `rust{c,doc}` exactly for the aforementioned use case. It's not perfect, you might be able to remove some flags for the reproducer (you can definitely get rid of `--default-theme=ayu` :D).
+If you'd like to know the precise commands *rruxwry* runs under the hood for example to be able to open a rust-lang/rust GitHub issue with proper reproduction steps, pass `-V`/`--verbose` and look for output of the form `info: running `. *rruxwry* tries very hard to minimize the amount of flags passed to `rust{,do}c` exactly for the aforementioned use case. It's not perfect, you might be able to remove some flags for the reproducer (you can definitely get rid of `--default-theme=ayu` :D).
 
 Just like *Cargo*, *rruxwry* recognizes the environment variables `RUSTFLAGS` and `RUSTDOCFLAGS`. The arguments / flags present in these flags get passed *verbatim* (modulo shell escaping) to `rustc` and `rustdoc` respectively. Be aware that the flags you pass *may conflict* with the ones added by *rruxwry* but as mentioned in the paragraph above, it tries fiercely to not add flags unnecessarily. Note that your flags get added last. You can debug conflicts by passing `-V`/`--verbose` to `rruxwry` and by looking for lines starting with `info: running ` in the output to get to know first hand what `rruxwry` tried to pass to the underlying programs.
 
@@ -97,7 +97,7 @@ However if that's too wordy for you and you don't care about passing arguments /
 `rruxwry -h`:
 
 ```
-A wrapper around rust{c,doc} for rust{c,doc} devs
+A wrapper around rust{,do}c for rust{,do}c devs
 
 Usage: rruxwry [OPTIONS] <PATH> [-- <VERBATIM>...]
 
@@ -135,6 +135,13 @@ Options:
 ```
 
 Additionally, *rruxwry* recognizes the environment variables `RUSTFLAGS` and `RUSTDOCFLAGS`.
+
+## Name: Pronunciation and Origin
+
+IPA transcription: /ʔə.ˈɹʌks.ɹaɪ/.
+Standard phonetic transcription: \[*uh*-**ruhks**-rahy\].
+
+Origin: **r**ustc **r**ustdoc r**u**st{,do}c e**x**ecute **w**rite **r**ead -**y**.
 
 ## License
 
