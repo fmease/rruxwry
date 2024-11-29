@@ -43,7 +43,7 @@ mod lexer {
 
     pub(super) type Tokens<'src> = impl Iterator<Item = Token>;
 
-    pub(super) fn lex<'src>(source: &'src str) -> (usize, PeekableTokens<'src>) {
+    pub(super) fn lex(source: &str) -> (usize, PeekableTokens<'_>) {
         let index = strip_shebang(source).unwrap_or_default();
         let tokens = ra_ap_rustc_lexer::tokenize(&source[index..]).peekable();
         (index, tokens)

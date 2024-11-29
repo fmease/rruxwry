@@ -7,7 +7,7 @@
 
 ## Power Features
 
-### `--cross-crate`
+### `-X`, `--cross-crate`
 
 Very useful for rapidly reproducing and debugging [rustdoc *cross-crate re-exports* issues][x-crate-reexport-bugs].
 *rruxwry* reduces the number of steps from many to just two:
@@ -20,9 +20,9 @@ The alternatives would be:
 * Creating at least two files, running `rustc` then `rustdoc` manually without forgetting the various flags that need to be passed and manually opening up the generated documentation with the browser of choice.
 * Setting up a *[Cargo]* project containing at least two crates and running `cargo doc` or `cargo rustc` (or `cargo doc --open`).
 
-### `--compiletest`
+### `-@`, `--compiletest`
 
-Super nice for debugging rustdoc tests. I.e., tests found in the [rust-lang/rust repository][rust-repo] under `tests/rustdoc{,-ui,-json}/`. You can run rustdoc on such files simply by calling `rruxwry file.rs -T` (or `rruxwry file.rs -To`). *rruxwry* supports all [`ui_test`]-style [`compiletest`] directives that are relevant (it skips and warns on “unknown” directives).
+Super nice for debugging rustdoc tests. I.e., tests found in the [rust-lang/rust repository][rust-repo] under `tests/rustdoc{,-ui,-json}/`. You can run rustdoc on such files simply by calling `rruxwry file.rs -@` (or `rruxwry file.rs -@o`). *rruxwry* supports all [`ui_test`]-style [`compiletest`] directives that are relevant (it skips and warns on “unknown” directives).
 
 This build mode can be used to debug *cross-crate re-export* tests found in `tests/rustdoc/inline_cross` (since it understands the directives `//@ aux-build`, `//@ aux-crate`, etc.).
 
@@ -33,10 +33,8 @@ Presently this tool has no stability guarantees whatsoever. Anything may change 
 The *default* and the *cross crate* build modes are pretty fleshed out and should be pretty stable.
 On the other hand, you might experience some bugs in the *compiletest* build mode since it was added pretty recently and hasn't been thoroughly tested yet.
 
-The *compiletest+query* build mode (`-TQ`) has not been implemented yet. The plan is to provide useful output for quickly debugging tests that make use of [`htmldocck`] and [`jsondocck`] directives.
-
 Feel free to report any bugs and other unpleasantries on [the issue tracker][bugs].
-If `rruxwry -T` fails to build a `tests/rustdoc{,-ui,-json}/` file, e.g., due to unsupported directives, that's definitely a bug.
+If `rruxwry -@` fails to build a `tests/rustdoc{,-ui,-json}/` file, e.g., due to unsupported directives, that's definitely a bug. <!-- FIXME: Change policy -->
 
 ## Explainer & Tutorial
 
@@ -129,8 +127,7 @@ Options:
       --log                      Override `RUSTC_LOG` to be `debug`
   -B, --no-backtrace             Override `RUST_BACKTRACE` to be `0`
   -X, --cross-crate              Enable the cross-crate re-export mode
-  -T, --compiletest              Enable ui_test-style compiletest directives: `//@`
-  -Q, --query                    Enable XPath / JsonPath queries
+  -@, --compiletest              Enable compiletest directives
   -V, --verbose                  Use verbose output
   -0, --dry-run                  Run through without making any changes
       --color <WHEN>             Control when to use color [default: auto] [possible values: auto, always, never]

@@ -47,7 +47,7 @@ fn parse_flags(
         return None;
     };
 
-    let flags = shlex::split(&flags);
+    let flags = shlex::split(flags);
 
     if flags.is_none() {
         warning::malformed_environment_variable(key, "its content is not properly escaped").emit();

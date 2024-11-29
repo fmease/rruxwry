@@ -1,8 +1,8 @@
-#![feature(let_chains, exit_status_error, type_alias_impl_trait, os_str_display)]
+#![feature(let_chains, exit_status_error, type_alias_impl_trait, os_str_display, if_let_guard)]
 #![deny(unused_must_use, rust_2018_idioms)]
 
 use attribute::Attributes;
-use builder::{BuildMode, QueryMode};
+use builder::BuildMode;
 use data::{CrateNameBuf, CrateNameCow, CrateType, Edition};
 use diagnostic::IntoDiagnostic;
 use std::{path::Path, process::ExitCode};
@@ -45,7 +45,6 @@ fn try_main() -> error::Result {
             build_flags,
             cross_crate,
             compiletest,
-            query,
             program_flags,
             color,
         },
@@ -60,8 +59,7 @@ fn try_main() -> error::Result {
 
     // FIXME: eagerly lower `-f`s to `--cfg`s here, so we properly support them in `compiletest`+command
 
-    let query_mode = compute_query_mode(query, build_flags.json);
-    let build_mode = compute_build_mode(cross_crate, compiletest, query_mode);
+    let build_mode = compute_build_mode(cross_crate, compiletest);
 
     let edition = edition.unwrap_or_else(|| match build_mode {
         BuildMode::Default | BuildMode::CrossCrate => Edition::LATEST_STABLE,
@@ -101,18 +99,10 @@ fn try_main() -> error::Result {
     Ok(())
 }
 
-fn compute_query_mode(query: bool, json: bool) -> Option<QueryMode> {
-    match (query, json) {
-        (true, false) => Some(QueryMode::Html),
-        (true, true) => Some(QueryMode::Json),
-        (false, _) => None,
-    }
-}
-
-fn compute_build_mode(cross_crate: bool, compiletest: bool, query: Option<QueryMode>) -> BuildMode {
+fn compute_build_mode(cross_crate: bool, compiletest: bool) -> BuildMode {
     match (cross_crate, compiletest) {
         (true, false) => BuildMode::CrossCrate,
-        (false, true) => BuildMode::Compiletest { query },
+        (false, true) => BuildMode::Compiletest,
         (false, false) => BuildMode::Default,
         (true, true) => unreachable!(), // Already caught by `clap`.
     }

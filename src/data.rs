@@ -132,7 +132,7 @@ impl CrateNameBuf {
         path.file_stem()
             .and_then(|name| name.to_str())
             .ok_or(())
-            .and_then(|name| Self::adjust_and_parse(name))
+            .and_then(Self::adjust_and_parse)
     }
 
     pub(crate) fn adjust_and_parse(source: &str) -> Result<Self, ()> {

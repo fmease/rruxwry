@@ -1,7 +1,6 @@
 //! The parser of `ui_test`-style `compiletest`, `htmldocck` and `jsondocck` directives.
 
 use crate::{
-    builder::QueryMode,
     command::{ExternCrate, VerbatimFlagsBuf},
     data::{CrateNameRef, Edition},
     diagnostic::warning,
@@ -25,8 +24,8 @@ pub(crate) struct Directives<'src> {
 }
 
 impl<'src> Directives<'src> {
-    pub(crate) fn parse(source: &'src str, query: Option<QueryMode>) -> Self {
-        DirectivesParser::new(source, query).execute()
+    pub(crate) fn parse(source: &'src str) -> Self {
+        DirectivesParser::new(source).execute()
     }
 
     fn add(&mut self, directive: Directive<'src>) {
@@ -92,14 +91,12 @@ impl<'src> DerefMut for Directives<'src> {
 
 struct DirectivesParser<'src> {
     parser: parser::SourceFileParser<'src>,
-    #[allow(dead_code)] // FIXME: use this when impl'ing htmldocck & jsondocck queries.
-    query: Option<QueryMode>,
     directives: Directives<'src>,
 }
 
 impl<'src> DirectivesParser<'src> {
-    fn new(source: &'src str, query: Option<QueryMode>) -> Self {
-        Self { parser: parser::SourceFileParser::new(source), query, directives: default() }
+    fn new(source: &'src str) -> Self {
+        Self { parser: parser::SourceFileParser::new(source), directives: default() }
     }
 
     // FIXME: Parse htmldocck/jsondocck queries

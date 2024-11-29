@@ -25,9 +25,7 @@ pub(crate) fn build<'a>(
     match mode {
         BuildMode::Default => build_default(path, crate_name, crate_type, edition, flags),
         BuildMode::CrossCrate => build_cross_crate(path, crate_name, crate_type, edition, flags),
-        BuildMode::Compiletest { query } => {
-            build_compiletest(path, crate_name, edition, flags, query)
-        }
+        BuildMode::Compiletest => build_compiletest(path, crate_name, edition, flags),
     }
 }
 
@@ -112,12 +110,11 @@ fn build_compiletest<'a>(
     crate_name: CrateNameRef<'a>,
     _edition: Edition, // FIXME: should we respect the edition or should we reject it with `clap`?
     flags: Flags<'_>,
-    query: Option<QueryMode>,
 ) -> Result<CrateNameCow<'a>> {
     // FIXME: Add a flag `--all-revs`.
     // FIXME: Make sure `//@ compile-flags: --extern name` works as expected
     let source = std::fs::read_to_string(path)?;
-    let directives = Directives::parse(&source, query);
+    let directives = Directives::parse(&source);
 
     // FIXME: We should also store Cargo-like features here after having converted them to
     // cfg specs NOTE: This will be fixed once we eagerly expand `-f` to `--cfg`.
@@ -194,7 +191,7 @@ fn build_compiletest_auxiliary<'a>(
 
     // FIXME: What about instantiation???
     let mut directives =
-        source.as_ref().map(|source| Directives::parse(source, None)).unwrap_or_default();
+        source.as_ref().map(|source| Directives::parse(source)).unwrap_or_default();
 
     let edition = directives.edition.unwrap_or_default();
 
@@ -251,17 +248,8 @@ fn build_compiletest_auxiliary<'a>(
 #[derive(Clone, Copy)]
 pub(crate) enum BuildMode {
     Default,
-    // FIXME make compatible with "-T"
     CrossCrate,
-    // FIXME: remove/make default
-    Compiletest { query: Option<QueryMode> },
-}
-
-// FIXME: remove
-#[derive(Clone, Copy)]
-pub(crate) enum QueryMode {
-    Html,
-    Json,
+    Compiletest,
 }
 
 pub(crate) enum Error {
@@ -277,7 +265,7 @@ impl IntoDiagnostic for Error {
 
                 error(format!("unknown revision `{unknown}`"))
                     .note(format!("available revisions are: {available}"))
-                    .note(format!("you can use `--cfg` over `--rev` to suppress this check"))
+                    .note("you can use `--cfg` over `--rev` to suppress this check".to_string())
             }
         }
     }
