@@ -60,8 +60,9 @@ pub(crate) fn compile(
 
     command.set_backtrace_behavior(flags.build);
 
-    if flags.build.log {
-        command.env("RUSTC_LOG", "debug");
+    if let Some(filter) = &flags.build.log {
+        // FIXME: DRY default value. Do this inside `cli` once it uses the builder pattern.
+        command.env("RUSTC_LOG", filter.as_deref().unwrap_or("debug"));
     }
 
     command.execute()
@@ -136,8 +137,9 @@ pub(crate) fn document(
 
     command.set_backtrace_behavior(flags.build);
 
-    if flags.build.log {
-        command.env("RUSTDOC_LOG", "debug");
+    if let Some(filter) = &flags.build.log {
+        // FIXME: DRY default value. Do this inside `cli` once it uses the builder pattern.
+        command.env("RUSTDOC_LOG", filter.as_deref().unwrap_or("debug"));
     }
 
     command.execute()
