@@ -111,7 +111,7 @@ pub(crate) struct BuildFlags {
     /// Enable rustc's `-Zverbose-internals`.
     #[arg(short = '#', long = "internals")]
     pub(crate) rustc_verbose_internals: bool,
-    /// Override `RUSTC_LOG` to be `debug`.
+    /// Enable rust{,doc}c logging.
     #[arg(long)]
     pub(crate) log: bool,
     /// Override `RUST_BACKTRACE` to be `0`.
