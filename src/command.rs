@@ -38,10 +38,7 @@ pub(crate) fn compile(
     strictness: Strictness,
 ) -> Result {
     let mut command = Command::new("rustc", flags.program, strictness);
-
-    command.set_env_vars(flags.build);
     command.set_toolchain(flags);
-
     command.arg(path);
 
     command.set_crate_type(crate_type);
@@ -61,6 +58,13 @@ pub(crate) fn compile(
         command.args(flags);
     }
 
+    command.set_backtrace_behavior(flags.build);
+
+    if let Some(filter) = &flags.build.log {
+        // FIXME: DRY default value. Do this inside `cli` once it uses the builder pattern.
+        command.env("RUSTC_LOG", filter.as_deref().unwrap_or("debug"));
+    }
+
     command.execute()
 }
 
@@ -74,11 +78,8 @@ pub(crate) fn document(
     strictness: Strictness,
 ) -> Result {
     let mut command = Command::new("rustdoc", flags.program, strictness);
-
-    command.set_env_vars(flags.build);
     command.set_toolchain(flags);
-
-    command.arg(path.as_os_str());
+    command.arg(path);
 
     command.set_crate_name(crate_name, path);
     command.set_crate_type(crate_type);
@@ -132,6 +133,13 @@ pub(crate) fn document(
 
     if let Some(flags) = environment::rustdoc_flags() {
         command.args(flags);
+    }
+
+    command.set_backtrace_behavior(flags.build);
+
+    if let Some(filter) = &flags.build.log {
+        // FIXME: DRY default value. Do this inside `cli` once it uses the builder pattern.
+        command.env("RUSTDOC_LOG", filter.as_deref().unwrap_or("debug"));
     }
 
     command.execute()
@@ -271,10 +279,7 @@ impl<'a> Command<'a> {
         }
     }
 
-    fn set_env_vars(&mut self, flags: &cli::BuildFlags) {
-        if flags.log {
-            self.env("RUSTC_LOG", "debug");
-        }
+    fn set_backtrace_behavior(&mut self, flags: &cli::BuildFlags) {
         if flags.no_backtrace {
             self.env("RUST_BACKTRACE", "0");
         }

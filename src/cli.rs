@@ -111,9 +111,9 @@ pub(crate) struct BuildFlags {
     /// Enable rustc's `-Zverbose-internals`.
     #[arg(short = '#', long = "internals")]
     pub(crate) rustc_verbose_internals: bool,
-    /// Override `RUSTC_LOG` to be `debug`.
-    #[arg(long)]
-    pub(crate) log: bool,
+    /// Enable rust{,do}c logging. FILTER defaults to `debug`.
+    #[arg(long, value_name("FILTER"))]
+    pub(crate) log: Option<Option<String>>,
     /// Override `RUST_BACKTRACE` to be `0`.
     #[arg(short = 'B', long)]
     pub(crate) no_backtrace: bool,

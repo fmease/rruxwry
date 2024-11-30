@@ -124,7 +124,7 @@ Options:
       --theme <THEME>            Set the theme [default: ayu]
       --cap-lints <LEVEL>        Cap lints at a level
   -#, --internals                Enable rustc's `-Zverbose-internals`
-      --log                      Override `RUSTC_LOG` to be `debug`
+      --log [<FILTER>]           Enable rust{,do}c logging. FILTER defaults to `debug`
   -B, --no-backtrace             Override `RUST_BACKTRACE` to be `0`
   -X, --cross-crate              Enable the cross-crate re-export mode
   -@, --compiletest              Enable compiletest directives
