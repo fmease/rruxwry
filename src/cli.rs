@@ -3,7 +3,10 @@
 use crate::data::{CrateNameBuf, CrateType, Edition};
 use clap::{ColorChoice, Parser};
 use joinery::JoinableIterator;
-use std::{ffi::OsString, path::PathBuf};
+use std::{
+    ffi::OsString,
+    path::{self, Path, PathBuf},
+};
 
 // FIXME: Improve the signature (smh. incorporate the toolchain).
 pub(crate) fn parse() -> (Arguments, Option<OsString>) {
@@ -145,7 +148,7 @@ impl Edition {
 
 impl CrateNameBuf {
     fn parse_cli_style(source: &str) -> Result<Self, &'static str> {
-        Self::adjust_and_parse(source).map_err(|()| "not a non-empty alphanumeric string")
+        Self::parse_relaxed(source).map_err(|()| "not a non-empty alphanumeric string")
     }
 }
 
@@ -160,4 +163,26 @@ fn possible_values(values: impl IntoIterator<Item: std::fmt::Display, IntoIter: 
         "possible values: {}",
         values.into_iter().map(|value| format!("`{value}`")).join_with(", ")
     )
+}
+
+// FIXME: move to mod data
+#[derive(Clone, Copy)]
+pub(crate) enum InputPath<'a> {
+    Path(&'a Path),
+    Stdin,
+}
+
+impl<'a> InputPath<'a> {
+    const STDIN_MARKER: &'static str = "-";
+
+    pub(crate) fn parse(path: &'a Path) -> Self {
+        if path.as_os_str() == Self::STDIN_MARKER { Self::Stdin } else { Self::Path(path) }
+    }
+
+    pub(crate) fn into_inner(self) -> &'a Path {
+        match self {
+            InputPath::Path(path) => path,
+            InputPath::Stdin => Path::new(Self::STDIN_MARKER),
+        }
+    }
 }

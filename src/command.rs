@@ -10,8 +10,8 @@
 //        as well as those passed via the `RUST{,DOC}FLAGS` env vars.
 
 use crate::{
-    cli,
-    data::{CrateName, CrateNameRef, CrateType, Edition},
+    cli::{self, InputPath},
+    data::{CrateNameCow, CrateNameRef, CrateType, Edition},
     diagnostic::info,
     error::Result,
     utility::default,
@@ -22,14 +22,13 @@ use std::{
     ffi::OsStr,
     fmt,
     ops::{Deref, DerefMut},
-    path::Path,
     process,
 };
 
 mod environment;
 
 pub(crate) fn compile(
-    path: &Path,
+    path: InputPath<'_>,
     crate_name: CrateNameRef<'_>,
     crate_type: CrateType,
     edition: Edition,
@@ -39,7 +38,7 @@ pub(crate) fn compile(
 ) -> Result {
     let mut command = Command::new("rustc", flags.program, strictness);
     command.set_toolchain(flags);
-    command.arg(path);
+    command.arg(path.into_inner()); // rustc supports `-`
 
     command.set_crate_type(crate_type);
     command.set_crate_name(crate_name, path);
@@ -69,7 +68,7 @@ pub(crate) fn compile(
 }
 
 pub(crate) fn document(
-    path: &Path,
+    path: InputPath<'_>,
     crate_name: CrateNameRef<'_>,
     crate_type: CrateType,
     edition: Edition,
@@ -79,7 +78,7 @@ pub(crate) fn document(
 ) -> Result {
     let mut command = Command::new("rustdoc", flags.program, strictness);
     command.set_toolchain(flags);
-    command.arg(path);
+    command.arg(path.into_inner()); // rustdoc supports `-`
 
     command.set_crate_name(crate_name, path);
     command.set_crate_type(crate_type);
@@ -220,8 +219,8 @@ impl<'a> Command<'a> {
         }
     }
 
-    fn set_crate_name(&mut self, crate_name: CrateNameRef<'_>, path: &Path) {
-        if let Ok(fiducial_crate_name) = CrateName::adjust_and_parse_file_path(path)
+    fn set_crate_name(&mut self, crate_name: CrateNameRef<'_>, path: InputPath<'_>) {
+        if let Ok(fiducial_crate_name) = CrateNameCow::parse_from_input_path(path)
             && crate_name == fiducial_crate_name.as_ref()
         {
             return;

@@ -3,6 +3,7 @@
 //! The low-level build commands are defined in [`crate::command`].
 
 use crate::{
+    cli::InputPath,
     command::{self, ExternCrate, Flags, Strictness},
     data::{CrateName, CrateNameCow, CrateNameRef, CrateType, Edition},
     diagnostic::{Diagnostic, IntoDiagnostic, error},
@@ -16,7 +17,7 @@ use std::{borrow::Cow, cell::LazyCell, mem, path::Path};
 
 pub(crate) fn build<'a>(
     mode: BuildMode,
-    path: &Path,
+    path: InputPath<'_>,
     crate_name: CrateNameRef<'a>,
     crate_type: CrateType,
     edition: Edition,
@@ -30,7 +31,7 @@ pub(crate) fn build<'a>(
 }
 
 fn build_default<'a>(
-    path: &Path,
+    path: InputPath<'_>,
     crate_name: CrateNameRef<'a>,
     crate_type: CrateType,
     edition: Edition,
@@ -50,7 +51,7 @@ fn build_default<'a>(
 }
 
 fn build_cross_crate(
-    path: &Path,
+    path: InputPath<'_>,
     crate_name: CrateNameRef<'_>,
     crate_type: CrateType,
     edition: Edition,
@@ -67,8 +68,12 @@ fn build_cross_crate(
     )?;
 
     let dependent_crate_name = CrateName::new_unchecked(format!("u_{crate_name}"));
-    let dependent_crate_path =
-        path.with_file_name(dependent_crate_name.as_str()).with_extension("rs");
+    let dependent_crate_path = match path {
+        InputPath::Path(path) => path,
+        InputPath::Stdin => Path::new("."),
+    }
+    .with_file_name(dependent_crate_name.as_str())
+    .with_extension("rs");
 
     if !flags.program.dry_run && !dependent_crate_path.exists() {
         // While we could omit the `extern crate` declaration in `edition >= Edition::Edition2018`,
@@ -106,14 +111,17 @@ fn extern_prelude_for(crate_type: CrateType) -> &'static [ExternCrate<'static>] 
 }
 
 fn build_compiletest<'a>(
-    path: &Path,
+    path: InputPath<'_>,
     crate_name: CrateNameRef<'a>,
     _edition: Edition, // FIXME: should we respect the edition or should we reject it with `clap`?
     flags: Flags<'_>,
 ) -> Result<CrateNameCow<'a>> {
     // FIXME: Add a flag `--all-revs`.
     // FIXME: Make sure `//@ compile-flags: --extern name` works as expected
-    let source = std::fs::read_to_string(path)?;
+    let source = match path {
+        InputPath::Path(path) => std::fs::read_to_string(path)?,
+        InputPath::Stdin => todo!(), // FIXME
+    };
     let directives = Directives::parse(&source);
 
     // FIXME: We should also store Cargo-like features here after having converted them to
@@ -137,8 +145,14 @@ fn build_compiletest<'a>(
 
     let mut directives = directives.into_instantiated(&revisions);
 
-    // FIXME: unwrap
-    let auxiliary_base_path = LazyCell::new(|| path.parent().unwrap().join("auxiliary"));
+    let auxiliary_base_path = LazyCell::new(|| {
+        match path {
+            // FIXME: unwrap
+            InputPath::Path(path) => path.parent().unwrap(),
+            InputPath::Stdin => Path::new("."),
+        }
+        .join("auxiliary")
+    });
 
     let dependencies: Vec<_> = directives
         .dependencies
@@ -187,7 +201,7 @@ fn build_compiletest_auxiliary<'a>(
     let source = std::fs::read_to_string(&path);
 
     // FIXME: unwrap
-    let crate_name = CrateName::adjust_and_parse_file_path(&path).unwrap();
+    let crate_name = CrateName::parse_from_path(&path).unwrap();
 
     // FIXME: What about instantiation???
     let mut directives =
@@ -199,7 +213,7 @@ fn build_compiletest_auxiliary<'a>(
     let flags = Flags { verbatim: verbatim_flags.as_ref(), ..flags };
 
     command::compile(
-        &path,
+        InputPath::Path(&path), // FIXME: create From-impl
         crate_name.as_ref(),
         // FIXME: Verify this works with `@compile-flags:--crate-type=proc-macro`
         // FIXME: I don't think it works rn
@@ -213,7 +227,7 @@ fn build_compiletest_auxiliary<'a>(
     // FIXME: Is this how `//@ build-aux-docs` is supposed to work?
     if document {
         command::document(
-            &path,
+            InputPath::Path(&path), // FIXME: create From-impl
             crate_name.as_ref(),
             // FIXME: Verify this works with `@compile-flags:--crate-type=proc_macro`
             // FIXME: I don't think it works rn
@@ -232,7 +246,7 @@ fn build_compiletest_auxiliary<'a>(
         // FIXME: For some reason `compiletest` doesn't support `//@ aux-crate: name=../`
         ExternCrate::Named { name, .. } => {
             // FIXME: unwrap
-            let crate_name = CrateName::adjust_and_parse_file_path(&path).unwrap();
+            let crate_name = CrateName::parse_from_path(&path).unwrap();
 
             ExternCrate::Named {
                 name,
