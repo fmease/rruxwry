@@ -1,7 +1,7 @@
 [package]
 name = "rruxwry"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
 description = "A wrapper around rust{,do}c for rust{,do}c devs"
 license = "MIT"
 publish = false
