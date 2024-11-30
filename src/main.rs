@@ -34,22 +34,19 @@ fn main() -> ExitCode {
 }
 
 fn try_main() -> error::Result {
-    let (
-        cli::Arguments {
-            path,
-            verbatim_flags,
-            open,
-            crate_name,
-            crate_type,
-            edition,
-            build_flags,
-            cross_crate,
-            compiletest,
-            program_flags,
-            color,
-        },
+    let cli::Arguments {
         toolchain,
-    ) = cli::parse();
+        path,
+        verbatim,
+        open,
+        crate_name,
+        crate_type,
+        edition,
+        build: build_flags,
+        build_mode,
+        debug: debug_flags,
+        color,
+    } = cli::arguments();
 
     match color {
         clap::ColorChoice::Always => owo_colors::set_override(true),
@@ -58,8 +55,6 @@ fn try_main() -> error::Result {
     }
 
     // FIXME: eagerly lower `-f`s to `--cfg`s here, so we properly support them in `compiletest`+command
-
-    let build_mode = compute_build_mode(cross_crate, compiletest);
 
     let edition = edition.unwrap_or_else(|| match build_mode {
         BuildMode::Default | BuildMode::CrossCrate => Edition::LATEST_STABLE,
@@ -74,38 +69,29 @@ fn try_main() -> error::Result {
         &path,
         edition,
         &build_flags.cfgs,
-        &program_flags,
+        &debug_flags,
         &mut source,
     )?;
 
     let verbatim_flags = command::VerbatimFlagsBuf {
-        arguments: verbatim_flags.iter().map(String::as_str).collect(),
+        arguments: verbatim.iter().map(String::as_str).collect(),
         environment: Vec::new(),
     };
     let flags = command::Flags {
         toolchain: toolchain.as_deref(),
         build: &build_flags,
         verbatim: verbatim_flags.as_ref(),
-        program: &program_flags,
+        debug: &debug_flags,
     };
 
     let crate_name =
         builder::build(build_mode, &path, crate_name.as_ref(), crate_type, edition, flags)?;
 
     if open {
-        command::open(crate_name.as_ref(), &program_flags)?;
+        command::open(crate_name.as_ref(), &debug_flags)?;
     }
 
     Ok(())
-}
-
-fn compute_build_mode(cross_crate: bool, compiletest: bool) -> BuildMode {
-    match (cross_crate, compiletest) {
-        (true, false) => BuildMode::CrossCrate,
-        (false, true) => BuildMode::Compiletest,
-        (false, false) => BuildMode::Default,
-        (true, true) => unreachable!(), // Already caught by `clap`.
-    }
 }
 
 fn compute_crate_name_and_type<'src>(
@@ -115,7 +101,7 @@ fn compute_crate_name_and_type<'src>(
     path: &Path,
     edition: Edition,
     cfgs: &[String],
-    program_flags: &cli::ProgramFlags,
+    debug_flags: &cli::DebugFlags,
     source: &'src mut String,
 ) -> error::Result<(CrateNameCow<'src>, CrateType)> {
     Ok(match (crate_name, crate_type) {
@@ -129,7 +115,7 @@ fn compute_crate_name_and_type<'src>(
                         // FIXME: doesn't contain `-f`s; eagerly expand them into `--cfg`s in main
                         cfgs,
                         edition,
-                        program_flags.verbose,
+                        debug_flags.verbose,
                     );
 
                     let crate_name: Option<CrateNameCow<'_>> = crate_name

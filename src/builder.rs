@@ -70,7 +70,7 @@ fn build_cross_crate(
     let dependent_crate_path =
         path.with_file_name(dependent_crate_name.as_str()).with_extension("rs");
 
-    if !flags.program.dry_run && !dependent_crate_path.exists() {
+    if !flags.debug.dry_run && !dependent_crate_path.exists() {
         // While we could omit the `extern crate` declaration in `edition >= Edition::Edition2018`,
         // we would need to recreate the file on each rerun if the edition was 2015 instead of
         // skipping that step since we wouldn't know whether the existing file if applicable was

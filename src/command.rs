@@ -37,7 +37,7 @@ pub(crate) fn compile(
     flags: Flags<'_>,
     strictness: Strictness,
 ) -> Result {
-    let mut command = Command::new("rustc", flags.program, strictness);
+    let mut command = Command::new("rustc", flags.debug, strictness);
     command.set_toolchain(flags);
     command.arg(path);
 
@@ -61,8 +61,7 @@ pub(crate) fn compile(
     command.set_backtrace_behavior(flags.build);
 
     if let Some(filter) = &flags.build.log {
-        // FIXME: DRY default value. Do this inside `cli` once it uses the builder pattern.
-        command.env("RUSTC_LOG", filter.as_deref().unwrap_or("debug"));
+        command.env("RUSTC_LOG", filter);
     }
 
     command.execute()
@@ -77,7 +76,7 @@ pub(crate) fn document(
     flags: Flags<'_>,
     strictness: Strictness,
 ) -> Result {
-    let mut command = Command::new("rustdoc", flags.program, strictness);
+    let mut command = Command::new("rustdoc", flags.debug, strictness);
     command.set_toolchain(flags);
     command.arg(path);
 
@@ -138,14 +137,13 @@ pub(crate) fn document(
     command.set_backtrace_behavior(flags.build);
 
     if let Some(filter) = &flags.build.log {
-        // FIXME: DRY default value. Do this inside `cli` once it uses the builder pattern.
-        command.env("RUSTDOC_LOG", filter.as_deref().unwrap_or("debug"));
+        command.env("RUSTDOC_LOG", filter);
     }
 
     command.execute()
 }
 
-pub(crate) fn open(crate_name: CrateNameRef<'_>, flags: &cli::ProgramFlags) -> Result {
+pub(crate) fn open(crate_name: CrateNameRef<'_>, flags: &cli::DebugFlags) -> Result {
     let path = std::env::current_dir()?.join("doc").join(crate_name.as_str()).join("index.html");
 
     if flags.verbose {
@@ -171,17 +169,13 @@ pub(crate) fn open(crate_name: CrateNameRef<'_>, flags: &cli::ProgramFlags) -> R
 
 struct Command<'a> {
     command: process::Command,
-    flags: &'a cli::ProgramFlags,
+    flags: &'a cli::DebugFlags,
     strictness: Strictness,
     uses_unstable_options: bool,
 }
 
 impl<'a> Command<'a> {
-    fn new(
-        program: impl AsRef<OsStr>,
-        flags: &'a cli::ProgramFlags,
-        strictness: Strictness,
-    ) -> Self {
+    fn new(program: impl AsRef<OsStr>, flags: &'a cli::DebugFlags, strictness: Strictness) -> Self {
         Self {
             command: process::Command::new(program),
             flags,
@@ -304,9 +298,8 @@ impl<'a> Command<'a> {
     }
 
     fn set_cap_lints(&mut self, flags: &cli::BuildFlags) {
-        if let Some(level) = &flags.cap_lints {
-            self.arg("--cap-lints");
-            self.arg(level);
+        if flags.cap_lints {
+            self.arg("--cap-lints=warn");
         }
     }
 
@@ -390,12 +383,13 @@ pub(crate) enum ExternCrate<'src> {
     Named { name: CrateNameRef<'src>, path: Option<Cow<'src, str>> },
 }
 
+// FIXME: Should we / can we move this into `cli` somehow?
 #[derive(Clone, Copy)]
 pub(crate) struct Flags<'a> {
     pub(crate) toolchain: Option<&'a OsStr>,
     pub(crate) build: &'a cli::BuildFlags,
     pub(crate) verbatim: VerbatimFlags<'a>,
-    pub(crate) program: &'a cli::ProgramFlags,
+    pub(crate) debug: &'a cli::DebugFlags,
 }
 
 #[derive(Clone, Copy)]

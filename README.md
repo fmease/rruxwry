@@ -99,7 +99,7 @@ However if that's too wordy for you and you don't care about passing arguments /
 ```
 A wrapper around rust{,do}c for rust{,do}c devs
 
-Usage: rruxwry [OPTIONS] <PATH> [-- <VERBATIM>...]
+Usage: rruxwry [OPTIONS] <PATH> [-- [VERBATIM]...]
 
 Arguments:
   <PATH>         Path to the source file
@@ -110,25 +110,25 @@ Options:
   -n, --crate-name <NAME>        Set the name of the (base) crate
   -y, --crate-type <TYPE>        Set the type of the (base) crate
   -e, --edition <EDITION>        Set the edition of the source files
-      --cfg <SPEC>               Enable a `cfg`
+      --cfg <NAME>               Enable a `cfg`
       --rev <NAME>               Enable a compiletest revision
   -f, --cargo-feature <NAME>     Enable a Cargo-like feature
   -F, --rustc-feature <NAME>     Enable an experimental rustc library or language feature
   -j, --json                     Output JSON instead of HTML
-  -v, --crate-version <VERSION>  Set the version of the (root) crate
+  -V, --crate-version <VERSION>  Set the version of the (base) crate
   -P, --private                  Document private items
   -H, --hidden                   Document hidden items
       --layout                   Document the memory layout of types
-  -D, --link-to-definition       Generate links to definitions
-      --normalize                Normalize types and constants
+      --link-to-definition       Generate links to definitions
+  -N, --normalize                Normalize types
       --theme <THEME>            Set the theme [default: ayu]
-      --cap-lints <LEVEL>        Cap lints at a level
+      --cap-lints                Cap lints at warning level
   -#, --internals                Enable rustc's `-Zverbose-internals`
       --log [<FILTER>]           Enable rust{,do}c logging. FILTER defaults to `debug`
   -B, --no-backtrace             Override `RUST_BACKTRACE` to be `0`
   -X, --cross-crate              Enable the cross-crate re-export mode
   -@, --compiletest              Enable compiletest directives
-  -V, --verbose                  Use verbose output
+  -v, --verbose                  Use verbose output
   -0, --dry-run                  Run through without making any changes
       --color <WHEN>             Control when to use color [default: auto] [possible values: auto, always, never]
   -h, --help                     Print help

@@ -7,7 +7,7 @@ license = "MIT"
 publish = false
 
 [dependencies]
-clap = { version = "4.3.8", features = ["derive"] }
+clap = { version = "4.3.8" }
 joinery = "3.1.0"
 open = "5.0.0"
 owo-colors = { version = "4.0.0-rc.1", features = ["supports-colors"] }
