@@ -3,7 +3,8 @@
 
 use attribute::Attributes;
 use builder::BuildMode;
-use data::{CrateNameBuf, CrateNameCow, CrateType, Edition};
+use cli::InputPath;
+use data::{CrateName, CrateNameBuf, CrateNameCow, CrateType, Edition};
 use diagnostic::IntoDiagnostic;
 use std::{path::Path, process::ExitCode};
 
@@ -57,8 +58,12 @@ fn try_main() -> error::Result {
         clap::ColorChoice::Auto => {}
     }
 
+    // FIXME: Smh. move this into `cli::parse`.
+    let path = cli::InputPath::parse(&path);
+
     // FIXME: eagerly lower `-f`s to `--cfg`s here, so we properly support them in `compiletest`+command
 
+    // FIXME: Smh. move this into `cli::parse`.
     let build_mode = compute_build_mode(cross_crate, compiletest);
 
     let edition = edition.unwrap_or_else(|| match build_mode {
@@ -71,7 +76,7 @@ fn try_main() -> error::Result {
         crate_name,
         crate_type,
         build_mode,
-        &path,
+        path,
         edition,
         &build_flags.cfgs,
         &program_flags,
@@ -90,7 +95,7 @@ fn try_main() -> error::Result {
     };
 
     let crate_name =
-        builder::build(build_mode, &path, crate_name.as_ref(), crate_type, edition, flags)?;
+        builder::build(build_mode, path, crate_name.as_ref(), crate_type, edition, flags)?;
 
     if open {
         command::open(crate_name.as_ref(), &program_flags)?;
@@ -112,7 +117,7 @@ fn compute_crate_name_and_type<'src>(
     crate_name: Option<CrateNameBuf>,
     crate_type: Option<CrateType>,
     build_mode: BuildMode,
-    path: &Path,
+    path: InputPath<'_>,
     edition: Edition,
     cfgs: &[String],
     program_flags: &cli::ProgramFlags,
@@ -123,7 +128,10 @@ fn compute_crate_name_and_type<'src>(
         (crate_name, crate_type) => {
             let (crate_name, crate_type): (Option<CrateNameCow<'_>>, _) = match build_mode {
                 BuildMode::Default | BuildMode::CrossCrate => {
-                    *source = std::fs::read_to_string(path)?;
+                    *source = match path {
+                        InputPath::Path(path) => std::fs::read_to_string(path)?,
+                        InputPath::Stdin => todo!(), // FIXME
+                    };
                     let attributes = Attributes::parse(
                         source,
                         // FIXME: doesn't contain `-f`s; eagerly expand them into `--cfg`s in main
@@ -142,8 +150,8 @@ fn compute_crate_name_and_type<'src>(
             };
 
             // FIXME: unwrap
-            let crate_name = crate_name
-                .unwrap_or_else(|| CrateNameBuf::adjust_and_parse_file_path(path).unwrap().into());
+            let crate_name =
+                crate_name.unwrap_or_else(|| CrateNameCow::parse_from_input_path(path).unwrap());
             let crate_type = crate_type.unwrap_or_default();
 
             (crate_name, crate_type)

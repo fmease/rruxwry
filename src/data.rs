@@ -1,4 +1,11 @@
-use std::{borrow::Cow, fmt, path::Path, str::FromStr};
+use std::{
+    borrow::Cow,
+    fmt,
+    path::{self, Path},
+    str::FromStr,
+};
+
+use crate::cli::InputPath;
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default)]
 pub(crate) enum Edition {
@@ -128,14 +135,11 @@ impl<'src> CrateNameRef<'src> {
 }
 
 impl CrateNameBuf {
-    pub(crate) fn adjust_and_parse_file_path(path: &Path) -> Result<Self, ()> {
-        path.file_stem()
-            .and_then(|name| name.to_str())
-            .ok_or(())
-            .and_then(Self::adjust_and_parse)
+    pub(crate) fn parse_from_path(path: &Path) -> Result<Self, ()> {
+        path.file_stem().and_then(|name| name.to_str()).ok_or(()).and_then(Self::parse_relaxed)
     }
 
-    pub(crate) fn adjust_and_parse(source: &str) -> Result<Self, ()> {
+    pub(crate) fn parse_relaxed(source: &str) -> Result<Self, ()> {
         // NB: See the comment over in `CrateNameRef::parse` for why this makes sense.
         if !source.is_empty()
             && source.chars().all(|char| char.is_alphanumeric() || char == '_' || char == '-')
@@ -143,6 +147,17 @@ impl CrateNameBuf {
             Ok(Self::new_unchecked(source.replace('-', "_")))
         } else {
             Err(())
+        }
+    }
+}
+
+impl<'src> CrateNameCow<'src> {
+    const FALLBACK_CRATE_NAME: &'static str = "rust_out";
+
+    pub(crate) fn parse_from_input_path(path: InputPath<'_>) -> Result<Self, ()> {
+        match path {
+            InputPath::Path(path) => CrateNameBuf::parse_from_path(path).map(Into::into),
+            InputPath::Stdin => Ok(CrateName::new_unchecked(Self::FALLBACK_CRATE_NAME).into()),
         }
     }
 }
