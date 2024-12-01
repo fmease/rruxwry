@@ -1,6 +1,6 @@
 //! Low-level build commands.
 //!
-//! The high-level build commands are defined in [`crate::builder`].
+//! The high-level build operations are defined in [`crate::operate`].
 
 // Note that we try to avoid generating unnecessary flags where possible even if that means
 // doing more work on our side. The main motivation for this is being able to just copy/paste
@@ -10,10 +10,10 @@
 //        as well as those passed via the `RUST{,DOC}FLAGS` env vars.
 
 use crate::{
-    cli,
-    data::{CrateName, CrateNameRef, CrateType, Edition},
+    data::{CrateName, CrateNameRef, CrateType, DocBackend, Edition},
     diagnostic::info,
     error::Result,
+    interface,
     utility::default,
 };
 use owo_colors::OwoColorize;
@@ -28,7 +28,7 @@ use std::{
 
 mod environment;
 
-pub(crate) fn compile(
+pub(super) fn compile(
     path: &Path,
     crate_name: CrateNameRef<'_>,
     crate_type: CrateType,
@@ -37,113 +37,118 @@ pub(crate) fn compile(
     flags: Flags<'_>,
     strictness: Strictness,
 ) -> Result {
-    let mut command = Command::new("rustc", flags.debug, strictness);
-    command.set_toolchain(flags);
-    command.arg(path);
+    let mut cmd = Command::new("rustc", flags.debug, strictness);
+    cmd.set_toolchain(flags);
+    cmd.arg(path);
 
-    command.set_crate_type(crate_type);
-    command.set_crate_name(crate_name, path);
-    command.set_edition(edition);
+    cmd.set_crate_type(crate_type);
+    cmd.set_crate_name(crate_name, path);
+    cmd.set_edition(edition);
 
-    command.set_extern_crates(extern_crates);
+    cmd.set_extern_crates(extern_crates);
 
-    command.set_cfgs(flags.build);
-    command.set_rustc_features(flags.build);
-    command.set_cap_lints(flags.build);
-    command.set_internals_mode(flags.build);
+    cmd.set_cfgs(flags.build);
+    cmd.set_rustc_features(flags.build);
+    cmd.set_cap_lints(flags.build);
+    cmd.set_internals_mode(flags.build);
 
-    command.set_verbatim_flags(flags.verbatim);
+    cmd.set_verbatim_flags(flags.verbatim);
 
     if let Some(flags) = environment::rustc_flags() {
-        command.args(flags);
+        cmd.args(flags);
     }
 
-    command.set_backtrace_behavior(flags.build);
+    cmd.set_backtrace_behavior(flags.build);
 
     if let Some(filter) = &flags.build.log {
-        command.env("RUSTC_LOG", filter);
+        cmd.env("RUSTC_LOG", filter);
     }
 
-    command.execute()
+    cmd.execute()
 }
 
-pub(crate) fn document(
+pub(super) fn document(
     path: &Path,
     crate_name: CrateNameRef<'_>,
     crate_type: CrateType,
     edition: Edition,
     extern_crates: &[ExternCrate<'_>],
     flags: Flags<'_>,
+    // FIXME: temporary; integrate into flags: Flags<D> above (D discriminant)
+    doc_flags: &interface::DocFlags,
     strictness: Strictness,
 ) -> Result {
-    let mut command = Command::new("rustdoc", flags.debug, strictness);
-    command.set_toolchain(flags);
-    command.arg(path);
+    let mut cmd = Command::new("rustdoc", flags.debug, strictness);
+    cmd.set_toolchain(flags);
+    cmd.arg(path);
 
-    command.set_crate_name(crate_name, path);
-    command.set_crate_type(crate_type);
-    command.set_edition(edition);
+    cmd.set_crate_name(crate_name, path);
+    cmd.set_crate_type(crate_type);
+    cmd.set_edition(edition);
 
-    command.set_extern_crates(extern_crates);
+    cmd.set_extern_crates(extern_crates);
 
-    if flags.build.json {
-        command.arg("--output-format");
-        command.arg("json");
-        command.uses_unstable_options = true;
+    if let DocBackend::Json = doc_flags.backend {
+        cmd.arg("--output-format=json");
+        cmd.uses_unstable_options = true;
     }
 
-    if flags.build.private {
-        command.arg("--document-private-items");
+    if let Some(crate_version) = &doc_flags.crate_version {
+        cmd.arg("--crate-version");
+        cmd.arg(crate_version);
     }
 
-    if flags.build.hidden {
-        command.arg("--document-hidden-items");
-        command.uses_unstable_options = true;
+    if doc_flags.private {
+        cmd.arg("--document-private-items");
     }
 
-    if flags.build.layout {
-        command.arg("--show-type-layout");
-        command.uses_unstable_options = true;
+    if doc_flags.hidden {
+        cmd.arg("--document-hidden-items");
+        cmd.uses_unstable_options = true;
     }
 
-    if flags.build.link_to_definition {
-        command.arg("--generate-link-to-definition");
-        command.uses_unstable_options = true;
+    if doc_flags.layout {
+        cmd.arg("--show-type-layout");
+        cmd.uses_unstable_options = true;
     }
 
-    if flags.build.normalize {
-        command.arg("-Znormalize-docs");
+    if doc_flags.link_to_definition {
+        cmd.arg("--generate-link-to-definition");
+        cmd.uses_unstable_options = true;
     }
 
-    if let Some(crate_version) = &flags.build.crate_version {
-        command.arg("--crate-version");
-        command.arg(crate_version);
+    if doc_flags.normalize {
+        cmd.arg("-Znormalize-docs");
     }
 
-    command.arg("--default-theme");
-    command.arg(&flags.build.theme);
+    cmd.arg("--default-theme");
+    cmd.arg(&doc_flags.theme);
 
-    command.set_cfgs(flags.build);
-    command.set_rustc_features(flags.build);
-    command.set_cap_lints(flags.build);
-    command.set_internals_mode(flags.build);
+    cmd.set_cfgs(flags.build);
+    cmd.set_rustc_features(flags.build);
+    cmd.set_cap_lints(flags.build);
+    cmd.set_internals_mode(flags.build);
 
-    command.set_verbatim_flags(flags.verbatim);
+    cmd.set_verbatim_flags(flags.verbatim);
 
     if let Some(flags) = environment::rustdoc_flags() {
-        command.args(flags);
+        cmd.args(flags);
     }
 
-    command.set_backtrace_behavior(flags.build);
+    cmd.set_backtrace_behavior(flags.build);
 
     if let Some(filter) = &flags.build.log {
-        command.env("RUSTDOC_LOG", filter);
+        cmd.env("RUSTDOC_LOG", filter);
     }
 
-    command.execute()
+    cmd.execute()
 }
 
-pub(crate) fn open(crate_name: CrateNameRef<'_>, flags: &cli::DebugFlags) -> Result {
+pub(crate) fn execute(program: impl AsRef<OsStr>, flags: &interface::DebugFlags) -> Result {
+    Command::new(program, flags, Strictness::Strict).execute()
+}
+
+pub(crate) fn open(crate_name: CrateNameRef<'_>, flags: &interface::DebugFlags) -> Result {
     let path = std::env::current_dir()?.join("doc").join(crate_name.as_str()).join("index.html");
 
     if flags.verbose {
@@ -169,13 +174,17 @@ pub(crate) fn open(crate_name: CrateNameRef<'_>, flags: &cli::DebugFlags) -> Res
 
 struct Command<'a> {
     command: process::Command,
-    flags: &'a cli::DebugFlags,
+    flags: &'a interface::DebugFlags,
     strictness: Strictness,
     uses_unstable_options: bool,
 }
 
 impl<'a> Command<'a> {
-    fn new(program: impl AsRef<OsStr>, flags: &'a cli::DebugFlags, strictness: Strictness) -> Self {
+    fn new(
+        program: impl AsRef<OsStr>,
+        flags: &'a interface::DebugFlags,
+        strictness: Strictness,
+    ) -> Self {
         Self {
             command: process::Command::new(program),
             flags,
@@ -209,6 +218,8 @@ impl<'a> Command<'a> {
     }
 
     fn set_toolchain(&mut self, flags: Flags<'_>) {
+        // FIXME: Consider only setting the (rustup) toolchain if the env var `RUSTUP_HOME` exists.
+        //        And emitting a warning further up the stack of course.
         if let Some(toolchain) = flags.toolchain {
             self.arg(toolchain);
         }
@@ -267,37 +278,38 @@ impl<'a> Command<'a> {
         }
     }
 
-    fn set_internals_mode(&mut self, flags: &cli::BuildFlags) {
+    fn set_internals_mode(&mut self, flags: &interface::BuildFlags) {
         if flags.rustc_verbose_internals {
             self.arg("-Zverbose-internals");
         }
     }
 
-    fn set_backtrace_behavior(&mut self, flags: &cli::BuildFlags) {
+    fn set_backtrace_behavior(&mut self, flags: &interface::BuildFlags) {
         if flags.no_backtrace {
             self.env("RUST_BACKTRACE", "0");
         }
     }
 
-    fn set_cfgs(&mut self, flags: &cli::BuildFlags) {
+    fn set_cfgs(&mut self, flags: &interface::BuildFlags) {
         for cfg in &flags.cfgs {
             self.arg("--cfg");
             self.arg(cfg);
         }
         for feature in &flags.cargo_features {
             // FIXME: Warn on conflicts with `cfgs` from `self.arguments.cfgs`.
+            // FIXME: collapse
             self.arg("--cfg");
             self.arg(format!("feature=\"{feature}\""));
         }
     }
 
-    fn set_rustc_features(&mut self, flags: &cli::BuildFlags) {
+    fn set_rustc_features(&mut self, flags: &interface::BuildFlags) {
         for feature in &flags.rustc_features {
             self.arg(format!("-Zcrate-attr=feature({feature})"));
         }
     }
 
-    fn set_cap_lints(&mut self, flags: &cli::BuildFlags) {
+    fn set_cap_lints(&mut self, flags: &interface::BuildFlags) {
         if flags.cap_lints {
             self.arg("--cap-lints=warn");
         }
@@ -387,17 +399,19 @@ pub(crate) enum ExternCrate<'src> {
 #[derive(Clone, Copy)]
 pub(crate) struct Flags<'a> {
     pub(crate) toolchain: Option<&'a OsStr>,
-    pub(crate) build: &'a cli::BuildFlags,
+    pub(crate) build: &'a interface::BuildFlags,
     pub(crate) verbatim: VerbatimFlags<'a>,
-    pub(crate) debug: &'a cli::DebugFlags,
+    pub(crate) debug: &'a interface::DebugFlags,
 }
 
+// FIXME: bad name, env is not "flags"
 #[derive(Clone, Copy)]
 pub(crate) struct VerbatimFlags<'a> {
     pub(crate) arguments: &'a [&'a str],
     pub(crate) environment: &'a [(&'a str, Option<&'a str>)],
 }
 
+// FIXME: bad name, env is not "flags"
 #[derive(Clone, Default)]
 pub(crate) struct VerbatimFlagsBuf<'a> {
     pub(crate) arguments: Vec<&'a str>,

@@ -1,11 +1,15 @@
 //! The parser of `ui_test`-style `compiletest`, `htmldocck` and `jsondocck` directives.
 
+// FIXME: What does compiletest do for `//@ revisions: off` `//@[off] undefined`? We warn.
+// FIXME: Does compiletest permit `//@[pre] check-pass` `//@ revisions: pre`?
+// FIXME: We should warn on `//@[undeclared] compile-flags:`.
+// FIXME: What does compiletest do on `//@ revisions: dupe dupe`? We should warn.
+
 use crate::{
     command::{ExternCrate, VerbatimFlagsBuf},
     data::{CrateNameRef, Edition},
     diagnostic::warning,
-    parser,
-    utility::default,
+    utility::{default, parse},
 };
 use joinery::JoinableIterator;
 use ra_ap_rustc_lexer::TokenKind;
@@ -83,20 +87,20 @@ impl<'src> Deref for Directives<'src> {
     }
 }
 
-impl<'src> DerefMut for Directives<'src> {
+impl DerefMut for Directives<'_> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.instantiated
     }
 }
 
 struct DirectivesParser<'src> {
-    parser: parser::SourceFileParser<'src>,
+    parser: parse::SourceFileParser<'src>,
     directives: Directives<'src>,
 }
 
 impl<'src> DirectivesParser<'src> {
     fn new(source: &'src str) -> Self {
-        Self { parser: parser::SourceFileParser::new(source), directives: default() }
+        Self { parser: parse::SourceFileParser::new(source), directives: default() }
     }
 
     // FIXME: Parse htmldocck/jsondocck queries
@@ -179,6 +183,8 @@ struct Directive<'src> {
     kind: DirectiveKind<'src>,
 }
 
+// FIXME: Can somehow get rid of this? By merging "adjoin" & "parse-single" I guess?
+//        This isn't scalable rn
 #[derive(Clone)]
 enum DirectiveKind<'src> {
     AuxBuild { path: &'src str },
