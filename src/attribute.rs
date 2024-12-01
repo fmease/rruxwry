@@ -1,8 +1,10 @@
 use crate::{
     data::{CrateName, CrateNameRef, CrateType, Edition},
     diagnostic::info,
-    parser::{At, SourceFileParser, Span},
-    utility::SmallVec,
+    utility::{
+        SmallVec,
+        parse::{At, SourceFileParser, Span},
+    },
 };
 use ra_ap_rustc_lexer::{DocStyle, LiteralKind, Token, TokenKind};
 use std::ops::ControlFlow;

@@ -5,7 +5,7 @@ pub(crate) type Result<T = (), E = Error> = std::result::Result<T, E>;
 pub(crate) enum Error {
     Io(std::io::Error),
     Process(std::process::ExitStatusError),
-    Build(Box<crate::builder::Error>),
+    Build(Box<crate::operate::Error>),
 }
 
 impl From<std::io::Error> for Error {
@@ -20,8 +20,8 @@ impl From<std::process::ExitStatusError> for Error {
     }
 }
 
-impl From<crate::builder::Error> for Error {
-    fn from(error: crate::builder::Error) -> Self {
+impl From<crate::operate::Error> for Error {
+    fn from(error: crate::operate::Error) -> Self {
         Self::Build(Box::new(error))
     }
 }

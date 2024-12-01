@@ -1,5 +1,7 @@
 use std::borrow::Cow;
 
+pub(crate) mod parse;
+
 pub(crate) type Str = Cow<'static, str>;
 
 pub(crate) fn default<T: Default>() -> T {

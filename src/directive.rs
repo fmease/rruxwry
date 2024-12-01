@@ -4,8 +4,7 @@ use crate::{
     command::{ExternCrate, VerbatimFlagsBuf},
     data::{CrateNameRef, Edition},
     diagnostic::warning,
-    parser,
-    utility::default,
+    utility::{default, parse},
 };
 use joinery::JoinableIterator;
 use ra_ap_rustc_lexer::TokenKind;
@@ -90,13 +89,13 @@ impl<'src> DerefMut for Directives<'src> {
 }
 
 struct DirectivesParser<'src> {
-    parser: parser::SourceFileParser<'src>,
+    parser: parse::SourceFileParser<'src>,
     directives: Directives<'src>,
 }
 
 impl<'src> DirectivesParser<'src> {
     fn new(source: &'src str) -> Self {
-        Self { parser: parser::SourceFileParser::new(source), directives: default() }
+        Self { parser: parse::SourceFileParser::new(source), directives: default() }
     }
 
     // FIXME: Parse htmldocck/jsondocck queries
