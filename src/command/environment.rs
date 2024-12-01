@@ -1,3 +1,5 @@
+//! Dealing with environment variables.
+
 use rustc_hash::FxHashMap;
 use std::{
     ffi::{OsStr, OsString},
@@ -6,7 +8,7 @@ use std::{
 
 type Environment = FxHashMap<OsString, OsString>;
 
-pub(crate) fn rustc_flags<'a>() -> Option<&'a [String]> {
+pub(super) fn rustc_flags<'a>() -> Option<&'a [String]> {
     static RUSTFLAGS: LazyLock<Option<Vec<String>>> = LazyLock::new(|| {
         parse_flags(
             OsStr::new("RUSTFLAGS"),
@@ -18,7 +20,7 @@ pub(crate) fn rustc_flags<'a>() -> Option<&'a [String]> {
     RUSTFLAGS.as_deref()
 }
 
-pub(crate) fn rustdoc_flags<'a>() -> Option<&'a [String]> {
+pub(super) fn rustdoc_flags<'a>() -> Option<&'a [String]> {
     static RUSTDOCFLAGS: LazyLock<Option<Vec<String>>> = LazyLock::new(|| {
         parse_flags(OsStr::new("RUSTDOCFLAGS"), &[OsStr::new("RUSTDOC_FLAGS")], &ENVIRONMENT)
     });

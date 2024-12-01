@@ -1,6 +1,5 @@
 #![feature(decl_macro)]
 #![feature(exit_status_error)]
-#![feature(if_let_guard)]
 #![feature(impl_trait_in_assoc_type)]
 #![feature(let_chains)]
 #![feature(os_str_display)]
@@ -8,24 +7,23 @@
 #![deny(unused_must_use, rust_2018_idioms)]
 
 use attribute::Attributes;
-use builder::BuildMode;
 use data::{CrateNameBuf, CrateNameCow, CrateType, Edition};
 use diagnostic::IntoDiagnostic;
 use std::{path::Path, process::ExitCode};
 
 mod attribute;
-mod builder;
-mod cli;
 mod command;
 mod data;
 mod diagnostic;
 mod directive;
 mod error;
-mod parser;
+mod interface;
+mod operate;
 mod utility;
 
 // FIXME: respect `compile-flags: --test`
 // FIXME: Add `--all-revs`.
+// FIXME: Support for `-r`/`--release` maybe?
 
 fn main() -> ExitCode {
     let result = try_main();
@@ -40,97 +38,119 @@ fn main() -> ExitCode {
 }
 
 fn try_main() -> error::Result {
-    let cli::Arguments {
-        toolchain,
-        path,
-        verbatim,
-        open,
-        crate_name,
-        crate_type,
-        edition,
-        build: build_flags,
-        build_mode,
-        debug: debug_flags,
-        color,
-    } = cli::arguments();
+    let args = interface::arguments();
 
-    match color {
+    match args.color {
         clap::ColorChoice::Always => owo_colors::set_override(true),
         clap::ColorChoice::Never => owo_colors::set_override(false),
         clap::ColorChoice::Auto => {}
     }
 
-    // FIXME: eagerly lower `-f`s to `--cfg`s here, so we properly support them in `compiletest`+command
+    // FIXME: eagerly lower `-f`s to `--cfg`s here (or rather in `cli`?),
+    // so we properly support them in `compiletest`+command
 
-    let edition = edition.unwrap_or_else(|| match build_mode {
-        BuildMode::Default | BuildMode::CrossCrate => Edition::LATEST_STABLE,
-        BuildMode::Compiletest { .. } => Edition::RUSTC_DEFAULT,
+    // FIXME: this is awkward
+    let edition = args.edition.unwrap_or_else(|| match args.command {
+        interface::Command::Build { mode, .. } => mode.edition(),
+        interface::Command::Doc { mode, .. } => mode.edition(),
     });
 
     let mut source = String::new();
     let (crate_name, crate_type) = compute_crate_name_and_type(
-        crate_name,
-        crate_type,
-        build_mode,
-        &path,
+        args.crate_name,
+        args.crate_type,
+        // FIXME: this is awkward
+        match args.command {
+            interface::Command::Build { mode, .. } => {
+                matches!(mode, operate::BuildMode::Compiletest)
+            }
+            interface::Command::Doc { mode, .. } => matches!(mode, operate::DocMode::Compiletest),
+        },
+        &args.path,
         edition,
-        &build_flags.cfgs,
-        &debug_flags,
+        &args.build.cfgs,
+        &args.debug,
         &mut source,
     )?;
 
+    // FIXME: this is akward ... can we do this inside cli smh (not the ref op ofc)
     let verbatim_flags = command::VerbatimFlagsBuf {
-        arguments: verbatim.iter().map(String::as_str).collect(),
+        arguments: args.verbatim.iter().map(String::as_str).collect(),
         environment: Vec::new(),
     };
+    // FIXME: this is akward ... can we do this inside cli smh (not the ref op ofc)
     let flags = command::Flags {
-        toolchain: toolchain.as_deref(),
-        build: &build_flags,
+        toolchain: args.toolchain.as_deref(),
+        build: &args.build,
         verbatim: verbatim_flags.as_ref(),
-        debug: &debug_flags,
+        debug: &args.debug,
     };
 
-    let crate_name =
-        builder::build(build_mode, &path, crate_name.as_ref(), crate_type, edition, flags)?;
+    match args.command {
+        interface::Command::Build { run, mode } => {
+            operate::build(mode, &args.path, crate_name.as_ref(), crate_type, edition, flags)?;
 
-    if open {
-        command::open(crate_name.as_ref(), &debug_flags)?;
+            if run {
+                command::execute(Path::new(".").join(crate_name.as_str()), flags.debug)?;
+            }
+        }
+        interface::Command::Doc { open, mode, flags: doc_flags } => {
+            let crate_name = operate::document(
+                mode,
+                &args.path,
+                crate_name.as_ref(),
+                crate_type,
+                edition,
+                flags,
+                &doc_flags,
+            )?;
+
+            if open {
+                command::open(crate_name.as_ref(), &args.debug)?;
+            }
+        }
     }
 
     Ok(())
 }
 
+// FIXME: this is awkward
 fn compute_crate_name_and_type<'src>(
     crate_name: Option<CrateNameBuf>,
     crate_type: Option<CrateType>,
-    build_mode: BuildMode,
+    compiletest: bool,
     path: &Path,
     edition: Edition,
     cfgs: &[String],
-    debug_flags: &cli::DebugFlags,
+    debug_flags: &interface::DebugFlags,
     source: &'src mut String,
 ) -> error::Result<(CrateNameCow<'src>, CrateType)> {
     Ok(match (crate_name, crate_type) {
         (Some(crate_name), Some(crate_type)) => (crate_name.into(), crate_type),
         (crate_name, crate_type) => {
-            let (crate_name, crate_type): (Option<CrateNameCow<'_>>, _) = match build_mode {
-                BuildMode::Default | BuildMode::CrossCrate => {
-                    *source = std::fs::read_to_string(path)?;
-                    let attributes = Attributes::parse(
-                        source,
-                        // FIXME: doesn't contain `-f`s; eagerly expand them into `--cfg`s in main
-                        cfgs,
-                        edition,
-                        debug_flags.verbose,
-                    );
+            // FIXME: Not computing the crate name in compiletest mode is actually incorrect
+            // since that leads to --open/--run failing to find the (correct) artifact.
+            // So either use `-o` to force the location and get rid of the attr parsing code
+            // or try to find it unconditionally.
+            // NOTE: However, I don't want us to open the source file *twice* in compiletest
+            // mode (once for attrs & once for directives). We should do it once if we go with
+            // that approach
+            let (crate_name, crate_type): (Option<CrateNameCow<'_>>, _) = if compiletest {
+                (crate_name.map(Into::into), crate_type)
+            } else {
+                *source = std::fs::read_to_string(path)?;
+                let attributes = Attributes::parse(
+                    source,
+                    // FIXME: doesn't contain `-f`s; eagerly expand them into `--cfg`s in main
+                    cfgs,
+                    edition,
+                    debug_flags.verbose,
+                );
 
-                    let crate_name: Option<CrateNameCow<'_>> = crate_name
-                        .map(Into::into)
-                        .or_else(|| attributes.crate_name.map(Into::into));
+                let crate_name: Option<CrateNameCow<'_>> =
+                    crate_name.map(Into::into).or_else(|| attributes.crate_name.map(Into::into));
 
-                    (crate_name, crate_type.or(attributes.crate_type))
-                }
-                BuildMode::Compiletest { .. } => (crate_name.map(Into::into), crate_type),
+                (crate_name, crate_type.or(attributes.crate_type))
             };
 
             // FIXME: unwrap

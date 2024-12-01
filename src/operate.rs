@@ -1,4 +1,4 @@
-//! High-level build commands.
+//! High-level build operations.
 //!
 //! The low-level build commands are defined in [`crate::command`].
 
@@ -14,27 +14,114 @@ use joinery::JoinableIterator;
 use rustc_hash::FxHashSet;
 use std::{borrow::Cow, cell::LazyCell, mem, path::Path};
 
-pub(crate) fn build<'a>(
+pub(crate) fn build(
     mode: BuildMode,
     path: &Path,
-    crate_name: CrateNameRef<'a>,
+    crate_name: CrateNameRef<'_>,
     crate_type: CrateType,
     edition: Edition,
     flags: Flags<'_>,
-) -> Result<CrateNameCow<'a>> {
+) -> Result {
     match mode {
         BuildMode::Default => build_default(path, crate_name, crate_type, edition, flags),
-        BuildMode::CrossCrate => build_cross_crate(path, crate_name, crate_type, edition, flags),
         BuildMode::Compiletest => build_compiletest(path, crate_name, edition, flags),
     }
 }
 
-fn build_default<'a>(
+fn build_default(
+    path: &Path,
+    crate_name: CrateNameRef<'_>,
+    crate_type: CrateType,
+    edition: Edition,
+    flags: Flags<'_>,
+) -> Result {
+    command::compile(
+        path,
+        crate_name,
+        crate_type,
+        edition,
+        extern_prelude_for(crate_type),
+        flags,
+        Strictness::Lenient,
+    )
+}
+
+fn build_compiletest(
+    path: &Path,
+    crate_name: CrateNameRef<'_>,
+    // FIXME: use it
+    _edition: Edition,
+    flags: Flags<'_>,
+) -> Result {
+    // FIXME: Add a flag `--all-revs`.
+    // FIXME: Make sure `//@ compile-flags: --extern name` works as expected
+    let source = std::fs::read_to_string(path)?;
+    let directives = Directives::parse(&source);
+
+    // FIXME: We should also store Cargo-like features here after having converted them to
+    // cfg specs NOTE: This will be fixed once we eagerly expand `-f` to `--cfg`.
+    // FIXME: Is it actually possible to write `//[feature="name"]@` and have compiletest understand it?
+    let mut revisions = FxHashSet::default();
+
+    for revision in &flags.build.revisions {
+        if !directives.revisions.contains(revision.as_str()) {
+            let error = Error::UnknownRevision {
+                unknown: revision.clone(),
+                available: directives.revisions.iter().map(ToString::to_string).collect(),
+            };
+            return Err(error.into());
+        }
+
+        revisions.insert(revision.as_str());
+    }
+
+    revisions.extend(flags.build.cfgs.iter().map(String::as_str));
+
+    let mut directives = directives.into_instantiated(&revisions);
+
+    let verbatim_flags = mem::take(&mut directives.verbatim_flags).extended(flags.verbatim);
+    let flags = Flags { verbatim: verbatim_flags.as_ref(), ..flags };
+
+    command::compile(
+        path,
+        crate_name,
+        default(), // FIXME: respect `@compile-flags: --crate-type` (do we???)
+        directives.edition.unwrap_or(Edition::RUSTC_DEFAULT),
+        &[], // FIXME
+        flags,
+        Strictness::Strict,
+    )
+}
+
+pub(crate) fn document<'a>(
+    mode: DocMode,
     path: &Path,
     crate_name: CrateNameRef<'a>,
     crate_type: CrateType,
     edition: Edition,
     flags: Flags<'_>,
+    // FIXME: temporary
+    doc_flags: &crate::interface::DocFlags,
+) -> Result<CrateNameCow<'a>> {
+    match mode {
+        DocMode::Default => {
+            document_default(path, crate_name, crate_type, edition, flags, doc_flags)
+        }
+        DocMode::CrossCrate => {
+            document_cross_crate(path, crate_name, crate_type, edition, flags, doc_flags)
+        }
+        DocMode::Compiletest => document_compiletest(path, crate_name, edition, flags, doc_flags),
+    }
+}
+
+fn document_default<'a>(
+    path: &Path,
+    crate_name: CrateNameRef<'a>,
+    crate_type: CrateType,
+    edition: Edition,
+    flags: Flags<'_>,
+    // FIXME: temporary
+    doc_flags: &crate::interface::DocFlags,
 ) -> Result<CrateNameCow<'a>> {
     command::document(
         path,
@@ -43,18 +130,21 @@ fn build_default<'a>(
         edition,
         extern_prelude_for(crate_type),
         flags,
+        doc_flags,
         Strictness::Lenient,
     )?;
 
     Ok(crate_name.map(Cow::Borrowed))
 }
 
-fn build_cross_crate(
+fn document_cross_crate(
     path: &Path,
     crate_name: CrateNameRef<'_>,
     crate_type: CrateType,
     edition: Edition,
     flags: Flags<'_>,
+    // FIXME: temporary
+    doc_flags: &crate::interface::DocFlags,
 ) -> Result<CrateNameCow<'static>> {
     command::compile(
         path,
@@ -88,6 +178,7 @@ fn build_cross_crate(
         edition,
         &[ExternCrate::Named { name: crate_name.as_ref(), path: None }],
         flags,
+        doc_flags,
         Strictness::Lenient,
     )?;
 
@@ -105,11 +196,15 @@ fn extern_prelude_for(crate_type: CrateType) -> &'static [ExternCrate<'static>] 
     }
 }
 
-fn build_compiletest<'a>(
+fn document_compiletest<'a>(
     path: &Path,
     crate_name: CrateNameRef<'a>,
-    _edition: Edition, // FIXME: should we respect the edition or should we reject it with `clap`?
+    // FIXME: respect the CLI edition, it should override `//@edition`
+    //        yes, it would lead to a failure  for e.g. `//@compile-args:--edition`
+    _edition: Edition,
     flags: Flags<'_>,
+    // FIXME: tempory
+    doc_flags: &crate::interface::DocFlags,
 ) -> Result<CrateNameCow<'a>> {
     // FIXME: Add a flag `--all-revs`.
     // FIXME: Make sure `//@ compile-flags: --extern name` works as expected
@@ -144,11 +239,12 @@ fn build_compiletest<'a>(
         .dependencies
         .iter()
         .map(|dependency| {
-            build_compiletest_auxiliary(
+            document_compiletest_auxiliary(
                 dependency,
                 &auxiliary_base_path,
                 directives.build_aux_docs,
                 flags,
+                doc_flags,
             )
         })
         .collect::<Result<_>>()?;
@@ -159,10 +255,11 @@ fn build_compiletest<'a>(
     command::document(
         path,
         crate_name,
-        default(), // FIXME: respect `@compile-flags: --crate-type`
+        default(), // FIXME: respect `@compile-flags: --crate-type` (do we???)
         directives.edition.unwrap_or(Edition::RUSTC_DEFAULT),
         &dependencies,
         flags,
+        doc_flags,
         Strictness::Strict,
     )?;
 
@@ -170,11 +267,13 @@ fn build_compiletest<'a>(
 }
 
 // FIXME: Support nested auxiliaries!
-fn build_compiletest_auxiliary<'a>(
+fn document_compiletest_auxiliary<'a>(
     extern_crate: &ExternCrate<'a>,
     base_path: &Path,
     document: bool,
     flags: Flags<'_>,
+    // FIXME: temporary
+    doc_flags: &crate::interface::DocFlags,
 ) -> Result<ExternCrate<'a>> {
     let path = match extern_crate {
         ExternCrate::Unnamed { path } => base_path.join(path),
@@ -221,6 +320,7 @@ fn build_compiletest_auxiliary<'a>(
             edition,
             &[],
             flags,
+            doc_flags,
             Strictness::Strict,
         )?;
     }
@@ -244,12 +344,38 @@ fn build_compiletest_auxiliary<'a>(
     })
 }
 
-// FIXME: generalize to rustc vs rustdoc
+// FIXME: Is there are way to consolidate DocMode and BuildMode?
+//        Plz DRY the compiletest edition code.
+
 #[derive(Clone, Copy)]
-pub(crate) enum BuildMode {
+pub(crate) enum DocMode {
     Default,
     CrossCrate,
     Compiletest,
+}
+
+impl DocMode {
+    pub(crate) fn edition(self) -> Edition {
+        match self {
+            Self::Default | Self::CrossCrate => Edition::LATEST_STABLE,
+            Self::Compiletest => Edition::RUSTC_DEFAULT,
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+pub(crate) enum BuildMode {
+    Default,
+    Compiletest,
+}
+
+impl BuildMode {
+    pub(crate) fn edition(self) -> Edition {
+        match self {
+            Self::Default => Edition::LATEST_STABLE,
+            Self::Compiletest => Edition::RUSTC_DEFAULT,
+        }
+    }
 }
 
 pub(crate) enum Error {
@@ -265,7 +391,7 @@ impl IntoDiagnostic for Error {
 
                 error(format!("unknown revision `{unknown}`"))
                     .note(format!("available revisions are: {available}"))
-                    .note("you can use `--cfg` over `--rev` to suppress this check".to_string())
+                    .note("you can use `--cfg` over `--rev` to suppress this check")
             }
         }
     }
