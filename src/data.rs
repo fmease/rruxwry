@@ -1,8 +1,9 @@
 use std::{borrow::Cow, fmt, path::Path, str::FromStr};
 
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default)]
+use crate::utility::parse;
+
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum Edition {
-    #[default]
     Edition2015,
     Edition2018,
     Edition2021,
@@ -10,8 +11,9 @@ pub(crate) enum Edition {
 }
 
 impl Edition {
-    pub(crate) const LATEST_STABLE: Self = Self::Edition2021;
-    pub(crate) const BLEEDING_EDGE: Self = Self::Edition2024;
+    pub(crate) const RUSTC_DEFAULT: Self = Self::Edition2015;
+    pub(crate) const LATEST_STABLE: Self = Self::Edition2024;
+    pub(crate) const BLEEDING_EDGE: Self = Self::LATEST_STABLE;
 
     pub(crate) fn is_stable(self) -> bool {
         self <= Self::LATEST_STABLE
@@ -24,11 +26,6 @@ impl Edition {
             Self::Edition2021 => "2021",
             Self::Edition2024 => "2024",
         }
-    }
-
-    // FIXME: Derive this.
-    pub(crate) fn elements() -> impl Iterator<Item = Self> + Clone {
-        [Self::Edition2015, Self::Edition2018, Self::Edition2021, Self::Edition2024].into_iter()
     }
 }
 
@@ -74,15 +71,14 @@ impl CrateType {
 }
 
 impl FromStr for CrateType {
-    type Err = ();
+    type Err = impl Iterator<Item = &'static str> + Clone;
 
     fn from_str(source: &str) -> std::result::Result<Self, Self::Err> {
-        Ok(match source {
+        parse!(
             "bin" => Self::Bin,
             "lib" | "rlib" => Self::Lib,
             "proc-macro" => Self::ProcMacro,
-            _ => return Err(()),
-        })
+        )(source)
     }
 }
 
@@ -129,10 +125,7 @@ impl<'src> CrateNameRef<'src> {
 
 impl CrateNameBuf {
     pub(crate) fn adjust_and_parse_file_path(path: &Path) -> Result<Self, ()> {
-        path.file_stem()
-            .and_then(|name| name.to_str())
-            .ok_or(())
-            .and_then(Self::adjust_and_parse)
+        path.file_stem().and_then(|name| name.to_str()).ok_or(()).and_then(Self::adjust_and_parse)
     }
 
     pub(crate) fn adjust_and_parse(source: &str) -> Result<Self, ()> {

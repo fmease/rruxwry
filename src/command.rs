@@ -235,7 +235,7 @@ impl<'a> Command<'a> {
     }
 
     fn set_edition(&mut self, edition: Edition) {
-        if edition == default() {
+        if edition == Edition::RUSTC_DEFAULT {
             return;
         }
         if !edition.is_stable() {

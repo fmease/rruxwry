@@ -3,6 +3,7 @@
 use crate::{
     builder::BuildMode,
     data::{CrateNameBuf, CrateType, Edition},
+    utility::parse,
 };
 use clap::ColorChoice;
 use joinery::JoinableIterator;
@@ -178,9 +179,7 @@ pub(crate) fn arguments() -> Arguments {
     Arguments {
         toolchain,
         path: matches.remove_one(id::PATH).unwrap(),
-        verbatim: dbg!(
-            matches.remove_many(id::VERBATIM).map(Iterator::collect).unwrap_or_default()
-        ),
+        verbatim: matches.remove_many(id::VERBATIM).map(Iterator::collect).unwrap_or_default(),
         open: matches.remove_one(id::OPEN).unwrap_or_default(),
         crate_name: matches.remove_one(id::CRATE_NAME),
         crate_type: matches.remove_one(id::CRATE_TYPE),
@@ -273,13 +272,16 @@ pub(crate) struct DebugFlags {
 
 impl Edition {
     fn parse_cli_style(source: &str) -> Result<Self, String> {
-        match source {
-            "D" => Ok(Self::default()),
-            "S" => Ok(Self::LATEST_STABLE),
-            "U" => Ok(Self::BLEEDING_EDGE),
-            source => source.parse(),
-        }
-        .map_err(|()| possible_values(Self::elements().map(Self::to_str).chain(["D", "S", "U"])))
+        parse!(
+            "D" => Self::RUSTC_DEFAULT,
+            "S" => Self::LATEST_STABLE,
+            "E" => Self::BLEEDING_EDGE,
+            "15" | "2015" => Self::Edition2015,
+            "18" | "2018" => Self::Edition2018,
+            "21" | "2021" => Self::Edition2021,
+            "24" | "2024" => Self::Edition2024,
+        )(source)
+        .map_err(possible_values)
     }
 }
 
@@ -291,11 +293,11 @@ impl CrateNameBuf {
 
 impl CrateType {
     fn parse_cli_style(source: &str) -> Result<Self, String> {
-        source.parse().map_err(|()| possible_values(["bin", "lib", "rlib", "proc-macro"]))
+        source.parse().map_err(possible_values)
     }
 }
 
-fn possible_values(values: impl IntoIterator<Item: std::fmt::Display, IntoIter: Clone>) -> String {
+fn possible_values(values: impl Iterator<Item: std::fmt::Display> + Clone) -> String {
     format!(
         "possible values: {}",
         values.into_iter().map(|value| format!("`{value}`")).join_with(", ")

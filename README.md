@@ -42,7 +42,7 @@ If `rruxwry -@` fails to build a `tests/rustdoc{,-ui,-json}/` file, e.g., due to
 
 Compared to a raw `rustdoc file.rs` invocation, a `rruxwry file.rs` invocation has some goodies in store.
 
-For one, it defaults to the *latest stable edition* (i.e., Rust 2021 at the time of writing) while `rustdoc` obviously defaults to the first edition (i.e., Rust 2015) for backward compatibility. You can pass `-e`/`--edition` to overwrite the edition.
+For one, it defaults to the *latest stable edition* (i.e., Rust 2024 at the time of writing) while `rustdoc` obviously defaults to the first edition (i.e., Rust 2015) for backward compatibility. You can pass `-e`/`--edition` to overwrite the edition.
 
 Moreover, you don't need to “pass `-Zunstable-options`” (that flag is not even available) since *rruxwry* does that for you (this is a *developer tool* after all).
 
@@ -90,7 +90,7 @@ Just like *Cargo*, *rruxwry* recognizes the environment variables `RUSTFLAGS` an
 
 However if that's too wordy for you and you don't care about passing arguments / flags to *both* `rustc` *and* `rustdoc`, you can simply provide them inline after `--`. Example: `rruxwry file.rs -X -- -Ztreat-err-as-bug`. Here, the `-Z` flag gets passed to both `rustc file.rs` and `rustdoc u_file.rs` (remember, `-X` enables the cross-crate build mode).
 
-`-e`/`--edition` supports the following edition *aliases*: `D` (default edition), `S` (latest stable edition) and `U` (latest edition, no matter if stable or unstable).
+`-e`/`--edition` supports the following edition *aliases*: `D` (rustc's **d**efault edition), `S` (latest **s**table edition) and `E` ("bleeding **e**dge": latest edition, no matter if stable or unstable).
 
 ## Command-Line Interface
 

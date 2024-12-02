@@ -1,4 +1,10 @@
-#![feature(let_chains, exit_status_error, type_alias_impl_trait, os_str_display, if_let_guard)]
+#![feature(decl_macro)]
+#![feature(exit_status_error)]
+#![feature(if_let_guard)]
+#![feature(impl_trait_in_assoc_type)]
+#![feature(let_chains)]
+#![feature(os_str_display)]
+#![feature(type_alias_impl_trait)]
 #![deny(unused_must_use, rust_2018_idioms)]
 
 use attribute::Attributes;
@@ -58,7 +64,7 @@ fn try_main() -> error::Result {
 
     let edition = edition.unwrap_or_else(|| match build_mode {
         BuildMode::Default | BuildMode::CrossCrate => Edition::LATEST_STABLE,
-        BuildMode::Compiletest { .. } => Edition::default(),
+        BuildMode::Compiletest { .. } => Edition::RUSTC_DEFAULT,
     });
 
     let mut source = String::new();
