@@ -1,6 +1,5 @@
-use std::{borrow::Cow, fmt, path::Path, str::FromStr};
-
 use crate::utility::parse;
+use std::{borrow::Cow, fmt, path::Path, str::FromStr};
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum Edition {
@@ -162,4 +161,10 @@ impl<T: AsRef<str>> fmt::Display for CrateName<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(self.as_str())
     }
+}
+
+#[derive(Clone, Copy)]
+pub(crate) enum DocBackend {
+    Html,
+    Json,
 }

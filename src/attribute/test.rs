@@ -1,5 +1,8 @@
 use super::Attributes;
-use crate::data::{CrateName, CrateType, Edition};
+use crate::{
+    data::{CrateName, CrateType, Edition},
+    utility::default,
+};
 
 // FIXME: Test that we detect `#![crate_name = "0"]` (leading digits) to match rustc's behavior.
 
@@ -74,7 +77,7 @@ fn main() {}
 #![crate_name = "name"]
     "#
         ),
-        Attributes::default()
+        default()
     );
 }
 
@@ -87,7 +90,7 @@ fn crate_name_not_at_beginning_leading_outer_attribute() {
 #![crate_name = "name"]
 "#
         ),
-        Attributes::default()
+        default()
     );
 }
 
@@ -124,7 +127,7 @@ fn crate_name_semantically_malformed_leading_attributes() {
 
 #[test]
 fn crate_type_invalid() {
-    assert_eq!(parse(r#"#![crate_type = "garbage"]"#), Attributes::default())
+    assert_eq!(parse(r#"#![crate_type = "garbage"]"#), default())
 }
 
 #[test]
@@ -138,7 +141,7 @@ fn crate_name_multiple() {
 
 #[test]
 fn crate_name_garbage() {
-    assert_eq!(parse(r#"#![crate_name = "?"]"#), Attributes::default());
+    assert_eq!(parse(r#"#![crate_name = "?"]"#), default());
 }
 
 #[test]
