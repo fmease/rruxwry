@@ -160,7 +160,7 @@ fn build_compiletest<'a>(
         path,
         crate_name,
         default(), // FIXME: respect `@compile-flags: --crate-type`
-        directives.edition.unwrap_or_default(),
+        directives.edition.unwrap_or(Edition::RUSTC_DEFAULT),
         &dependencies,
         flags,
         Strictness::Strict,
@@ -193,7 +193,7 @@ fn build_compiletest_auxiliary<'a>(
     let mut directives =
         source.as_ref().map(|source| Directives::parse(source)).unwrap_or_default();
 
-    let edition = directives.edition.unwrap_or_default();
+    let edition = directives.edition.unwrap_or(Edition::RUSTC_DEFAULT);
 
     let verbatim_flags = mem::take(&mut directives.verbatim_flags).extended(flags.verbatim);
     let flags = Flags { verbatim: verbatim_flags.as_ref(), ..flags };
