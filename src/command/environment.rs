@@ -37,7 +37,7 @@ fn parse_flags(
 ) -> Option<Vec<String>> {
     for &confusable in confusables {
         if environment.contains_key(confusable) {
-            warning::environment_contains_confusable_variable(confusable, key).emit()
+            warning::environment_contains_confusable_variable(confusable, key).emit();
         }
     }
 

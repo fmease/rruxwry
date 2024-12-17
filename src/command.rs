@@ -152,10 +152,7 @@ pub(crate) fn open(crate_name: CrateNameRef<'_>, flags: &interface::DebugFlags) 
     let path = std::env::current_dir()?.join("doc").join(crate_name.as_str()).join("index.html");
 
     if flags.verbose {
-        let verb = match flags.dry_run {
-            false => "running",
-            true => "skipping",
-        };
+        let verb = if !flags.dry_run { "running" } else { "skipping" };
 
         info(format!(
             "{verb} {} {}",
@@ -173,7 +170,7 @@ pub(crate) fn open(crate_name: CrateNameRef<'_>, flags: &interface::DebugFlags) 
 }
 
 struct Command<'a> {
-    command: process::Command,
+    inner: process::Command,
     flags: &'a interface::DebugFlags,
     strictness: Strictness,
     uses_unstable_options: bool,
@@ -186,7 +183,7 @@ impl<'a> Command<'a> {
         strictness: Strictness,
     ) -> Self {
         Self {
-            command: process::Command::new(program),
+            inner: process::Command::new(program),
             flags,
             strictness,
             uses_unstable_options: false,
@@ -338,13 +335,13 @@ impl Deref for Command<'_> {
     type Target = process::Command;
 
     fn deref(&self) -> &Self::Target {
-        &self.command
+        &self.inner
     }
 }
 
 impl DerefMut for Command<'_> {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.command
+        &mut self.inner
     }
 }
 

@@ -127,7 +127,7 @@ fn crate_name_semantically_malformed_leading_attributes() {
 
 #[test]
 fn crate_type_invalid() {
-    assert_eq!(parse(r#"#![crate_type = "garbage"]"#), default())
+    assert_eq!(parse(r#"#![crate_type = "garbage"]"#), default());
 }
 
 #[test]

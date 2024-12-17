@@ -5,6 +5,11 @@
 #![feature(os_str_display)]
 #![feature(type_alias_impl_trait)]
 #![deny(unused_must_use, rust_2018_idioms)]
+#![deny(clippy::all, clippy::pedantic)]
+#![allow(clippy::items_after_statements)] // I disagree
+#![allow(clippy::too_many_arguments)] // low priority
+#![allow(clippy::too_many_lines)] // I disagree
+#![allow(clippy::if_not_else)] // I disagree
 
 use attribute::Attributes;
 use data::{CrateNameBuf, CrateNameCow, CrateType, Edition};

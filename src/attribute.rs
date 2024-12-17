@@ -105,7 +105,7 @@ impl<'src> Attributes<'src> {
 
                         crate_name = Some(match CrateName::parse(name) {
                             Ok(name) => name,
-                            Err(_) => break, // like in rustc, an invalid crate name is fatal
+                            Err(()) => break, // like in rustc, an invalid crate name is fatal
                         });
                     }
                 }
@@ -159,7 +159,7 @@ impl<'src> AttributeParser<'src> {
             match token.kind {
                 TokenKind::LineComment { doc_style: Some(DocStyle::Inner) }
                 | TokenKind::BlockComment { doc_style: Some(DocStyle::Inner), terminated: true } => {
-                    self.parser.advance()
+                    self.parser.advance();
                 }
                 TokenKind::Pound => {
                     self.parser.advance();
@@ -343,7 +343,7 @@ impl<'src> AttributeParser<'src> {
                 TokenKind::Whitespace
                 | TokenKind::LineComment { doc_style: None }
                 | TokenKind::BlockComment { doc_style: None, terminated: _ } => {
-                    self.parser.advance()
+                    self.parser.advance();
                 }
                 _ => break,
             }

@@ -26,7 +26,7 @@ pub(crate) fn arguments() -> Arguments {
         // FIXME: Is this actually correct on Windows (UTF-16 and all)?
         .filter(|arg| arg.as_encoded_bytes().starts_with(b"+"))
         .map(drop)
-        .and_then(|_| args.next());
+        .and_then(|()| args.next());
 
     let args = bin.chain(subcommand).chain(args);
 
@@ -337,6 +337,7 @@ pub(crate) enum Command {
     Doc { open: bool, mode: DocMode, flags: DocFlags },
 }
 
+#[allow(clippy::struct_excessive_bools)] // not worth to address
 pub(crate) struct DocFlags {
     pub(crate) backend: DocBackend,
     pub(crate) crate_version: Option<String>,
