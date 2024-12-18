@@ -4,15 +4,14 @@
 
 use crate::{
     command::{self, ExternCrate, Flags, Strictness},
-    data::{CrateName, CrateNameCow, CrateNameRef, CrateType, Edition},
+    data::{CrateName, CrateNameCow, CrateNameRef, CrateType, DocBackend, Edition},
     diagnostic::{Diagnostic, IntoDiagnostic, error},
-    directive::Directives,
+    directive,
     error::Result,
     utility::default,
 };
 use joinery::JoinableIterator;
-use rustc_hash::FxHashSet;
-use std::{borrow::Cow, cell::LazyCell, mem, path::Path};
+use std::{borrow::Cow, cell::LazyCell, collections::BTreeSet, mem, path::Path};
 
 pub(crate) fn build(
     mode: BuildMode,
@@ -24,7 +23,7 @@ pub(crate) fn build(
 ) -> Result {
     match mode {
         BuildMode::Default => build_default(path, crate_name, crate_type, edition, flags),
-        BuildMode::Compiletest => build_compiletest(path, crate_name, edition, flags),
+        BuildMode::Compiletest => build_compiletest(path, crate_name, crate_type, edition, flags),
     }
 }
 
@@ -49,19 +48,20 @@ fn build_default(
 fn build_compiletest(
     path: &Path,
     crate_name: CrateNameRef<'_>,
+    crate_type: CrateType,
     // FIXME: use it
     _edition: Edition,
     flags: Flags<'_>,
 ) -> Result {
     // FIXME: Add a flag `--all-revs`.
     // FIXME: Make sure `//@ compile-flags: --extern name` works as expected
-    let source = std::fs::read_to_string(path)?;
-    let directives = Directives::parse(&source);
+    let source = std::fs::read_to_string(path)?; // FIXME: error context
+    let directives = directive::parse(&source, directive::Scope::Base);
 
     // FIXME: We should also store Cargo-like features here after having converted them to
     // cfg specs NOTE: This will be fixed once we eagerly expand `-f` to `--cfg`.
     // FIXME: Is it actually possible to write `//[feature="name"]@` and have compiletest understand it?
-    let mut revisions = FxHashSet::default();
+    let mut revisions = BTreeSet::default();
 
     for revision in &flags.build.revisions {
         if !directives.revisions.contains(revision.as_str()) {
@@ -85,9 +85,12 @@ fn build_compiletest(
     command::compile(
         path,
         crate_name,
-        default(), // FIXME: respect `@compile-flags: --crate-type` (do we???)
+        // FIXME: Once we support `//@ proc-macro` we need to honor the implicit crate_type==Lib (of the host) here.
+        crate_type,
         directives.edition.unwrap_or(Edition::RUSTC_DEFAULT),
-        &[], // FIXME
+        // FIXME: Respect `//@ aux-crate` etc.
+        // FIXME: Once we support `//@ proc-macro` we need to add `proc_macro` (to the client) similar to `extern_prelude_for` here.
+        &[],
         flags,
         Strictness::Strict,
     )
@@ -110,7 +113,9 @@ pub(crate) fn document<'a>(
         DocMode::CrossCrate => {
             document_cross_crate(path, crate_name, crate_type, edition, flags, doc_flags)
         }
-        DocMode::Compiletest => document_compiletest(path, crate_name, edition, flags, doc_flags),
+        DocMode::Compiletest => {
+            document_compiletest(path, crate_name, crate_type, edition, flags, doc_flags)
+        }
     }
 }
 
@@ -199,6 +204,7 @@ fn extern_prelude_for(crate_type: CrateType) -> &'static [ExternCrate<'static>] 
 fn document_compiletest<'a>(
     path: &Path,
     crate_name: CrateNameRef<'a>,
+    crate_type: CrateType,
     // FIXME: respect the CLI edition, it should override `//@edition`
     //        yes, it would lead to a failure  for e.g. `//@compile-args:--edition`
     _edition: Edition,
@@ -208,13 +214,17 @@ fn document_compiletest<'a>(
 ) -> Result<CrateNameCow<'a>> {
     // FIXME: Add a flag `--all-revs`.
     // FIXME: Make sure `//@ compile-flags: --extern name` works as expected
-    let source = std::fs::read_to_string(path)?;
-    let directives = Directives::parse(&source);
+    let source = std::fs::read_to_string(path)?; // FIXME: error context
+    let scope = match doc_flags.backend {
+        DocBackend::Html => directive::Scope::HtmlDocCk,
+        DocBackend::Json => directive::Scope::JsonDocCk,
+    };
+    let directives = directive::parse(&source, scope);
 
     // FIXME: We should also store Cargo-like features here after having converted them to
     // cfg specs NOTE: This will be fixed once we eagerly expand `-f` to `--cfg`.
     // FIXME: Is it actually possible to write `//[feature="name"]@` and have compiletest understand it?
-    let mut revisions = FxHashSet::default();
+    let mut revisions = BTreeSet::default();
 
     for revision in &flags.build.revisions {
         if !directives.revisions.contains(revision.as_str()) {
@@ -255,8 +265,10 @@ fn document_compiletest<'a>(
     command::document(
         path,
         crate_name,
-        default(), // FIXME: respect `@compile-flags: --crate-type` (do we???)
+        // FIXME: Once we support `//@ proc-macro` we need to honor the implicit crate_type==Lib (of the host) here.
+        crate_type,
         directives.edition.unwrap_or(Edition::RUSTC_DEFAULT),
+        // FIXME: Once we support `//@ proc-macro` we need to add `proc_macro` (to the client) similar to `extern_prelude_for` here.
         &dependencies,
         flags,
         doc_flags,
@@ -283,14 +295,20 @@ fn document_compiletest_auxiliary<'a>(
         },
     };
 
-    let source = std::fs::read_to_string(&path);
+    let source = std::fs::read_to_string(&path); // FIXME: error context
 
     // FIXME: unwrap
     let crate_name = CrateName::adjust_and_parse_file_path(&path).unwrap();
 
+    // FIXME: DRY
+    let scope = match doc_flags.backend {
+        DocBackend::Html => directive::Scope::HtmlDocCk,
+        DocBackend::Json => directive::Scope::JsonDocCk,
+    };
+
     // FIXME: What about instantiation???
     let mut directives =
-        source.as_ref().map(|source| Directives::parse(source)).unwrap_or_default();
+        source.as_ref().map(|source| directive::parse(source, scope)).unwrap_or_default();
 
     let edition = directives.edition.unwrap_or(Edition::RUSTC_DEFAULT);
 
@@ -379,7 +397,7 @@ impl BuildMode {
 }
 
 pub(crate) enum Error {
-    UnknownRevision { unknown: String, available: FxHashSet<String> },
+    UnknownRevision { unknown: String, available: BTreeSet<String> },
 }
 
 impl IntoDiagnostic for Error {

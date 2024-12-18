@@ -15,6 +15,8 @@ pub(crate) fn arguments() -> Arguments {
     let mut args = std::env::args_os().peekable();
 
     let bin = args.next().into_iter();
+    // FIXME: If this resembles a toolchain argument, throw an error suggesting to
+    //        move it after the subcommand.
     let subcommand = args.next().into_iter();
 
     // FIXME: Ideally, `clap` would support custom prefixes (here: `+`).

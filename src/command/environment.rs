@@ -1,12 +1,12 @@
 //! Dealing with environment variables.
 
-use rustc_hash::FxHashMap;
 use std::{
+    collections::HashMap,
     ffi::{OsStr, OsString},
     sync::LazyLock,
 };
 
-type Environment = FxHashMap<OsString, OsString>;
+type Environment = HashMap<OsString, OsString>;
 
 pub(super) fn rustc_flags<'a>() -> Option<&'a [String]> {
     static RUSTFLAGS: LazyLock<Option<Vec<String>>> = LazyLock::new(|| {

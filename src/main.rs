@@ -4,12 +4,12 @@
 #![feature(let_chains)]
 #![feature(os_str_display)]
 #![feature(type_alias_impl_trait)]
-#![deny(unused_must_use, rust_2018_idioms)]
+#![deny(rust_2018_idioms, unused_must_use, unused_crate_dependencies)]
 #![deny(clippy::all, clippy::pedantic)]
+#![allow(clippy::if_not_else)] // I disagree
 #![allow(clippy::items_after_statements)] // I disagree
 #![allow(clippy::too_many_arguments)] // low priority
 #![allow(clippy::too_many_lines)] // I disagree
-#![allow(clippy::if_not_else)] // I disagree
 
 use attribute::Attributes;
 use data::{CrateNameBuf, CrateNameCow, CrateType, Edition};
@@ -143,7 +143,7 @@ fn compute_crate_name_and_type<'src>(
             let (crate_name, crate_type): (Option<CrateNameCow<'_>>, _) = if compiletest {
                 (crate_name.map(Into::into), crate_type)
             } else {
-                *source = std::fs::read_to_string(path)?;
+                *source = std::fs::read_to_string(path)?; // FIXME: error context
                 let attributes = Attributes::parse(
                     source,
                     // FIXME: doesn't contain `-f`s; eagerly expand them into `--cfg`s in main

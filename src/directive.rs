@@ -11,15 +11,46 @@ use crate::{
     diagnostic::warning,
     utility::{default, parse},
 };
-use joinery::JoinableIterator;
 use ra_ap_rustc_lexer::TokenKind;
-use rustc_hash::{FxHashMap, FxHashSet};
 use std::{
+    collections::{BTreeMap, BTreeSet},
     fmt,
     iter::Peekable,
     ops::{Deref, DerefMut},
     str::CharIndices,
 };
+
+pub(crate) fn parse<'src>(source: &'src str, scope: Scope) -> Directives<'src> {
+    let mut buffer = ErrorBuffer::default();
+    let mut parser = parse::SourceFileParser::new(source);
+    let mut directives = Directives::default();
+
+    // FIXME: Does compiletest actually rust-tokenize the input? I doubt it.
+    //        Simplify this once you've confirmed that.
+    while let Some(token) = parser.peek() {
+        if let TokenKind::LineComment { doc_style: None } = token.kind
+            && let comment = parser.source()
+            && let Some(directive) = comment.strip_prefix("//@")
+        {
+            match Directive::parse(directive, scope) {
+                Ok(directive) => directives.add(directive),
+                Err(error) => buffer.add(error),
+            };
+        }
+
+        parser.advance();
+    }
+
+    buffer.release();
+    directives
+}
+
+#[derive(Clone, Copy)]
+pub(crate) enum Scope {
+    Base,
+    HtmlDocCk,
+    JsonDocCk,
+}
 
 #[derive(Default)]
 pub(crate) struct Directives<'src> {
@@ -28,10 +59,6 @@ pub(crate) struct Directives<'src> {
 }
 
 impl<'src> Directives<'src> {
-    pub(crate) fn parse(source: &'src str) -> Self {
-        DirectivesParser::new(source).execute()
-    }
-
     fn add(&mut self, directive: Directive<'src>) {
         if let DirectiveKind::Revisions(revisions) = directive.kind {
             // We ignore revision predicates on revisions since that's what `compiletest` does, too.
@@ -46,7 +73,7 @@ impl<'src> Directives<'src> {
     }
 
     /// Instantiate all directives that are conditional on a revision.
-    pub(crate) fn into_instantiated(mut self, revs: &FxHashSet<&str>) -> Self {
+    pub(crate) fn into_instantiated(mut self, revs: &BTreeSet<&str>) -> Self {
         let uninstantiated = std::mem::take(&mut self.uninstantiated);
         Self::instantiate(&mut self, &uninstantiated, revs);
         self
@@ -54,7 +81,7 @@ impl<'src> Directives<'src> {
 
     /// Instantiate all directives that are conditional on a revision.
     #[allow(dead_code)] // FIXME: use this when impl'ing `--all-revs`
-    pub(crate) fn instantiated(&self, revs: &FxHashSet<&str>) -> Self {
+    pub(crate) fn instantiated(&self, revs: &BTreeSet<&str>) -> Self {
         let mut instantiated =
             Self { instantiated: self.instantiated.clone(), uninstantiated: default() };
         Self::instantiate(&mut instantiated, &self.uninstantiated, revs);
@@ -64,7 +91,7 @@ impl<'src> Directives<'src> {
     fn instantiate(
         instantiated: &mut InstantiatedDirectives<'src>,
         uninstantiated: &UninstantiatedDirectives<'src>,
-        revisions: &FxHashSet<&str>,
+        revisions: &BTreeSet<&str>,
     ) {
         // In the most common case, the user doesn't enable any revisions. Therefore we
         // iterate over the `revisions` instead of the `uninstantiated` directives and
@@ -93,43 +120,6 @@ impl DerefMut for Directives<'_> {
     }
 }
 
-struct DirectivesParser<'src> {
-    parser: parse::SourceFileParser<'src>,
-    directives: Directives<'src>,
-}
-
-impl<'src> DirectivesParser<'src> {
-    fn new(source: &'src str) -> Self {
-        Self { parser: parse::SourceFileParser::new(source), directives: default() }
-    }
-
-    // FIXME: Parse htmldocck/jsondocck queries
-    fn execute(mut self) -> Directives<'src> {
-        let mut report = Report::default();
-
-        while let Some(token) = self.parser.peek() {
-            if let TokenKind::LineComment { doc_style: None } = token.kind
-                && let comment = self.parser.source()
-                && let Some(directive) = comment.strip_prefix("//@")
-            {
-                match DirectiveParser::new(directive).execute() {
-                    Ok(directive) => self.directives.add(directive),
-                    // Emit a single error containing all unknown directives to avoid terminal spam.
-                    Err(Error { kind: ErrorKind::UnknownDirective(directive), .. }) => {
-                        report.unknowns.push(directive);
-                    }
-                    Err(error) => report.errors.push(error),
-                };
-            }
-
-            self.parser.advance();
-        }
-
-        report.publish();
-        self.directives
-    }
-}
-
 #[derive(Default, Clone)]
 pub(crate) struct InstantiatedDirectives<'src> {
     pub(crate) dependencies: Vec<ExternCrate<'src>>,
@@ -137,7 +127,7 @@ pub(crate) struct InstantiatedDirectives<'src> {
     pub(crate) edition: Option<Edition>,
     pub(crate) force_host: bool,
     pub(crate) no_prefer_dynamic: bool,
-    pub(crate) revisions: FxHashSet<&'src str>,
+    pub(crate) revisions: BTreeSet<&'src str>,
     pub(crate) verbatim_flags: VerbatimFlagsBuf<'src>,
     pub(crate) htmldocck: Vec<(HtmlDocCkDirectiveKind, Polarity)>,
     pub(crate) jsondocck: Vec<(JsonDocCkDirectiveKind, Polarity)>,
@@ -176,11 +166,17 @@ impl<'src> InstantiatedDirectives<'src> {
     }
 }
 
-type UninstantiatedDirectives<'src> = FxHashMap<&'src str, Vec<DirectiveKind<'src>>>;
+type UninstantiatedDirectives<'src> = BTreeMap<&'src str, Vec<DirectiveKind<'src>>>;
 
 struct Directive<'src> {
     revision: Option<&'src str>,
     kind: DirectiveKind<'src>,
+}
+
+impl<'src> Directive<'src> {
+    fn parse(source: &'src str, scope: Scope) -> Result<Self, Error<'src>> {
+        DirectiveParser { chars: source.char_indices().peekable(), source, scope }.execute()
+    }
 }
 
 // FIXME: Can somehow get rid of this? By merging "adjoin" & "parse-single" I guess?
@@ -238,13 +234,10 @@ pub(crate) enum Polarity {
 struct DirectiveParser<'src> {
     chars: Peekable<CharIndices<'src>>,
     source: &'src str,
+    scope: Scope,
 }
 
 impl<'src> DirectiveParser<'src> {
-    fn new(source: &'src str) -> Self {
-        Self { chars: source.char_indices().peekable(), source }
-    }
-
     fn execute(mut self) -> Result<Directive<'src>, Error<'src>> {
         self.parse_whitespace();
 
@@ -262,10 +255,60 @@ impl<'src> DirectiveParser<'src> {
 
         let directive =
             self.take_while(|char| matches!(char, '-' | '!') || char.is_ascii_alphabetic());
-        let context = ErrorContext::Directive(directive);
-        let kind = match directive {
+
+        self.parse_directive_kind(directive).map(|kind| Directive { revision, kind })
+    }
+
+    fn parse_directive_kind(
+        &mut self,
+        source: &'src str,
+    ) -> Result<DirectiveKind<'src>, Error<'src>> {
+        let context = ErrorContext::Directive(source);
+
+        match self.parse_base_directive(source) {
+            Ok(directive) => return Ok(directive),
+            Err(ErrorKind::UnknownDirective(_)) => {}
+            Err(error) => return Err(Error::new(error).context(context)),
+        }
+        let htmldocck = match self.parse_htmldocck_directive(source) {
+            Ok(directive) => Some(directive),
+            Err(ErrorKind::UnknownDirective(_)) => None,
+            Err(error) => return Err(Error::new(error).context(context)),
+        };
+        let jsondocck = match self.parse_jsondocck_directive(source) {
+            Ok(directive) => Some(directive),
+            Err(ErrorKind::UnknownDirective(_)) => None,
+            Err(error) => return Err(Error::new(error).context(context)),
+        };
+
+        match (self.scope, htmldocck, jsondocck) {
+            (Scope::HtmlDocCk, Some(directive), _) | (Scope::JsonDocCk, _, Some(directive)) => {
+                return Ok(directive);
+            }
+            | (Scope::HtmlDocCk | Scope::Base, None, Some(_))
+            | (Scope::JsonDocCk | Scope::Base, Some(_), None)
+            | (Scope::Base, Some(_), Some(_)) => {
+                // FIXME: Add more context to the error.
+                return Err(Error::new(ErrorKind::UnavailableDirective(source)));
+            }
+            _ => {}
+        }
+
+        // FIXME: Import/maintain a list of "all directives" (including "parametrized" ones like `only-*``)
+        //        currently recognized by compiletest and don't error/warn on them (unless --verbose ig).
+        Err(Error::new(ErrorKind::UnknownDirective(source)))
+    }
+
+    fn parse_base_directive(
+        &mut self,
+        source: &'src str,
+    ) -> Result<DirectiveKind<'src>, ErrorKind<'src>> {
+        // FIXME: Don't do the error.kind extraction.
+        //        Instead, parse functions should return ErrorKind (→BareError) instead of Error
+
+        Ok(match source {
             "aux-build" => {
-                self.parse_separator(Padding::Yes).map_err(|error| error.context(context))?; // FIXME: audit AllowPadding
+                self.parse_separator(Padding::Yes).map_err(|error| error.kind)?; // FIXME: audit AllowPadding
                 let path = self.take_remaining_line();
                 DirectiveKind::AuxBuild { path }
             }
@@ -273,21 +316,24 @@ impl<'src> DirectiveParser<'src> {
             // at the time of writing. Therefore, we don't need to deal with them here either.
             // Neither does it support optional paths (`//@ aux-crate:name`).
             "aux-crate" => {
-                self.parse_separator(Padding::Yes).map_err(|error| error.context(context))?; // FIXME: audit AllowPadding
+                self.parse_separator(Padding::Yes).map_err(|error| error.kind)?; // FIXME: audit AllowPadding
 
                 // We're doing this two-step process — (greedy) lexing followed by validation —
                 // to be able to provide a better error message.
                 let name = self.take_while(|char| char != '=' && !char.is_ascii_whitespace());
                 let Ok(name) = CrateNameRef::parse(name) else {
-                    return Err(Error::new(ErrorKind::InvalidValue(name)).context(context));
+                    return Err(ErrorKind::InvalidValue(name));
                 };
 
                 let path = self.consume(|char| char == '=').then(|| self.take_remaining_line());
                 DirectiveKind::AuxCrate { name, path }
             }
+            // FIXME: Is this available outside of rustdoc tests, too? Check compiletest's behavior!
+            //        If not, intro a new scope, Scope::Rustdoc, which is separate from HtmlDocCk/JsonDocCk.
+            //        Should probably be sth. akin to Scope::Rustdoc(DocCk) then.
             "build-aux-docs" => DirectiveKind::BuildAuxDocs,
             "compile-flags" => {
-                self.parse_separator(Padding::Yes).map_err(|error| error.context(context))?; // FIXME: audit AllowPadding (before)
+                self.parse_separator(Padding::Yes).map_err(|error| error.kind)?; // FIXME: audit AllowPadding (before)
 
                 // FIXME: Supported quotes arguments (they shouldn't be split in halves).
                 //        Use crate `shlex` for this.
@@ -295,13 +341,13 @@ impl<'src> DirectiveParser<'src> {
                 DirectiveKind::CompileFlags(arguments)
             }
             "edition" => {
-                self.parse_separator(Padding::Yes).map_err(|error| error.context(context))?; // FIXME: audit AllowPadding (before)
+                self.parse_separator(Padding::Yes).map_err(|error| error.kind)?; // FIXME: audit AllowPadding (before)
 
                 // We're doing this two-step process — (greedy) lexing followed by validation —
                 // to be able to provide a better error message.
                 let edition = self.take_while(|char| !char.is_ascii_whitespace());
                 let Ok(edition) = edition.parse() else {
-                    return Err(Error::new(ErrorKind::InvalidValue(edition)).context(context));
+                    return Err(ErrorKind::InvalidValue(edition));
                 };
 
                 DirectiveKind::Edition(edition)
@@ -309,88 +355,73 @@ impl<'src> DirectiveParser<'src> {
             "force-host" => DirectiveKind::ForceHost,
             "no-prefer-dynamic" => DirectiveKind::NoPreferDynamic,
             "revisions" => {
-                self.parse_separator(Padding::Yes).map_err(|error| error.context(context))?; // FIXME: audit AllowPadding
+                self.parse_separator(Padding::Yes).map_err(|error| error.kind)?; // FIXME: audit AllowPadding
                 let revisions = self.take_remaining_line().split_ascii_whitespace().collect();
                 DirectiveKind::Revisions(revisions)
             }
             // `compiletest` only supports a single environment variable per directive.
             "rustc-env" => {
-                self.parse_separator(Padding::No).map_err(|error| error.context(context))?;
+                self.parse_separator(Padding::No).map_err(|error| error.kind)?;
                 let line = self.take_remaining_line();
 
                 // FIXME: How does `compiletest` handle the edge cases here?
                 let Some((key, value)) = line.split_once('=') else {
-                    return Err(Error::new(ErrorKind::InvalidValue(line)).context(context));
+                    return Err(ErrorKind::InvalidValue(line));
                 };
                 DirectiveKind::RustcEnv { key, value }
             }
             "unset-rustc-env" => {
-                self.parse_separator(Padding::No).map_err(|error| error.context(context))?;
+                self.parse_separator(Padding::No).map_err(|error| error.kind)?;
                 let variable = self.take_remaining_line();
                 DirectiveKind::UnsetRustcEnv(variable)
             }
-            // <> FIXME: Only accept these if mode==Rustdoc/Html...
-            //    FIXME: Actually parse these correctly (payload...)
-            "count" => DirectiveKind::HtmlDocCk(HtmlDocCkDirectiveKind::Count, Polarity::Positive),
-            "!count" => DirectiveKind::HtmlDocCk(HtmlDocCkDirectiveKind::Count, Polarity::Negative),
-            "files" => DirectiveKind::HtmlDocCk(HtmlDocCkDirectiveKind::Files, Polarity::Positive),
-            "!files" => DirectiveKind::HtmlDocCk(HtmlDocCkDirectiveKind::Files, Polarity::Negative),
-            "has" => DirectiveKind::HtmlDocCk(HtmlDocCkDirectiveKind::Has, Polarity::Positive),
-            "!has" => DirectiveKind::HtmlDocCk(HtmlDocCkDirectiveKind::Has, Polarity::Negative),
-            "has-dir" => {
-                DirectiveKind::HtmlDocCk(HtmlDocCkDirectiveKind::HasDir, Polarity::Positive)
-            }
-            "!has-dir" => {
-                DirectiveKind::HtmlDocCk(HtmlDocCkDirectiveKind::HasDir, Polarity::Negative)
-            }
-            "hasraw" => {
-                DirectiveKind::HtmlDocCk(HtmlDocCkDirectiveKind::HasRaw, Polarity::Positive)
-            }
-            "!hasraw" => {
-                DirectiveKind::HtmlDocCk(HtmlDocCkDirectiveKind::HasRaw, Polarity::Negative)
-            }
-            "matches" => {
-                DirectiveKind::HtmlDocCk(HtmlDocCkDirectiveKind::Matches, Polarity::Positive)
-            }
-            "!matches" => {
-                DirectiveKind::HtmlDocCk(HtmlDocCkDirectiveKind::Matches, Polarity::Negative)
-            }
-            "matchesraw" => {
-                DirectiveKind::HtmlDocCk(HtmlDocCkDirectiveKind::MatchesRaw, Polarity::Positive)
-            }
-            "!matchesraw" => {
-                DirectiveKind::HtmlDocCk(HtmlDocCkDirectiveKind::MatchesRaw, Polarity::Negative)
-            }
-            "snapshot" => {
-                DirectiveKind::HtmlDocCk(HtmlDocCkDirectiveKind::Snapshot, Polarity::Positive)
-            }
-            "!snapshot" => {
-                DirectiveKind::HtmlDocCk(HtmlDocCkDirectiveKind::Snapshot, Polarity::Negative)
-            }
-            // </>
-            // <> FIXME: Only accept these if mode==Rustdoc/Json...
-            //    FIXME: Actually parse these correctly (payload...)
-            // FIXME: actually parse directices correctly that "are both html & json"
-            // "count" => DirectiveKind::JsonDocCk(JsonDocCkDirectiveKind::Count, Polarity::Positive),
-            // "!count" => DirectiveKind::JsonDocCk(JsonDocCkDirectiveKind::Count, Polarity::Positive),
-            // "has" => DirectiveKind::JsonDocCk(JsonDocCkDirectiveKind::Count, Polarity::Positive),
-            // "!has" => DirectiveKind::JsonDocCk(JsonDocCkDirectiveKind::Count, Polarity::Positive),
-            "is" => DirectiveKind::JsonDocCk(JsonDocCkDirectiveKind::Is, Polarity::Positive),
-            "!is" => DirectiveKind::JsonDocCk(JsonDocCkDirectiveKind::Is, Polarity::Negative),
-            "ismany" => {
-                DirectiveKind::JsonDocCk(JsonDocCkDirectiveKind::IsMany, Polarity::Positive)
-            }
-            "!ismany" => {
-                DirectiveKind::JsonDocCk(JsonDocCkDirectiveKind::IsMany, Polarity::Negative)
-            }
-            "set" => DirectiveKind::JsonDocCk(JsonDocCkDirectiveKind::Set, Polarity::Positive),
-            "!set" => DirectiveKind::JsonDocCk(JsonDocCkDirectiveKind::Set, Polarity::Negative),
-            // </>
-            // NB: We don't support `{unset-,}exec-env` since it's not meaningful to rruxwry.
-            directive => return Err(Error::new(ErrorKind::UnknownDirective(directive))),
-        };
+            // FIXME: proc-macro, exec-env, unset-exec-env, run-flags, doc-flags
+            source => return Err(ErrorKind::UnknownDirective(source)),
+        })
+    }
 
-        Ok(Directive { revision, kind })
+    // FIXME: Actually parse them fully and do sth. with them, otherwise turn this into a array lookup.
+    fn parse_htmldocck_directive(
+        &self,
+        source: &'src str,
+    ) -> Result<DirectiveKind<'src>, ErrorKind<'src>> {
+        let (source, polarity) = Self::parse_polarity(source);
+        let kind = match source {
+            "count" => HtmlDocCkDirectiveKind::Count,
+            "files" => HtmlDocCkDirectiveKind::Files,
+            "has" => HtmlDocCkDirectiveKind::Has,
+            "has-dir" => HtmlDocCkDirectiveKind::HasDir,
+            "hasraw" => HtmlDocCkDirectiveKind::HasRaw,
+            "matches" => HtmlDocCkDirectiveKind::Matches,
+            "matchesraw" => HtmlDocCkDirectiveKind::MatchesRaw,
+            "snapshot" => HtmlDocCkDirectiveKind::Snapshot,
+            source => return Err(ErrorKind::UnknownDirective(source)),
+        };
+        Ok(DirectiveKind::HtmlDocCk(kind, polarity))
+    }
+
+    // FIXME: Actually parse them fully and do sth. with them, otherwise turn this into a array lookup.
+    fn parse_jsondocck_directive(
+        &self,
+        source: &'src str,
+    ) -> Result<DirectiveKind<'src>, ErrorKind<'src>> {
+        let (source, polarity) = Self::parse_polarity(source);
+        let kind = match source {
+            "count" => JsonDocCkDirectiveKind::Count,
+            "has" => JsonDocCkDirectiveKind::Count,
+            "is" => JsonDocCkDirectiveKind::Is,
+            "ismany" => JsonDocCkDirectiveKind::IsMany,
+            "set" => JsonDocCkDirectiveKind::Set,
+            source => return Err(ErrorKind::UnknownDirective(source)),
+        };
+        Ok(DirectiveKind::JsonDocCk(kind, polarity))
+    }
+
+    fn parse_polarity(source: &'src str) -> (&'src str, Polarity) {
+        match source.strip_prefix('!') {
+            Some(source) => (source, Polarity::Negative),
+            None => (source, Polarity::Positive),
+        }
     }
 
     fn peek(&mut self) -> Option<char> {
@@ -469,21 +500,56 @@ impl<'src> DirectiveParser<'src> {
 }
 
 #[derive(Default)]
-struct Report<'src> {
+struct ErrorBuffer<'src> {
     errors: Vec<Error<'src>>,
-    unknowns: Vec<&'src str>,
+    unknowns: BTreeSet<&'src str>,
+    unavailables: BTreeSet<&'src str>,
 }
 
-impl Report<'_> {
-    fn publish(mut self) {
-        if !self.unknowns.is_empty() {
-            self.unknowns.sort_unstable();
-            self.unknowns.dedup();
+impl<'src> ErrorBuffer<'src> {
+    fn add(&mut self, error: Error<'src>) {
+        // We coalesce certain kinds of errors where we assume they may occur in large
+        // quantities in order to avoid "terminal spamming".
+        match error.kind {
+            // FIXME: Add rationale
+            ErrorKind::UnknownDirective(directive) => {
+                self.unknowns.insert(directive);
+            }
+            // FIXME: Add rationale
+            ErrorKind::UnavailableDirective(directive) => {
+                self.unavailables.insert(directive);
+            }
+            _ => self.errors.push(error),
+        }
+    }
 
+    // FIXME: Shouldn't all these errors be emitted as (non-fatal) errors instead of warnings?
+    //        So we can use warnings for something else?
+    fn release(self) {
+        let list = |message: &mut String, mut elements: BTreeSet<_>| {
+            use std::fmt::Write as _;
+
+            if let Some(element) = elements.pop_first() {
+                write!(message, "`{element}`").unwrap();
+            }
+            for element in elements {
+                write!(message, ", `{element}`").unwrap();
+            }
+        };
+
+        if !self.unknowns.is_empty() {
             let s = if self.unknowns.len() == 1 { "" } else { "s" };
-            let unknowns =
-                self.unknowns.into_iter().map(|unknown| format!("`{unknown}`")).join_with(", ");
-            warning(format!("unknown directive{s}: {unknowns}")).emit();
+            let mut message = format!("unknown directive{s}: ");
+            list(&mut message, self.unknowns);
+            warning(message).emit();
+        }
+
+        if !self.unavailables.is_empty() {
+            let s = if self.unavailables.len() == 1 { "" } else { "s" };
+            // FIXME: Better error message.
+            let mut message = format!("unavailable directive{s}: ");
+            list(&mut message, self.unavailables);
+            warning(message).emit();
         }
 
         for error in self.errors {
@@ -520,6 +586,8 @@ impl fmt::Display for Error<'_> {
 
 enum ErrorKind<'src> {
     UnknownDirective(&'src str),
+    // FIXME: add scope?
+    UnavailableDirective(&'src str),
     UnexpectedToken { found: char, expected: char },
     UnexpectedEndOfInput,
     InvalidValue(&'src str),
@@ -528,7 +596,12 @@ enum ErrorKind<'src> {
 impl fmt::Display for ErrorKind<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            // FIXME: This is unreachable. Model this better
             Self::UnknownDirective(unknown) => write!(f, "unknown directive: `{unknown}`"),
+            // FIXME: THis is unreachable. Model this better
+            Self::UnavailableDirective(directive) => {
+                write!(f, "unavailable directive: `{directive}`")
+            }
             Self::UnexpectedToken { found, expected } => {
                 write!(f, "found `{found}` but expected `{expected}`")
             }
