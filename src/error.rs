@@ -1,4 +1,4 @@
-use crate::diagnostic::{Diagnostic, IntoDiagnostic, error};
+use crate::diagnostic::error;
 
 pub(crate) type Result<T = (), E = Error> = std::result::Result<T, E>;
 
@@ -6,6 +6,16 @@ pub(crate) enum Error {
     Io(std::io::Error),
     Process(std::process::ExitStatusError),
     Build(Box<crate::operate::Error>),
+}
+
+impl Error {
+    pub(crate) fn emit(self) {
+        match self {
+            Self::Io(error) => self::error!("{error}"),
+            Self::Process(error) => self::error!("{error}"),
+            Self::Build(error) => error.emit(),
+        }
+    }
 }
 
 impl From<std::io::Error> for Error {
@@ -23,15 +33,5 @@ impl From<std::process::ExitStatusError> for Error {
 impl From<crate::operate::Error> for Error {
     fn from(error: crate::operate::Error) -> Self {
         Self::Build(Box::new(error))
-    }
-}
-
-impl IntoDiagnostic for Error {
-    fn into_diagnostic(self) -> Diagnostic {
-        match self {
-            Self::Io(error) => self::error(error.to_string()),
-            Self::Process(error) => self::error(error.to_string()),
-            Self::Build(error) => error.into_diagnostic(),
-        }
     }
 }

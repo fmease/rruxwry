@@ -6,12 +6,20 @@ description = "A wrapper around rust{,do}c for rust{,do}c devs"
 license = "MIT"
 publish = false
 
+
 [dependencies]
+anstyle = "1.0.10"
+# FIXME: Decide whether to use `supports-color`, `anstyle-query`,
+#        another crate or a custom impl for terminal color detection.
+# NOTE:  Get rid of this. Right now we're commited to it as `clap` also uses it.
+# NOTE:  We're only using it for enum `ColorChoice` & `ColorChoice::auto`.
+anstream = "0.6.18"
+# FIXME: Get rid of this dependency smh.
 clap = { version = "4.5.23" }
-joinery = "3.1.0"
+# Patch/vendor this to no longer transitively depend on `once_cell`.
 open = "5.3.1"
-owo-colors = { version = "4.1.0", features = ["supports-colors"] }
-ra-ap-rustc_lexer = "0.86.0"
+ra-ap-rustc_lexer = "0.88.0"
+# FIXME: Write own implementation that tracks source location / span.
 shlex = "1.3.0"
 smallvec = { version = "1.13.1", features = ["const_generics"] }
 

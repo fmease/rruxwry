@@ -1,4 +1,5 @@
 #![feature(decl_macro)]
+#![feature(exact_size_is_empty)]
 #![feature(exit_status_error)]
 #![feature(impl_trait_in_assoc_type)]
 #![feature(let_chains)]
@@ -13,7 +14,6 @@
 
 use attribute::Attributes;
 use data::{CrateNameBuf, CrateNameCow, CrateType, Edition};
-use diagnostic::IntoDiagnostic;
 use std::{path::Path, process::ExitCode};
 
 mod attribute;
@@ -36,7 +36,7 @@ fn main() -> ExitCode {
     match result {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
-            error.into_diagnostic().emit();
+            error.emit();
             ExitCode::FAILURE
         }
     }
@@ -46,8 +46,8 @@ fn try_main() -> error::Result {
     let args = interface::arguments();
 
     match args.color {
-        clap::ColorChoice::Always => owo_colors::set_override(true),
-        clap::ColorChoice::Never => owo_colors::set_override(false),
+        clap::ColorChoice::Always => anstream::ColorChoice::Always.write_global(),
+        clap::ColorChoice::Never => anstream::ColorChoice::Never.write_global(),
         clap::ColorChoice::Auto => {}
     }
 

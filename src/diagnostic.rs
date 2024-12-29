@@ -1,75 +1,57 @@
-use crate::utility::Str;
-use owo_colors::{AnsiColors, OwoColorize};
-use std::fmt;
+use anstream::ColorChoice;
+use anstyle::AnsiColor;
+use std::io::{self, Write};
 
-pub(crate) fn error(message: impl Into<Str>) -> Diagnostic {
-    Diagnostic::new(Severity::Error, message)
+pub(crate) type Painter = crate::utility::paint::Painter<io::BufWriter<io::StderrLock<'static>>>;
+
+// FIXME: (sub)notes smh
+pub(crate) fn emit(severity: Severity, message: impl FnOnce(&mut Painter) -> io::Result<()>) {
+    let stderr = io::stderr().lock();
+    let colorize = anstream::AutoStream::choice(&stderr) != ColorChoice::Never;
+    let p = &mut Painter::new(io::BufWriter::new(stderr), colorize);
+    severity.paint(p).unwrap();
+    write!(p, ": ").unwrap();
+    message(p).unwrap();
+    writeln!(p).unwrap();
 }
 
-pub(crate) fn warning(message: impl Into<Str>) -> Diagnostic {
-    Diagnostic::new(Severity::Warning, message)
-}
+// if !self.notes.is_empty() {
+//     writeln!(p)?;
 
-pub(crate) fn info(message: impl Into<Str>) -> Diagnostic {
-    Diagnostic::new(Severity::Info, message)
-}
+//     let padding = " ".repeat(self.severity.name().len() + ": ".len());
 
-/// Just like [`Into<Diagnostic>`] but leads to nicer call sites.
-pub(crate) trait IntoDiagnostic {
-    fn into_diagnostic(self) -> Diagnostic;
-}
+//     // FIXME: first is not necessary lol!!! look up!
+//     let mut first = true;
+//     for note in &self.notes {
+//         if !first {
+//             writeln!(p)?;
+//         } else {
+//             first = false;
+//         }
+//         write!(p, "{padding}")?;
+//         Severity::Note.paint(p)?;
+//         write!(p, ": {note}")?;
+//     }
+// }
 
-pub(crate) struct Diagnostic {
-    severity: Severity,
-    message: Str,
-    notes: Vec<Str>,
-}
+pub(crate) macro error($( $arg:tt )*) { diag!(Error $( $arg )*) }
+pub(crate) macro warning($( $arg:tt )*) { diag!(Warning $( $arg )*) }
+pub(crate) macro note($( $arg:tt )*) { diag!(Note $( $arg )*) }
 
-impl Diagnostic {
-    fn new(severity: Severity, message: impl Into<Str>) -> Self {
-        Self { severity, message: message.into(), notes: Vec::new() }
-    }
-
-    pub(crate) fn note(mut self, note: impl Into<Str>) -> Self {
-        self.notes.push(note.into());
-        self
-    }
-
-    pub(crate) fn emit(self) {
-        eprintln!("{self}");
-    }
-}
-
-impl fmt::Display for Diagnostic {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}: {}", self.severity, self.message)?;
-
-        if !self.notes.is_empty() {
-            writeln!(f)?;
-
-            let padding = self.severity.name().len() + ": ".len();
-            let padding = " ".repeat(padding);
-
-            let mut first = true;
-            for note in &self.notes {
-                if !first {
-                    writeln!(f)?;
-                } else {
-                    first = false;
-                }
-                write!(f, "{padding}{Note}: {note}")?;
-            }
-        }
-
-        Ok(())
+macro diag {
+    ($severity:ident |$p:ident| $e:expr) => {
+        emit(Severity::$severity, |$p| $e)
+    },
+    ($severity:ident $( $arg:tt )*) => {
+        emit(Severity::$severity, |p| write!(p, $( $arg )*))
     }
 }
 
 #[derive(Clone, Copy)]
-enum Severity {
+pub(crate) enum Severity {
     Error,
     Warning,
-    Info,
+    Note,
 }
 
 impl Severity {
@@ -77,29 +59,20 @@ impl Severity {
         match self {
             Self::Error => "error",
             Self::Warning => "warning",
-            Self::Info => "info",
+            Self::Note => "note",
         }
     }
 
-    const fn color(self) -> AnsiColors {
+    const fn color(self) -> AnsiColor {
         match self {
-            Self::Info => AnsiColors::Cyan,
-            Self::Warning => AnsiColors::Yellow,
-            Self::Error => AnsiColors::Red,
+            Self::Error => AnsiColor::Red,
+            Self::Warning => AnsiColor::Yellow,
+            Self::Note => AnsiColor::Blue,
         }
     }
-}
 
-impl fmt::Display for Severity {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.name().color(Self::color(*self)))
-    }
-}
-
-struct Note;
-
-impl fmt::Display for Note {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", "note".blue())
+    // FIXME: temp
+    fn paint(&self, p: &mut Painter) -> io::Result<()> {
+        p.with(self.color(), |p| write!(p, "{}", self.name()))
     }
 }

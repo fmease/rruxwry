@@ -37,14 +37,14 @@ fn parse_flags(
 ) -> Option<Vec<String>> {
     for &confusable in confusables {
         if environment.contains_key(confusable) {
-            warning::environment_contains_confusable_variable(confusable, key).emit();
+            warning::emit_env_contains_confusable_var(confusable, key);
         }
     }
 
     let flags = environment.get(key)?;
 
     let Some(flags) = flags.to_str() else {
-        warning::malformed_environment_variable(key, "its content is not valid UTF-8").emit();
+        warning::emit_malformed_env_var(key, "its content is not valid UTF-8");
 
         return None;
     };
@@ -52,30 +52,26 @@ fn parse_flags(
     let flags = shlex::split(flags);
 
     if flags.is_none() {
-        warning::malformed_environment_variable(key, "its content is not properly escaped").emit();
+        warning::emit_malformed_env_var(key, "its content is not properly escaped");
     }
 
     flags
 }
 
 mod warning {
-    use crate::diagnostic::{Diagnostic, warning};
+    use crate::diagnostic::warning;
     use std::ffi::OsStr;
 
-    pub(super) fn environment_contains_confusable_variable(
-        confusable: &OsStr,
-        suggestion: &OsStr,
-    ) -> Diagnostic {
-        warning(format!(
-            "rruxwry does not read the environment variable `{}`",
-            confusable.display()
-        ))
-        .note(format!("you might have meant `{}`", suggestion.display()))
+    pub(super) fn emit_env_contains_confusable_var(confusable: &OsStr, suggestion: &OsStr) {
+        warning!("rruxwry does not read the environment variable `{}`", confusable.display())
+        // FIXME: add back note
+        // .note(format!("you might have meant `{}`", suggestion.display()))
     }
 
-    pub(super) fn malformed_environment_variable(key: &OsStr, note: &'static str) -> Diagnostic {
-        warning(format!("the environment variable `{}` is malformed", key.display()))
-            .note(note)
-            .note("ignoring all flags potentially contained within it")
+    pub(super) fn emit_malformed_env_var(key: &OsStr, note: &'static str) {
+        warning!("the environment variable `{}` is malformed", key.display())
+        // FIXME: add back notes
+        // .note(note)
+        // .note("ignoring all flags potentially contained within it")
     }
 }
