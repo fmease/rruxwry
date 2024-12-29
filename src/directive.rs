@@ -8,7 +8,7 @@
 use crate::{
     command::{ExternCrate, VerbatimFlagsBuf},
     data::{CrateNameRef, Edition},
-    diagnostic::warning,
+    diagnostic::{self, emit},
     utility::{default, parse},
 };
 use ra_ap_rustc_lexer::TokenKind;
@@ -20,7 +20,7 @@ use std::{
     str::CharIndices,
 };
 
-pub(crate) fn parse<'src>(source: &'src str, scope: Scope) -> Directives<'src> {
+pub(crate) fn parse(source: &str, scope: Scope) -> Directives<'_> {
     let mut buffer = ErrorBuffer::default();
     let mut parser = parse::SourceFileParser::new(source);
     let mut directives = Directives::default();
@@ -270,12 +270,12 @@ impl<'src> DirectiveParser<'src> {
             Err(ErrorKind::UnknownDirective(_)) => {}
             Err(error) => return Err(Error::new(error).context(context)),
         }
-        let htmldocck = match self.parse_htmldocck_directive(source) {
+        let htmldocck = match Self::parse_htmldocck_directive(source) {
             Ok(directive) => Some(directive),
             Err(ErrorKind::UnknownDirective(_)) => None,
             Err(error) => return Err(Error::new(error).context(context)),
         };
-        let jsondocck = match self.parse_jsondocck_directive(source) {
+        let jsondocck = match Self::parse_jsondocck_directive(source) {
             Ok(directive) => Some(directive),
             Err(ErrorKind::UnknownDirective(_)) => None,
             Err(error) => return Err(Error::new(error).context(context)),
@@ -382,7 +382,6 @@ impl<'src> DirectiveParser<'src> {
 
     // FIXME: Actually parse them fully and do sth. with them, otherwise turn this into a array lookup.
     fn parse_htmldocck_directive(
-        &self,
         source: &'src str,
     ) -> Result<DirectiveKind<'src>, ErrorKind<'src>> {
         let (source, polarity) = Self::parse_polarity(source);
@@ -402,13 +401,12 @@ impl<'src> DirectiveParser<'src> {
 
     // FIXME: Actually parse them fully and do sth. with them, otherwise turn this into a array lookup.
     fn parse_jsondocck_directive(
-        &self,
         source: &'src str,
     ) -> Result<DirectiveKind<'src>, ErrorKind<'src>> {
         let (source, polarity) = Self::parse_polarity(source);
         let kind = match source {
             "count" => JsonDocCkDirectiveKind::Count,
-            "has" => JsonDocCkDirectiveKind::Count,
+            "has" => JsonDocCkDirectiveKind::Has,
             "is" => JsonDocCkDirectiveKind::Is,
             "ismany" => JsonDocCkDirectiveKind::IsMany,
             "set" => JsonDocCkDirectiveKind::Set,
@@ -526,35 +524,38 @@ impl<'src> ErrorBuffer<'src> {
     // FIXME: Shouldn't all these errors be emitted as (non-fatal) errors instead of warnings?
     //        So we can use warnings for something else?
     fn release(self) {
-        let list = |message: &mut String, mut elements: BTreeSet<_>| {
-            use std::fmt::Write as _;
+        use std::io::Write;
 
+        // FIXME: Use utility::ListExt::list (once that supports painter/writer)
+        let list = |p: &mut diagnostic::Painter, mut elements: BTreeSet<_>| {
             if let Some(element) = elements.pop_first() {
-                write!(message, "`{element}`").unwrap();
+                write!(p, "`{element}`")?;
             }
             for element in elements {
-                write!(message, ", `{element}`").unwrap();
+                write!(p, ", `{element}`")?;
             }
+            Ok(())
         };
 
+        let plural_s = |elements: &BTreeSet<_>| if elements.len() == 1 { "" } else { "s" };
+
         if !self.unknowns.is_empty() {
-            let s = if self.unknowns.len() == 1 { "" } else { "s" };
-            let mut message = format!("unknown directive{s}: ");
-            list(&mut message, self.unknowns);
-            warning(message).emit();
+            emit!(Warning(|p| {
+                write!(p, "unknown directive{}: ", plural_s(&self.unknowns))?;
+                list(p, self.unknowns)
+            }));
         }
 
         if !self.unavailables.is_empty() {
-            let s = if self.unavailables.len() == 1 { "" } else { "s" };
-            // FIXME: Better error message.
-            let mut message = format!("unavailable directive{s}: ");
-            list(&mut message, self.unavailables);
-            warning(message).emit();
+            emit!(Warning(|p| {
+                // FIXME: Better error message.
+                write!(p, "unavailable directive{}: ", plural_s(&self.unavailables))?;
+                list(p, self.unavailables)
+            }));
         }
 
         for error in self.errors {
-            // FIXME: Make `Error` impl `IntoDiagnostic`
-            warning(error.to_string()).emit();
+            emit!(Warning("{error}"));
         }
     }
 }

@@ -5,12 +5,11 @@
 use crate::{
     command::{self, ExternCrate, Flags, Strictness},
     data::{CrateName, CrateNameCow, CrateNameRef, CrateType, DocBackend, Edition},
-    diagnostic::{Diagnostic, IntoDiagnostic, error},
+    diagnostic::emit,
     directive,
     error::Result,
-    utility::default,
+    utility::{Conjunction, ListingExt as _, default},
 };
-use joinery::JoinableIterator;
 use std::{borrow::Cow, cell::LazyCell, collections::BTreeSet, mem, path::Path};
 
 pub(crate) fn build(
@@ -400,16 +399,18 @@ pub(crate) enum Error {
     UnknownRevision { unknown: String, available: BTreeSet<String> },
 }
 
-impl IntoDiagnostic for Error {
-    fn into_diagnostic(self) -> Diagnostic {
+impl Error {
+    pub(crate) fn emit(self) {
         match self {
-            Error::UnknownRevision { unknown, available } => {
+            Self::UnknownRevision { unknown, available } => {
                 let available =
-                    available.iter().map(|revision| format!("`{revision}`")).join_with(", ");
+                    available.iter().map(|revision| format!("`{revision}`")).list(Conjunction::And);
 
-                error(format!("unknown revision `{unknown}`"))
-                    .note(format!("available revisions are: {available}"))
-                    .note("you can use `--cfg` over `--rev` to suppress this check")
+                emit!(
+                    Error("unknown revision `{unknown}`")
+                        .note("available revisions are: {available}")
+                        .note("you can use `--cfg` over `--rev` to suppress this check")
+                );
             }
         }
     }

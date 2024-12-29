@@ -1,5 +1,6 @@
 //! Dealing with environment variables.
 
+use crate::command::emit;
 use std::{
     collections::HashMap,
     ffi::{OsStr, OsString},
@@ -37,14 +38,14 @@ fn parse_flags(
 ) -> Option<Vec<String>> {
     for &confusable in confusables {
         if environment.contains_key(confusable) {
-            warning::environment_contains_confusable_variable(confusable, key).emit();
+            warn_env_contains_confusable_var(confusable, key);
         }
     }
 
     let flags = environment.get(key)?;
 
     let Some(flags) = flags.to_str() else {
-        warning::malformed_environment_variable(key, "its content is not valid UTF-8").emit();
+        warn_malformed_env_var(key, "its content is not valid UTF-8");
 
         return None;
     };
@@ -52,30 +53,23 @@ fn parse_flags(
     let flags = shlex::split(flags);
 
     if flags.is_none() {
-        warning::malformed_environment_variable(key, "its content is not properly escaped").emit();
+        warn_malformed_env_var(key, "its content is not properly escaped");
     }
 
     flags
 }
 
-mod warning {
-    use crate::diagnostic::{Diagnostic, warning};
-    use std::ffi::OsStr;
+fn warn_env_contains_confusable_var(confusable: &OsStr, suggestion: &OsStr) {
+    emit!(
+        Warning("rruxwry does not read the environment variable `{}`", confusable.display())
+            .note("you might have meant `{}`", suggestion.display())
+    );
+}
 
-    pub(super) fn environment_contains_confusable_variable(
-        confusable: &OsStr,
-        suggestion: &OsStr,
-    ) -> Diagnostic {
-        warning(format!(
-            "rruxwry does not read the environment variable `{}`",
-            confusable.display()
-        ))
-        .note(format!("you might have meant `{}`", suggestion.display()))
-    }
-
-    pub(super) fn malformed_environment_variable(key: &OsStr, note: &'static str) -> Diagnostic {
-        warning(format!("the environment variable `{}` is malformed", key.display()))
-            .note(note)
+fn warn_malformed_env_var(key: &OsStr, note: &'static str) {
+    emit!(
+        Warning("the environment variable `{}` is malformed", key.display())
+            .note("{note}")
             .note("ignoring all flags potentially contained within it")
-    }
+    );
 }

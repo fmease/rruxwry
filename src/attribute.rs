@@ -1,6 +1,6 @@
 use crate::{
     data::{CrateName, CrateNameRef, CrateType, Edition},
-    diagnostic::info,
+    diagnostic::emit,
     utility::{
         SmallVec,
         parse::{At, SourceFileParser, Span},
@@ -43,7 +43,7 @@ impl<'src> Attributes<'src> {
 
         if verbose {
             let s = if amount == 1 { "" } else { "s" };
-            info(format!("parser: found {amount} crate attribute{s}")).emit();
+            emit!(Note("parser: found {amount} crate attribute{s}"));
         }
 
         let attributes = Self::lower(attributes, cfgs, source);
@@ -51,17 +51,15 @@ impl<'src> Attributes<'src> {
         if amount != 0 && verbose {
             let verb = |present| if present { "found" } else { "did not find" };
 
-            info(format!(
+            emit!(Note(
                 "lowerer: {} a well-formed `#![crate_name]`",
                 verb(attributes.crate_name.is_some()),
-            ))
-            .emit();
+            ));
 
-            info(format!(
+            emit!(Note(
                 "lowerer: {} a well-formed `#![crate_type]`",
                 verb(attributes.crate_type.is_some()),
-            ))
-            .emit();
+            ));
         }
 
         attributes

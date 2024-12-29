@@ -11,16 +11,16 @@
 
 use crate::{
     data::{CrateName, CrateNameRef, CrateType, DocBackend, Edition},
-    diagnostic::info,
+    diagnostic::{self, emit},
     error::Result,
     interface,
     utility::default,
 };
-use owo_colors::OwoColorize;
+use anstyle::{AnsiColor, Effects};
 use std::{
     borrow::Cow,
     ffi::OsStr,
-    fmt,
+    io::{self, Write},
     ops::{Deref, DerefMut},
     path::Path,
     process,
@@ -152,14 +152,14 @@ pub(crate) fn open(crate_name: CrateNameRef<'_>, flags: &interface::DebugFlags) 
     let path = std::env::current_dir()?.join("doc").join(crate_name.as_str()).join("index.html");
 
     if flags.verbose {
-        let verb = if !flags.dry_run { "running" } else { "skipping" };
-
-        info(format!(
-            "{verb} {} {}",
-            "⟨browser⟩".color(palette::COMMAND).bold(),
-            path.to_string_lossy().green()
-        ))
-        .emit();
+        emit!(Note(|p| {
+            let verb = if !flags.dry_run { "running" } else { "skipping" };
+            write!(p, "{verb} ")?;
+            p.with(palette::COMMAND.on_default().effects(Effects::BOLD), |p| {
+                write!(p, "⟨browser⟩ ")
+            })?;
+            p.with(AnsiColor::Green, |p| write!(p, "{}", path.display()))
+        }));
     }
 
     if !flags.dry_run {
@@ -206,12 +206,11 @@ impl<'a> Command<'a> {
             return;
         }
 
-        let verb = if !self.flags.dry_run { "running" } else { "skipping" };
-        let mut message = String::from(verb);
-        message += " ";
-        self.render_into(&mut message).unwrap();
-
-        info(message).emit();
+        emit!(Note(|p| {
+            let verb = if !self.flags.dry_run { "running" } else { "skipping" };
+            write!(p, "{verb} ")?;
+            self.render_into(p)
+        }));
     }
 
     fn set_toolchain(&mut self, flags: Flags<'_>) {
@@ -346,32 +345,35 @@ impl DerefMut for Command<'_> {
 }
 
 trait CommandExt {
-    fn render_into(&self, buffer: &mut String) -> fmt::Result;
+    fn render_into(&self, p: &mut diagnostic::Painter) -> io::Result<()>;
 }
 
 // This is very close to `<process::Command as fmt::Debug>::fmt` but prettier.
+// FIXME: This lacks shell escaping!
 impl CommandExt for process::Command {
-    fn render_into(&self, buffer: &mut String) -> fmt::Result {
-        use std::fmt::Write;
+    fn render_into(&self, p: &mut diagnostic::Painter) -> io::Result<()> {
+        #[allow(irrefutable_let_patterns)]
+        if let envs = self.get_envs()
+            && !envs.is_empty()
+        {
+            p.set(palette::VARIABLE)?;
+            for (key, value) in self.get_envs() {
+                // FIXME: Print `env -u VAR` for removed vars before
+                // added vars just like `Command`'s `Debug` impl.
+                let Some(value) = value else { continue };
 
-        for (key, value) in self.get_envs() {
-            // FIXME: Print `env -u VAR` for removed vars before
-            // added vars just like `Command`'s `Debug` impl.
-            let Some(value) = value else { continue };
-
-            write!(
-                buffer,
-                "{}{}{} ",
-                key.to_string_lossy().color(palette::VARIABLE).bold(),
-                "=".color(palette::VARIABLE),
-                value.to_string_lossy().color(palette::VARIABLE)
-            )?;
+                p.with(Effects::BOLD, |p| write!(p, "{}", key.display()))?;
+                write!(p, "={} ", value.display())?;
+            }
+            p.unset()?;
         }
 
-        write!(buffer, "{}", self.get_program().to_string_lossy().color(palette::COMMAND).bold())?;
+        p.with(palette::COMMAND.on_default().effects(Effects::BOLD), |p| {
+            write!(p, "{}", self.get_program().display())
+        })?;
 
         for argument in self.get_args() {
-            write!(buffer, " {}", argument.to_string_lossy().color(palette::ARGUMENT))?;
+            p.with(palette::ARGUMENT, |p| write!(p, " {}", argument.display()))?;
         }
 
         Ok(())
@@ -379,11 +381,11 @@ impl CommandExt for process::Command {
 }
 
 mod palette {
-    use owo_colors::AnsiColors;
+    use anstyle::AnsiColor;
 
-    pub(super) const VARIABLE: AnsiColors = AnsiColors::Yellow;
-    pub(super) const COMMAND: AnsiColors = AnsiColors::Magenta;
-    pub(super) const ARGUMENT: AnsiColors = AnsiColors::Green;
+    pub(super) const VARIABLE: AnsiColor = AnsiColor::Yellow;
+    pub(super) const COMMAND: AnsiColor = AnsiColor::Magenta;
+    pub(super) const ARGUMENT: AnsiColor = AnsiColor::Green;
 }
 
 #[derive(Clone)]

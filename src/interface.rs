@@ -3,10 +3,9 @@
 use crate::{
     data::{CrateNameBuf, CrateType, DocBackend, Edition},
     operate::{BuildMode, DocMode},
-    utility::parse,
+    utility::{Conjunction, ListingExt as _, parse},
 };
 use clap::ColorChoice;
-use joinery::JoinableIterator;
 use std::{ffi::OsString, path::PathBuf};
 
 // FIXME: Improve naming: *Flags, Arguments, ...
@@ -398,7 +397,7 @@ impl CrateType {
 fn possible_values(values: impl Iterator<Item: std::fmt::Display> + Clone) -> String {
     format!(
         "possible values: {}",
-        values.into_iter().map(|value| format!("`{value}`")).join_with(", ")
+        values.into_iter().map(|value| format!("`{value}`")).list(Conjunction::Or)
     )
 }
 
