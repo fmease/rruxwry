@@ -1,0 +1,6 @@
+#!/usr/bin/env sh
+
+CARGO_MANIFEST_DIR="$( dirname $( realpath $0 ) )/../"
+
+cargo build --release --manifest-path="$CARGO_MANIFEST_DIR/Cargo.toml" \
+   && cp "$CARGO_MANIFEST_DIR/target/release/rruxwry" "$HOME/.bin/"

@@ -1,0 +1,63 @@
+#!/usr/bin/env -S cargo -Zscript
+---
+[package]
+edition = "2024"
+---
+//! Regenerate the `README.md`.
+#![feature(exit_status_error)]
+
+use std::{env, error::Error, path::Path, process::Command};
+
+fn main() -> Result<(), Box<dyn Error>> {
+    let project_path = Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/.."));
+    let binary_path =
+        project_path.join("target/release/rruxwry").with_extension(env::consts::EXE_EXTENSION);
+    let readme_path = project_path.join("README.md");
+    std::fs::copy(&readme_path, project_path.join("README.backup.md"))?;
+    let source = std::fs::read_to_string(&readme_path)?;
+
+    let mut result = Vec::with_capacity(source.len());
+    let mut state = State::Keep;
+
+    for line in source.lines() {
+        match state {
+            State::Keep => {
+                if line == "<!--{COMMAND-->" {
+                    state = State::Seek;
+                }
+            }
+            State::Seek => state = State::Skip,
+            State::Skip => {
+                if line == "<!--COMMAND}-->" {
+                    state = State::Keep;
+                } else {
+                    continue;
+                }
+            }
+        }
+
+        result.extend_from_slice(line.as_bytes());
+        result.push(b'\n');
+
+        if let State::Skip = state {
+            let line = line.strip_prefix("`rruxwry ").unwrap();
+            let line = line.strip_suffix("`:").unwrap();
+            let mut output = Command::new(&binary_path).args(line.split(" ")).output()?;
+            output.status.exit_ok()?;
+            assert!(output.stderr.is_empty());
+            result.extend_from_slice(b"```\n");
+            result.append(&mut output.stdout);
+            result.extend_from_slice(b"```\n");
+        }
+    }
+
+    std::fs::write(readme_path, result)?;
+
+    Ok(())
+}
+
+enum State {
+    Keep,
+    Seek,
+    Skip,
+}

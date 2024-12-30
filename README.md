@@ -110,24 +110,25 @@ However if that's too wordy for you and you don't care about passing arguments /
 
 ## Command-Line Interface
 
+<!--{COMMAND-->
 `rruxwry -h`:
-
 ```
 A wrapper around rust{,do}c for rust{,do}c devs
 
 Usage: rruxwry <COMMAND>
 
 Commands:
-  build  Compile the given crate
-  doc    Document the given crate
+  build  Compile the given crate with rustc
+  doc    Document the given crate with rustdoc
   help   Print this message or the help of the given subcommand(s)
 
 Options:
   -h, --help  Print help
 ```
+<!--COMMAND}-->
 
+<!--{COMMAND-->
 `rruxwry build -h`:
-
 ```
 Compile the given crate with rustc
 
@@ -156,9 +157,10 @@ Options:
       --color <WHEN>          Control when to use color [default: auto] [possible values: auto, always, never]
   -h, --help                  Print help
 ```
+<!--COMMAND}-->
 
+<!--{COMMAND-->
 `rruxwry doc -h`:
-
 ```
 Document the given crate with rustdoc
 
@@ -196,6 +198,7 @@ Options:
       --color <WHEN>             Control when to use color [default: auto] [possible values: auto, always, never]
   -h, --help                     Print help
 ```
+<!--COMMAND}-->
 
 Additionally, *rruxwry* recognizes the environment variables `RUSTFLAGS` and `RUSTDOCFLAGS`.
 
