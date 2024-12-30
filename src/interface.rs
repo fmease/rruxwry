@@ -92,6 +92,7 @@ pub(crate) fn arguments() -> Arguments {
                 .value_name("NAME")
                 .action(clap::ArgAction::Append)
                 .help("Enable a Cargo-like feature"),
+            // FIXME: This doesn't really belong in this "group" (`cfgs`)
             clap::Arg::new(id::RUSTC_FEATURES)
                 .short('F')
                 .long("rustc-feature")
@@ -113,6 +114,11 @@ pub(crate) fn arguments() -> Arguments {
                 .long("internals")
                 .action(clap::ArgAction::SetTrue)
                 .help("Enable rustc's `-Zverbose-internals`"),
+            clap::Arg::new(id::NEXT_SOLVER)
+                .short('N')
+                .long("next-solver")
+                .action(clap::ArgAction::SetTrue)
+                .help("Enable the next-gen trait solver"),
             clap::Arg::new(id::LOG)
                 .long("log")
                 .value_name("FILTER")
@@ -232,7 +238,6 @@ pub(crate) fn arguments() -> Arguments {
                                 .action(clap::ArgAction::SetTrue)
                                 .help("Generate links to definitions"),
                             clap::Arg::new(id::NORMALIZE)
-                                .short('N')
                                 .long("normalize")
                                 .action(clap::ArgAction::SetTrue)
                                 .help("Normalize types"),
@@ -308,6 +313,7 @@ pub(crate) fn arguments() -> Arguments {
             rustc_verbose_internals: matches
                 .remove_one(id::RUSTC_VERBOSE_INTERNALS)
                 .unwrap_or_default(),
+            next_solver: matches.remove_one(id::NEXT_SOLVER).unwrap_or_default(),
             log: matches.remove_one(id::LOG),
             no_backtrace: matches.remove_one(id::NO_BACKTRACE).unwrap_or_default(),
         },
@@ -354,10 +360,12 @@ pub(crate) struct DocFlags {
 pub(crate) struct BuildFlags {
     pub(crate) cfgs: Vec<String>,
     pub(crate) revisions: Vec<String>,
+    // FIXME: This shouldn't be here:
     pub(crate) cargo_features: Vec<String>,
     pub(crate) rustc_features: Vec<String>,
     pub(crate) cap_lints: bool,
     pub(crate) rustc_verbose_internals: bool,
+    pub(crate) next_solver: bool,
     pub(crate) log: Option<String>,
     pub(crate) no_backtrace: bool,
 }
@@ -420,6 +428,7 @@ mod id {
     pub(super) const LAYOUT: &str = "LAYOUT";
     pub(super) const LINK_TO_DEFINITION: &str = "LINK_TO_DEFINITION";
     pub(super) const LOG: &str = "LOG";
+    pub(super) const NEXT_SOLVER: &str = "NEXT_SOLVER";
     pub(super) const NO_BACKTRACE: &str = "NO_BACKTRACE";
     pub(super) const NORMALIZE: &str = "NORMALIZE";
     pub(super) const OPEN: &str = "OPEN";

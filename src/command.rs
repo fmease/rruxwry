@@ -50,6 +50,8 @@ pub(super) fn compile(
     cmd.set_cfgs(flags.build);
     cmd.set_rustc_features(flags.build);
     cmd.set_cap_lints(flags.build);
+    cmd.set_next_solver(flags.build);
+
     cmd.set_internals_mode(flags.build);
 
     cmd.set_verbatim_flags(flags.verbatim);
@@ -127,6 +129,8 @@ pub(super) fn document(
     cmd.set_cfgs(flags.build);
     cmd.set_rustc_features(flags.build);
     cmd.set_cap_lints(flags.build);
+    cmd.set_next_solver(flags.build);
+
     cmd.set_internals_mode(flags.build);
 
     cmd.set_verbatim_flags(flags.verbatim);
@@ -308,6 +312,12 @@ impl<'a> Command<'a> {
     fn set_cap_lints(&mut self, flags: &interface::BuildFlags) {
         if flags.cap_lints {
             self.arg("--cap-lints=warn");
+        }
+    }
+
+    fn set_next_solver(&mut self, flags: &interface::BuildFlags) {
+        if flags.next_solver {
+            self.arg("-Znext-solver");
         }
     }
 

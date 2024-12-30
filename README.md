@@ -150,6 +150,7 @@ Options:
   -F, --rustc-feature <NAME>  Enable an experimental rustc library or language feature
   -/, --cap-lints             Cap lints at warning level
   -#, --internals             Enable rustc's `-Zverbose-internals`
+  -N, --next-solver           Enable the next-gen trait solver
       --log [<FILTER>]        Enable rust{,do}c logging. FILTER defaults to `debug`
   -B, --no-backtrace          Override `RUST_BACKTRACE` to be `0`
   -V, --verbose               Use verbose output
@@ -187,10 +188,11 @@ Options:
   -H, --hidden                   Document hidden items
       --layout                   Document the memory layout of types
       --link-to-definition       Generate links to definitions
-  -N, --normalize                Normalize types
+      --normalize                Normalize types
       --theme <THEME>            Set the theme [default: ayu]
   -/, --cap-lints                Cap lints at warning level
   -#, --internals                Enable rustc's `-Zverbose-internals`
+  -N, --next-solver              Enable the next-gen trait solver
       --log [<FILTER>]           Enable rust{,do}c logging. FILTER defaults to `debug`
   -B, --no-backtrace             Override `RUST_BACKTRACE` to be `0`
   -V, --verbose                  Use verbose output
