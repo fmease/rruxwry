@@ -1,7 +1,7 @@
 //! The command-line interface.
 
 use crate::{
-    data::{CrateNameBuf, CrateType, DocBackend, Edition},
+    data::{CrateNameBuf, CrateType, DocBackend, Edition, Identity},
     operate::{BuildMode, DocMode},
     utility::{Conjunction, ListingExt as _, parse},
 };
@@ -113,12 +113,18 @@ pub(crate) fn arguments() -> Arguments {
                 .short('#')
                 .long("internals")
                 .action(clap::ArgAction::SetTrue)
-                .help("Enable rustc's `-Zverbose-internals`"),
+                .help("Enable rust{,do}c's `-Zverbose-internals`"),
             clap::Arg::new(id::NEXT_SOLVER)
                 .short('N')
                 .long("next-solver")
                 .action(clap::ArgAction::SetTrue)
                 .help("Enable the next-gen trait solver"),
+            clap::Arg::new(id::IDENTITY)
+                .short('=')
+                .long("identity")
+                .value_name("IDENTITY")
+                .value_parser(Identity::parse_cli_style)
+                .help("Force rust{,do}c's identity"),
             clap::Arg::new(id::LOG)
                 .long("log")
                 .value_name("FILTER")
@@ -314,6 +320,7 @@ pub(crate) fn arguments() -> Arguments {
                 .remove_one(id::RUSTC_VERBOSE_INTERNALS)
                 .unwrap_or_default(),
             next_solver: matches.remove_one(id::NEXT_SOLVER).unwrap_or_default(),
+            identity: matches.remove_one(id::IDENTITY),
             log: matches.remove_one(id::LOG),
             no_backtrace: matches.remove_one(id::NO_BACKTRACE).unwrap_or_default(),
         },
@@ -366,6 +373,7 @@ pub(crate) struct BuildFlags {
     pub(crate) cap_lints: bool,
     pub(crate) rustc_verbose_internals: bool,
     pub(crate) next_solver: bool,
+    pub(crate) identity: Option<Identity>,
     pub(crate) log: Option<String>,
     pub(crate) no_backtrace: bool,
 }
@@ -402,6 +410,17 @@ impl CrateType {
     }
 }
 
+impl Identity {
+    fn parse_cli_style(source: &str) -> Result<Self, String> {
+        parse!(
+            "T" => Self::True,
+            "S" => Self::Stable,
+            "N" => Self::Nightly,
+        )(source)
+        .map_err(possible_values)
+    }
+}
+
 fn possible_values(values: impl Iterator<Item: std::fmt::Display> + Clone) -> String {
     format!(
         "possible values: {}",
@@ -424,6 +443,7 @@ mod id {
     pub(super) const DRY_RUN: &str = "DRY_RUN";
     pub(super) const EDITION: &str = "EDITION";
     pub(super) const HIDDEN: &str = "HIDDEN";
+    pub(super) const IDENTITY: &str = "IDENTITY";
     pub(super) const JSON: &str = "JSON";
     pub(super) const LAYOUT: &str = "LAYOUT";
     pub(super) const LINK_TO_DEFINITION: &str = "LINK_TO_DEFINITION";

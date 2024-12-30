@@ -10,7 +10,7 @@
 //        as well as those passed via the `RUST{,DOC}FLAGS` env vars.
 
 use crate::{
-    data::{CrateName, CrateNameRef, CrateType, DocBackend, Edition},
+    data::{CrateName, CrateNameRef, CrateType, DocBackend, Edition, Identity},
     diagnostic::{self, emit},
     error::Result,
     interface,
@@ -60,6 +60,7 @@ pub(super) fn compile(
         cmd.args(flags);
     }
 
+    cmd.set_identity(flags.build);
     cmd.set_backtrace_behavior(flags.build);
 
     if let Some(filter) = &flags.build.log {
@@ -282,6 +283,15 @@ impl<'a> Command<'a> {
         if flags.rustc_verbose_internals {
             self.arg("-Zverbose-internals");
         }
+    }
+
+    fn set_identity(&mut self, flags: &interface::BuildFlags) {
+        let Some(identity) = flags.identity else { return };
+        self.env("RUSTC_BOOTSTRAP", match identity {
+            Identity::True => "0",
+            Identity::Stable => "-1",
+            Identity::Nightly => "1",
+        });
     }
 
     fn set_backtrace_behavior(&mut self, flags: &interface::BuildFlags) {

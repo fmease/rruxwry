@@ -168,3 +168,10 @@ pub(crate) enum DocBackend {
     Html,
     Json,
 }
+
+#[derive(Clone, Copy)]
+pub(crate) enum Identity {
+    True,
+    Stable,
+    Nightly,
+}
