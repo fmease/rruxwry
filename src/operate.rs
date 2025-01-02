@@ -74,9 +74,19 @@ fn build_compiletest(
         revisions.insert(revision.as_str());
     }
 
+    // FIXME: Should we actually add `--cfg`s to the list of revisions???
     revisions.extend(flags.build.cfgs.iter().map(String::as_str));
 
     let mut directives = directives.into_instantiated(&revisions);
+
+    // FIXME: unwrap
+    let auxiliary_base_path = LazyCell::new(|| path.parent().unwrap().join("auxiliary"));
+
+    let dependencies: Vec<_> = directives
+        .dependencies
+        .iter()
+        .map(|dependency| build_compiletest_auxiliary(dependency, &auxiliary_base_path, flags))
+        .collect::<Result<_>>()?;
 
     let verbatim_flags = mem::take(&mut directives.verbatim_flags).extended(flags.verbatim);
     let flags = Flags { verbatim: verbatim_flags.as_ref(), ..flags };
@@ -87,12 +97,72 @@ fn build_compiletest(
         // FIXME: Once we support `//@ proc-macro` we need to honor the implicit crate_type==Lib (of the host) here.
         crate_type,
         directives.edition.unwrap_or(Edition::RUSTC_DEFAULT),
-        // FIXME: Respect `//@ aux-crate` etc.
         // FIXME: Once we support `//@ proc-macro` we need to add `proc_macro` (to the client) similar to `extern_prelude_for` here.
-        &[],
+        &dependencies,
         flags,
         Strictness::Strict,
     )
+}
+
+// FIXME: Support nested auxiliaries!
+// FIXME: Detect and reject circular/cyclic auxiliaries.
+fn build_compiletest_auxiliary<'a>(
+    extern_crate: &ExternCrate<'a>,
+    base_path: &Path,
+    flags: Flags<'_>,
+) -> Result<ExternCrate<'a>> {
+    let path = match extern_crate {
+        ExternCrate::Unnamed { path } => base_path.join(path),
+        ExternCrate::Named { name, path } => match path {
+            Some(path) => base_path.join(path.as_ref()),
+            None => base_path.join(name.as_str()).with_extension("rs"),
+        },
+    };
+
+    // FIXME: unwrap
+    let crate_name = CrateName::adjust_and_parse_file_path(&path).unwrap();
+
+    let source = std::fs::read_to_string(&path); // FIXME: error context
+
+    // FIXME: What about instantiation???
+    let mut directives = source
+        .as_ref()
+        .map(|source| directive::parse(source, directive::Scope::Base))
+        .unwrap_or_default();
+
+    let edition = directives.edition.unwrap_or(Edition::RUSTC_DEFAULT);
+
+    let verbatim_flags = mem::take(&mut directives.verbatim_flags).extended(flags.verbatim);
+    let flags = Flags { verbatim: verbatim_flags.as_ref(), ..flags };
+
+    command::compile(
+        &path,
+        crate_name.as_ref(),
+        // FIXME: Verify this works with `@compile-flags:--crate-type=proc-macro`
+        // FIXME: I don't think it works rn
+        CrateType::Lib,
+        edition,
+        &[],
+        flags,
+        Strictness::Strict,
+    )?;
+    // FIXME: Do we need to respect `compile-flags: --crate-name` and adjust `ExternCrate` accordingly?
+    Ok(match *extern_crate {
+        // FIXME: probably doesn't handle `//@ aux-build: ../file.rs` correctly since `-L.` wouldn't pick it up
+        ExternCrate::Unnamed { path } => ExternCrate::Unnamed { path },
+        // FIXME: For some reason `compiletest` doesn't support `//@ aux-crate: name=../`
+        ExternCrate::Named { name, .. } => {
+            // FIXME: unwrap
+            let crate_name = CrateName::adjust_and_parse_file_path(&path).unwrap();
+
+            ExternCrate::Named {
+                name,
+                // FIXME: needs to be relative to the base_path
+                // FIXME: layer violation?? should this be the job of mod command?
+                path: (name != crate_name.as_ref()).then(|| format!("lib{crate_name}.rlib").into()),
+            }
+        }
+    })
 }
 
 pub(crate) fn document<'a>(
@@ -237,6 +307,7 @@ fn document_compiletest<'a>(
         revisions.insert(revision.as_str());
     }
 
+    // FIXME: Should we actually add `--cfg`s to the list of revisions???
     revisions.extend(flags.build.cfgs.iter().map(String::as_str));
 
     let mut directives = directives.into_instantiated(&revisions);
@@ -278,6 +349,7 @@ fn document_compiletest<'a>(
 }
 
 // FIXME: Support nested auxiliaries!
+// FIXME: Detect and reject circular/cyclic auxiliaries.
 fn document_compiletest_auxiliary<'a>(
     extern_crate: &ExternCrate<'a>,
     base_path: &Path,
@@ -294,10 +366,10 @@ fn document_compiletest_auxiliary<'a>(
         },
     };
 
-    let source = std::fs::read_to_string(&path); // FIXME: error context
-
     // FIXME: unwrap
     let crate_name = CrateName::adjust_and_parse_file_path(&path).unwrap();
+
+    let source = std::fs::read_to_string(&path); // FIXME: error context
 
     // FIXME: DRY
     let scope = match doc_flags.backend {
