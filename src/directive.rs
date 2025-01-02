@@ -80,6 +80,7 @@ impl<'src> Directives<'src> {
 
         if let Some(revision) = revision {
             if !self.revisions.contains(revision) {
+                // FIXME: Emit a different error if `self.revisions.is_empty()`, one that makes no sense
                 return Err(emit!(
                     Error("unknown revision `{revision}`")
                         .note("available revisions are: {}", available())

@@ -1,6 +1,6 @@
 use crate::utility;
 use anstream::ColorChoice;
-use anstyle::AnsiColor;
+use anstyle::{AnsiColor, Effects};
 use std::io::{self, Write};
 
 pub(crate) type Painter = utility::paint::Painter<io::BufWriter<io::StderrLock<'static>>>;
@@ -19,24 +19,37 @@ impl Emitter {
         severity: Severity,
         message: impl FnOnce(&mut Painter) -> io::Result<()>,
     ) -> Self {
+        Self::try_new(severity, message).unwrap()
+    }
+
+    fn try_new(
+        severity: Severity,
+        message: impl FnOnce(&mut Painter) -> io::Result<()>,
+    ) -> io::Result<Self> {
         let stderr = io::stderr().lock();
         let colorize = anstream::AutoStream::choice(&stderr) != ColorChoice::Never;
         let mut p = Painter::new(io::BufWriter::new(stderr), colorize);
-        severity.paint(&mut p).unwrap();
-        write!(&mut p, ": ").unwrap();
-        message(&mut p).unwrap();
+        p.set(Effects::BOLD)?;
+        p.with(severity.color(), |p| write!(p, "{}[rruxwry]", severity.name()))?;
+        write!(&mut p, ": ")?;
+        message(&mut p)?;
+        p.unset()?;
         let padding = " ".repeat(severity.name().len() + ": ".len());
-        Self { p, padding }
+        Ok(Self { p, padding })
     }
 
-    pub(crate) fn note(mut self, note: impl FnOnce(&mut Painter) -> io::Result<()>) -> Self {
-        writeln!(&mut self.p).unwrap();
+    pub(crate) fn note(self, note: impl FnOnce(&mut Painter) -> io::Result<()>) -> Self {
+        self.try_note(note).unwrap()
+    }
+
+    fn try_note(mut self, note: impl FnOnce(&mut Painter) -> io::Result<()>) -> io::Result<Self> {
+        writeln!(self.p)?;
         // FIXME: can we use one of the format modifiers to allow us to store padding as usize?
-        write!(&mut self.p, "{}", self.padding).unwrap();
-        Severity::Note.paint(&mut self.p).unwrap();
-        write!(&mut self.p, ": ").unwrap();
-        note(&mut self.p).unwrap();
-        self
+        write!(self.p, "{}", self.padding)?;
+        self.p.with(Severity::Note.color(), |p| write!(p, "{}", Severity::Note.name()))?;
+        write!(self.p, ": ")?;
+        note(&mut self.p)?;
+        Ok(self)
     }
 
     pub(crate) fn finish(mut self) -> EmittedError {
@@ -82,9 +95,5 @@ impl Severity {
             Self::Warning => AnsiColor::Yellow,
             Self::Note => AnsiColor::Blue,
         }
-    }
-
-    fn paint(self, p: &mut Painter) -> io::Result<()> {
-        p.with(self.color(), |p| write!(p, "{}", self.name()))
     }
 }
