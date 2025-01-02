@@ -80,10 +80,9 @@ pub(crate) fn arguments() -> Arguments {
                 .value_name("NAME")
                 .action(clap::ArgAction::Append)
                 .help("Enable a `cfg`"),
-            clap::Arg::new(id::REVISIONS)
+            clap::Arg::new(id::REVISION)
                 .long("rev")
                 .value_name("NAME")
-                .action(clap::ArgAction::Append)
                 .requires(id::COMPILETEST)
                 .help("Enable a compiletest revision"),
             clap::Arg::new(id::CARGO_FEATURES)
@@ -303,10 +302,7 @@ pub(crate) fn arguments() -> Arguments {
         edition: matches.remove_one(id::EDITION),
         build: BuildFlags {
             cfgs: matches.remove_many(id::CFGS).map(Iterator::collect).unwrap_or_default(),
-            revisions: matches
-                .remove_many(id::REVISIONS)
-                .map(Iterator::collect)
-                .unwrap_or_default(),
+            revision: matches.remove_one(id::REVISION),
             cargo_features: matches
                 .remove_many(id::CARGO_FEATURES)
                 .map(Iterator::collect)
@@ -364,9 +360,10 @@ pub(crate) struct DocFlags {
 }
 
 /// Flags that get passed to `rustc` and `rustdoc` in a lowered form.
+#[allow(clippy::struct_excessive_bools)] // not worth to address
 pub(crate) struct BuildFlags {
     pub(crate) cfgs: Vec<String>,
-    pub(crate) revisions: Vec<String>,
+    pub(crate) revision: Option<String>,
     // FIXME: This shouldn't be here:
     pub(crate) cargo_features: Vec<String>,
     pub(crate) rustc_features: Vec<String>,
@@ -454,7 +451,7 @@ mod id {
     pub(super) const OPEN: &str = "OPEN";
     pub(super) const PATH: &str = "PATH";
     pub(super) const PRIVATE: &str = "PRIVATE";
-    pub(super) const REVISIONS: &str = "REVISIONS";
+    pub(super) const REVISION: &str = "REVISION";
     pub(super) const RUN: &str = "RUN";
     pub(super) const RUSTC_FEATURES: &str = "RUSTC_FEATURES";
     pub(super) const RUSTC_VERBOSE_INTERNALS: &str = "RUSTC_VERBOSE_INTERNALS";

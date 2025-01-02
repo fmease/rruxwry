@@ -39,10 +39,13 @@ impl Emitter {
         self
     }
 
-    pub(crate) fn finish(mut self) {
+    pub(crate) fn finish(mut self) -> EmittedError {
         writeln!(self.p).unwrap();
+        EmittedError(())
     }
 }
+
+pub(crate) struct EmittedError(());
 
 pub(crate) macro emit {
     ($Severity:ident($( $message:tt )*) $( .note( $( $note:tt )* ) )*) => {

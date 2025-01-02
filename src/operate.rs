@@ -5,12 +5,11 @@
 use crate::{
     command::{self, ExternCrate, Flags, Strictness},
     data::{CrateName, CrateNameCow, CrateNameRef, CrateType, DocBackend, Edition},
-    diagnostic::emit,
     directive,
     error::Result,
-    utility::{Conjunction, ListingExt as _, default},
+    utility::default,
 };
-use std::{borrow::Cow, cell::LazyCell, collections::BTreeSet, mem, path::Path};
+use std::{borrow::Cow, cell::LazyCell, mem, path::Path};
 
 pub(crate) fn build(
     mode: BuildMode,
@@ -52,29 +51,11 @@ fn build_compiletest(
     _edition: Edition,
     flags: Flags<'_>,
 ) -> Result {
-    // FIXME: Add a flag `--all-revs`.
     // FIXME: Make sure `//@ compile-flags: --extern name` works as expected
     let source = std::fs::read_to_string(path)?; // FIXME: error context
     let directives = directive::parse(&source, directive::Scope::Base);
 
-    // FIXME: We should also store Cargo-like features here after having converted them to
-    // cfg specs NOTE: This will be fixed once we eagerly expand `-f` to `--cfg`.
-    // FIXME: Is it actually possible to write `//[feature="name"]@` and have compiletest understand it?
-    let mut revisions = BTreeSet::default();
-
-    for revision in &flags.build.revisions {
-        if !directives.revisions.contains(revision.as_str()) {
-            let error = Error::UnknownRevision {
-                unknown: revision.clone(),
-                available: directives.revisions.iter().map(ToString::to_string).collect(),
-            };
-            return Err(error.into());
-        }
-
-        revisions.insert(revision.as_str());
-    }
-
-    let mut directives = directives.instantiated(&revisions);
+    let mut directives = directives.instantiated(flags.build.revision.as_deref())?;
 
     // FIXME: unwrap
     let auxiliary_base_path = LazyCell::new(|| path.parent().unwrap().join("auxiliary"));
@@ -278,7 +259,6 @@ fn document_compiletest<'a>(
     // FIXME: tempory
     doc_flags: &crate::interface::DocFlags,
 ) -> Result<CrateNameCow<'a>> {
-    // FIXME: Add a flag `--all-revs`.
     // FIXME: Make sure `//@ compile-flags: --extern name` works as expected
     let source = std::fs::read_to_string(path)?; // FIXME: error context
     let scope = match doc_flags.backend {
@@ -287,24 +267,7 @@ fn document_compiletest<'a>(
     };
     let directives = directive::parse(&source, scope);
 
-    // FIXME: We should also store Cargo-like features here after having converted them to
-    // cfg specs NOTE: This will be fixed once we eagerly expand `-f` to `--cfg`.
-    // FIXME: Is it actually possible to write `//[feature="name"]@` and have compiletest understand it?
-    let mut revisions = BTreeSet::default();
-
-    for revision in &flags.build.revisions {
-        if !directives.revisions.contains(revision.as_str()) {
-            let error = Error::UnknownRevision {
-                unknown: revision.clone(),
-                available: directives.revisions.iter().map(ToString::to_string).collect(),
-            };
-            return Err(error.into());
-        }
-
-        revisions.insert(revision.as_str());
-    }
-
-    let mut directives = directives.instantiated(&revisions);
+    let mut directives = directives.instantiated(flags.build.revision.as_deref())?;
 
     // FIXME: unwrap
     let auxiliary_base_path = LazyCell::new(|| path.parent().unwrap().join("auxiliary"));
@@ -457,26 +420,6 @@ impl BuildMode {
         match self {
             Self::Default => Edition::LATEST_STABLE,
             Self::Compiletest => Edition::RUSTC_DEFAULT,
-        }
-    }
-}
-
-pub(crate) enum Error {
-    UnknownRevision { unknown: String, available: BTreeSet<String> },
-}
-
-impl Error {
-    pub(crate) fn emit(self) {
-        match self {
-            Self::UnknownRevision { unknown, available } => {
-                let available =
-                    available.iter().map(|revision| format!("`{revision}`")).list(Conjunction::And);
-
-                emit!(
-                    Error("unknown revision `{unknown}`")
-                        .note("available revisions are: {available}")
-                );
-            }
         }
     }
 }

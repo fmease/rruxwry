@@ -27,7 +27,6 @@ mod operate;
 mod utility;
 
 // FIXME: respect `compile-flags: --test`
-// FIXME: Add `--all-revs`.
 // FIXME: Support for `-r`/`--release` maybe?
 
 fn main() -> ExitCode {

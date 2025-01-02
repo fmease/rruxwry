@@ -8,8 +8,8 @@
 use crate::{
     command::{ExternCrate, VerbatimFlagsBuf},
     data::{CrateNameRef, Edition},
-    diagnostic::{self, emit},
-    utility::parse,
+    diagnostic::{self, EmittedError, emit},
+    utility::{Conjunction, ListingExt, parse},
 };
 use ra_ap_rustc_lexer::TokenKind;
 use std::{
@@ -73,19 +73,32 @@ impl<'src> Directives<'src> {
     }
 
     /// Instantiate all directives that are conditional on a revision.
-    pub(crate) fn instantiated(mut self, revisions: &BTreeSet<&str>) -> Self {
-        let uninstantiated = std::mem::take(&mut self.uninstantiated);
-        // In the most common case, the user doesn't enable any revisions. Therefore we
-        // iterate over the `revisions` instead of the `uninstantiated` directives and
-        // can avoid performing unnecessary work.
-        for revision in revisions {
-            if let Some(directives) = uninstantiated.get(revision) {
-                for directive in directives {
-                    self.adjoin(directive.clone());
-                }
+    // FIXME: Return a proper error type (i.e., don't emit immediately).
+    pub(crate) fn instantiated(mut self, revision: Option<&str>) -> Result<Self, EmittedError> {
+        let available =
+            || self.revisions.iter().map(|revision| format!("`{revision}`")).list(Conjunction::And);
+
+        if let Some(revision) = revision {
+            if !self.revisions.contains(revision) {
+                return Err(emit!(
+                    Error("unknown revision `{revision}`")
+                        .note("available revisions are: {}", available())
+                ));
             }
+
+            let uninstantiated = std::mem::take(&mut self.uninstantiated);
+            for directive in &uninstantiated[revision] {
+                self.adjoin(directive.clone());
+            }
+        } else if !self.revisions.is_empty() {
+            // FIXME: Return a proper error type, so the caller can suggest `--rev`
+            //        without it resulting in an abstraction layer violation.
+            return Err(emit!(
+                Error("no revision specified").note("available revisions are: {}", available())
+            ));
         }
-        self
+
+        Ok(self)
     }
 }
 

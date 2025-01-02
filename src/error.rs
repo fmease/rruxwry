@@ -1,11 +1,12 @@
-use crate::diagnostic::emit;
+use crate::diagnostic::{EmittedError, emit};
+use std::{io, process};
 
 pub(crate) type Result<T = (), E = Error> = std::result::Result<T, E>;
 
 pub(crate) enum Error {
-    Io(std::io::Error),
-    Process(std::process::ExitStatusError),
-    Build(Box<crate::operate::Error>),
+    Io(io::Error),
+    Process(process::ExitStatusError),
+    Emitted(EmittedError),
 }
 
 impl Error {
@@ -13,25 +14,25 @@ impl Error {
         match self {
             Self::Io(error) => emit!(Error("{error}")),
             Self::Process(error) => emit!(Error("{error}")),
-            Self::Build(error) => error.emit(),
-        }
+            Self::Emitted(error) => error,
+        };
     }
 }
 
-impl From<std::io::Error> for Error {
-    fn from(error: std::io::Error) -> Self {
+impl From<io::Error> for Error {
+    fn from(error: io::Error) -> Self {
         Self::Io(error)
     }
 }
 
-impl From<std::process::ExitStatusError> for Error {
-    fn from(error: std::process::ExitStatusError) -> Self {
+impl From<process::ExitStatusError> for Error {
+    fn from(error: process::ExitStatusError) -> Self {
         Self::Process(error)
     }
 }
 
-impl From<crate::operate::Error> for Error {
-    fn from(error: crate::operate::Error) -> Self {
-        Self::Build(Box::new(error))
+impl From<EmittedError> for Error {
+    fn from(error: EmittedError) -> Self {
+        Self::Emitted(error)
     }
 }
