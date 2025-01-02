@@ -74,10 +74,7 @@ fn build_compiletest(
         revisions.insert(revision.as_str());
     }
 
-    // FIXME: Should we actually add `--cfg`s to the list of revisions???
-    revisions.extend(flags.build.cfgs.iter().map(String::as_str));
-
-    let mut directives = directives.into_instantiated(&revisions);
+    let mut directives = directives.instantiated(&revisions);
 
     // FIXME: unwrap
     let auxiliary_base_path = LazyCell::new(|| path.parent().unwrap().join("auxiliary"));
@@ -307,10 +304,7 @@ fn document_compiletest<'a>(
         revisions.insert(revision.as_str());
     }
 
-    // FIXME: Should we actually add `--cfg`s to the list of revisions???
-    revisions.extend(flags.build.cfgs.iter().map(String::as_str));
-
-    let mut directives = directives.into_instantiated(&revisions);
+    let mut directives = directives.instantiated(&revisions);
 
     // FIXME: unwrap
     let auxiliary_base_path = LazyCell::new(|| path.parent().unwrap().join("auxiliary"));
@@ -481,7 +475,6 @@ impl Error {
                 emit!(
                     Error("unknown revision `{unknown}`")
                         .note("available revisions are: {available}")
-                        .note("you can use `--cfg` over `--rev` to suppress this check")
                 );
             }
         }

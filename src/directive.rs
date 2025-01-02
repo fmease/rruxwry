@@ -9,7 +9,7 @@ use crate::{
     command::{ExternCrate, VerbatimFlagsBuf},
     data::{CrateNameRef, Edition},
     diagnostic::{self, emit},
-    utility::{default, parse},
+    utility::parse,
 };
 use ra_ap_rustc_lexer::TokenKind;
 use std::{
@@ -73,36 +73,19 @@ impl<'src> Directives<'src> {
     }
 
     /// Instantiate all directives that are conditional on a revision.
-    pub(crate) fn into_instantiated(mut self, revs: &BTreeSet<&str>) -> Self {
+    pub(crate) fn instantiated(mut self, revisions: &BTreeSet<&str>) -> Self {
         let uninstantiated = std::mem::take(&mut self.uninstantiated);
-        Self::instantiate(&mut self, &uninstantiated, revs);
-        self
-    }
-
-    /// Instantiate all directives that are conditional on a revision.
-    #[allow(dead_code)] // FIXME: use this when impl'ing `--all-revs`
-    pub(crate) fn instantiated(&self, revs: &BTreeSet<&str>) -> Self {
-        let mut instantiated =
-            Self { instantiated: self.instantiated.clone(), uninstantiated: default() };
-        Self::instantiate(&mut instantiated, &self.uninstantiated, revs);
-        instantiated
-    }
-
-    fn instantiate(
-        instantiated: &mut InstantiatedDirectives<'src>,
-        uninstantiated: &UninstantiatedDirectives<'src>,
-        revisions: &BTreeSet<&str>,
-    ) {
         // In the most common case, the user doesn't enable any revisions. Therefore we
         // iterate over the `revisions` instead of the `uninstantiated` directives and
         // can avoid performing unnecessary work.
         for revision in revisions {
             if let Some(directives) = uninstantiated.get(revision) {
                 for directive in directives {
-                    instantiated.adjoin(directive.clone());
+                    self.adjoin(directive.clone());
                 }
             }
         }
+        self
     }
 }
 
@@ -216,9 +199,7 @@ pub(crate) enum HtmlDocCkDirectiveKind {
 // FIXME: Populate payloads
 #[derive(Clone)]
 pub(crate) enum JsonDocCkDirectiveKind {
-    #[allow(dead_code)] // FIXME
     Count,
-    #[allow(dead_code)] // FIXME
     Has,
     Is,
     IsMany,

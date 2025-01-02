@@ -306,6 +306,7 @@ impl<'a> Command<'a> {
             self.arg("--cfg");
             self.arg(cfg);
         }
+        // FIXME: This shouldn't be done here.
         for feature in &flags.cargo_features {
             // FIXME: Warn on conflicts with `cfgs` from `self.arguments.cfgs`.
             // FIXME: collapse
