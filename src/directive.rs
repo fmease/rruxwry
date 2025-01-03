@@ -4,14 +4,14 @@
 // FIXME: Does compiletest permit `//@[pre] check-pass` `//@ revisions: pre`?
 // FIXME: We should warn on `//@[undeclared] compile-flags:`.
 // FIXME: What does compiletest do on `//@ revisions: dupe dupe`? We should warn.
+// FIXME: Warn(-@)/error(-@@) on `//@ revisions: single` (cuz it's useless)
 
 use crate::{
     command::{ExternCrate, VerbatimFlagsBuf},
     data::{CrateNameRef, Edition},
     diagnostic::{self, EmittedError, emit},
-    utility::{Conjunction, ListingExt, parse},
+    utility::{Conjunction, ListingExt},
 };
-use ra_ap_rustc_lexer::TokenKind;
 use std::{
     collections::{BTreeMap, BTreeSet},
     fmt,
@@ -22,23 +22,15 @@ use std::{
 
 pub(crate) fn parse(source: &str, scope: Scope) -> Directives<'_> {
     let mut buffer = ErrorBuffer::default();
-    let mut parser = parse::SourceFileParser::new(source);
     let mut directives = Directives::default();
 
-    // FIXME: Does compiletest actually rust-tokenize the input? I doubt it.
-    //        Simplify this once you've confirmed that.
-    while let Some(token) = parser.peek() {
-        if let TokenKind::LineComment { doc_style: None } = token.kind
-            && let comment = parser.source()
-            && let Some(directive) = comment.strip_prefix("//@")
-        {
-            match Directive::parse(directive, scope) {
-                Ok(directive) => directives.add(directive),
-                Err(error) => buffer.add(error),
-            };
+    for line in source.lines() {
+        let line = line.trim_start();
+        let Some(directive) = line.strip_prefix("//@") else { continue };
+        match Directive::parse(directive, scope) {
+            Ok(directive) => directives.add(directive),
+            Err(error) => buffer.add(error),
         }
-
-        parser.advance();
     }
 
     buffer.release();
@@ -61,6 +53,7 @@ pub(crate) struct Directives<'src> {
 impl<'src> Directives<'src> {
     fn add(&mut self, directive: Directive<'src>) {
         if let DirectiveKind::Revisions(revisions) = directive.kind {
+            // FIXME: Emit a warning (-@) / error (-@@) for this:
             // We ignore revision predicates on revisions since that's what `compiletest` does, too.
             self.revisions.extend(revisions);
         } else if let Some(revision) = directive.revision {
