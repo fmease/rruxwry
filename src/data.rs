@@ -2,16 +2,17 @@ use crate::utility::parse;
 use std::{borrow::Cow, fmt, path::Path, str::FromStr};
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[cfg_attr(test, derive(Debug))]
 pub(crate) enum Edition {
-    Edition2015,
-    Edition2018,
-    Edition2021,
-    Edition2024,
+    Rust2015,
+    Rust2018,
+    Rust2021,
+    Rust2024,
 }
 
 impl Edition {
-    pub(crate) const RUSTC_DEFAULT: Self = Self::Edition2015;
-    pub(crate) const LATEST_STABLE: Self = Self::Edition2024;
+    pub(crate) const RUSTC_DEFAULT: Self = Self::Rust2015;
+    pub(crate) const LATEST_STABLE: Self = Self::Rust2024;
     pub(crate) const BLEEDING_EDGE: Self = Self::LATEST_STABLE;
 
     pub(crate) fn is_stable(self) -> bool {
@@ -20,10 +21,10 @@ impl Edition {
 
     pub(crate) const fn to_str(self) -> &'static str {
         match self {
-            Self::Edition2015 => "2015",
-            Self::Edition2018 => "2018",
-            Self::Edition2021 => "2021",
-            Self::Edition2024 => "2024",
+            Self::Rust2015 => "2015",
+            Self::Rust2018 => "2018",
+            Self::Rust2021 => "2021",
+            Self::Rust2024 => "2024",
         }
     }
 }
@@ -33,10 +34,10 @@ impl FromStr for Edition {
 
     fn from_str(source: &str) -> Result<Self, Self::Err> {
         Ok(match source {
-            "2015" => Self::Edition2015,
-            "2018" => Self::Edition2018,
-            "2021" => Self::Edition2021,
-            "2024" => Self::Edition2024,
+            "2015" => Self::Rust2015,
+            "2018" => Self::Rust2018,
+            "2021" => Self::Rust2021,
+            "2024" => Self::Rust2024,
             _ => return Err(()),
         })
     }

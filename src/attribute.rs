@@ -433,12 +433,12 @@ fn is_reserved(ident: &str, edition: Edition) -> bool {
     }
 
     fn is_used_keyword_if(ident: &str, edition: Edition) -> bool {
-        edition >= Edition::Edition2018 && matches!(ident, "async" | "await" | "dyn")
+        edition >= Edition::Rust2018 && matches!(ident, "async" | "await" | "dyn")
     }
 
     fn is_unused_keyword_if(ident: &str, edition: Edition) -> bool {
-        edition >= Edition::Edition2018 && matches!(ident, "try")
-            || edition >= Edition::Edition2024 && matches!(ident, "gen")
+        edition >= Edition::Rust2018 && matches!(ident, "try")
+            || edition >= Edition::Rust2024 && matches!(ident, "gen")
     }
 
     ident == "_"

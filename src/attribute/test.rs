@@ -7,7 +7,7 @@ use crate::{
 // FIXME: Test that we detect `#![crate_name = "0"]` (leading digits) to match rustc's behavior.
 
 fn parse(source: &str) -> Attributes<'_> {
-    Attributes::parse(source, &[], Edition::Edition2015, false)
+    Attributes::parse(source, &[], Edition::Rust2015, false)
 }
 
 #[test]

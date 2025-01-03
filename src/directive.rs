@@ -1,10 +1,25 @@
 //! The parser of `ui_test`-style `compiletest`, `htmldocck` and `jsondocck` directives.
 
-// FIXME: What does compiletest do for `//@ revisions: off` `//@[off] undefined`? We warn.
 // FIXME: Does compiletest permit `//@[pre] check-pass` `//@ revisions: pre`?
 // FIXME: We should warn on `//@[undeclared] compile-flags:`.
 // FIXME: What does compiletest do on `//@ revisions: dupe dupe`? We should warn.
 // FIXME: Warn(-@)/error(-@@) on `//@ revisions: single` (cuz it's useless)
+
+// FIXME: Mirror compiletest regarding `mod …`/`fn …` (sth. like that):
+//        Under `-@` ignore all directives below a line starts with `mod …`/`fn …`(…)
+//        and issue warnings.
+//        Under `-@@` don't ignore them.
+
+// FIXME: Warn/error on "unused"/extraneous arguments (e.g., "//@ build-aux-docs some extra garbage").
+
+// FIXME: ---
+//        Be more conservative than compiletest by default. User can use `--force` to
+//        downgrade (hard) errors to warnings.
+//        Then, `-@@` doesn't mean "stricter" but purely "extended" which includes:
+//             * logic predicates inside revision "refs"
+//             * inline crates
+//             * path-less aux-crate etc.
+//        --- enum Flavor { Basic, Extended }
 
 use crate::{
     command::{ExternCrate, VerbatimFlagsBuf},
@@ -16,11 +31,21 @@ use std::{
     collections::{BTreeMap, BTreeSet},
     fmt,
     iter::Peekable,
+    mem,
     ops::{Deref, DerefMut},
     str::CharIndices,
 };
 
+#[cfg(test)]
+mod tests;
+
 pub(crate) fn parse(source: &str, scope: Scope) -> Directives<'_> {
+    let (directives, buffer) = try_parse(source, scope);
+    buffer.release();
+    directives
+}
+
+fn try_parse(source: &str, scope: Scope) -> (Directives<'_>, ErrorBuffer<'_>) {
     let mut buffer = ErrorBuffer::default();
     let mut directives = Directives::default();
 
@@ -33,8 +58,7 @@ pub(crate) fn parse(source: &str, scope: Scope) -> Directives<'_> {
         }
     }
 
-    buffer.release();
-    directives
+    (directives, buffer)
 }
 
 #[derive(Clone, Copy)]
@@ -44,7 +68,11 @@ pub(crate) enum Scope {
     JsonDocCk,
 }
 
+// FIXME: If possible get rid of the instantiated vs. uninstantiated separation.
+//        Users can no longer specify multiple revisions at once, so we don't
+//        need to care about "optimizing" unconditional directives.
 #[derive(Default)]
+#[cfg_attr(test, derive(PartialEq, Eq, Debug))]
 pub(crate) struct Directives<'src> {
     instantiated: InstantiatedDirectives<'src>,
     uninstantiated: UninstantiatedDirectives<'src>,
@@ -80,9 +108,10 @@ impl<'src> Directives<'src> {
                 ));
             }
 
-            let uninstantiated = std::mem::take(&mut self.uninstantiated);
-            for directive in &uninstantiated[revision] {
-                self.adjoin(directive.clone());
+            if let Some(directives) = mem::take(&mut self.uninstantiated).get(revision) {
+                for directive in directives {
+                    self.adjoin(directive.clone());
+                }
             }
         } else if !self.revisions.is_empty() {
             // FIXME: Return a proper error type, so the caller can suggest `--rev`
@@ -111,6 +140,7 @@ impl DerefMut for Directives<'_> {
 }
 
 #[derive(Default, Clone)]
+#[cfg_attr(test, derive(PartialEq, Eq, Debug))]
 pub(crate) struct InstantiatedDirectives<'src> {
     pub(crate) dependencies: Vec<ExternCrate<'src>>,
     pub(crate) build_aux_docs: bool,
@@ -137,11 +167,11 @@ impl<'src> InstantiatedDirectives<'src> {
             // However, that's just how it is, they are treated verbatim by `compiletest`, so we do the same.
             DirectiveKind::CompileFlags(flags) => self.verbatim_flags.arguments.extend(flags),
             // FIXME: Emit an error or warning if multiple `edition` directives were specified
-            //        just like `compiletest` does.
+            //        just like `compiletest` does (what happens if some of the edition directives are conditional?).
             DirectiveKind::Edition(edition) => self.edition = Some(edition),
             DirectiveKind::ForceHost => self.force_host = true,
             DirectiveKind::NoPreferDynamic => self.no_prefer_dynamic = true,
-            DirectiveKind::Revisions(_) => unreachable!(), // Already dealt with in `Self::add`.
+            DirectiveKind::Revisions(_) => unreachable!(), // Already dealt with in `Directives::add`.
             DirectiveKind::RustcEnv { key, value } => {
                 self.verbatim_flags.environment.push((key, Some(value)));
             }
@@ -156,8 +186,11 @@ impl<'src> InstantiatedDirectives<'src> {
     }
 }
 
+// FIXME: BTreeMap is the wrong data structure. I think this was meant to say "IndexMap"
+// (hash map that preserves insertion order). Should we just go for `Vec<(…, …)>`?
 type UninstantiatedDirectives<'src> = BTreeMap<&'src str, Vec<DirectiveKind<'src>>>;
 
+#[cfg_attr(test, derive(PartialEq, Eq, Debug))]
 struct Directive<'src> {
     revision: Option<&'src str>,
     kind: DirectiveKind<'src>,
@@ -172,11 +205,11 @@ impl<'src> Directive<'src> {
 // FIXME: Can somehow get rid of this? By merging "adjoin" & "parse-single" I guess?
 //        This isn't scalable rn
 #[derive(Clone)]
+#[cfg_attr(test, derive(PartialEq, Eq, Debug))]
 enum DirectiveKind<'src> {
     AuxBuild { path: &'src str },
-    // FIXME: Double-check that the path is indeed optional.
+    // FIXME: compiletest doesn't consider the path to be optional (gate this behind `-@@`).
     AuxCrate { name: CrateNameRef<'src>, path: Option<&'src str> },
-    // FIXME: This is relevant for rruxwry, right?
     BuildAuxDocs,
     CompileFlags(Vec<&'src str>),
     Edition(Edition),
@@ -191,7 +224,8 @@ enum DirectiveKind<'src> {
     JsonDocCk(JsonDocCkDirectiveKind, Polarity),
 }
 
-#[derive(Clone)]
+#[derive(Clone, Copy)]
+#[cfg_attr(test, derive(PartialEq, Eq, Debug))]
 pub(crate) enum HtmlDocCkDirectiveKind {
     Count,
     Files,
@@ -204,7 +238,8 @@ pub(crate) enum HtmlDocCkDirectiveKind {
 }
 
 // FIXME: Populate payloads
-#[derive(Clone)]
+#[derive(Clone, Copy)]
+#[cfg_attr(test, derive(PartialEq, Eq, Debug))]
 pub(crate) enum JsonDocCkDirectiveKind {
     Count,
     Has,
@@ -214,6 +249,7 @@ pub(crate) enum JsonDocCkDirectiveKind {
 }
 
 #[derive(Clone, Copy)]
+#[cfg_attr(test, derive(PartialEq, Eq, Debug))]
 pub(crate) enum Polarity {
     Negative,
     Positive,
@@ -229,11 +265,13 @@ impl<'src> DirectiveParser<'src> {
     fn execute(mut self) -> Result<Directive<'src>, Error<'src>> {
         self.parse_whitespace();
 
-        // FIXME: Non-standard: Support multiple revisions inside `[`,`]`, e.g. `[a,b]`
         let revision = if self.consume(|char| char == '[') {
-            // FIXME: How does `compiletest` deal with empty revision conditions (`//@[] ...`)?
-            let revision = self.take_while(|char| char != ']');
-            self.expect(']')?;
+            let revision = self.take_while(|char| char != ']').unwrap_or_default();
+            self.expect(']').map_err(Error::new)?;
+            // FIXME: Warn on empty/blank revision ("literally treated as a revision")
+            //        Warn on padded revision ("treated literally (not trimmed)")
+            //        Warn on quoted revision and commas inside the revision
+            // FIXME: Do we want to trim on `-@@`? And hard error on `-@f` (force)?
             Some(revision)
         } else {
             None
@@ -241,8 +279,9 @@ impl<'src> DirectiveParser<'src> {
 
         self.parse_whitespace();
 
-        let directive =
-            self.take_while(|char| matches!(char, '-' | '!') || char.is_ascii_alphabetic());
+        let directive = self
+            .take_while(|char| matches!(char, '-' | '!') || char.is_alphabetic())
+            .map_err(Error::new)?;
 
         self.parse_directive_kind(directive).map(|kind| Directive { revision, kind })
     }
@@ -291,12 +330,9 @@ impl<'src> DirectiveParser<'src> {
         &mut self,
         source: &'src str,
     ) -> Result<DirectiveKind<'src>, ErrorKind<'src>> {
-        // FIXME: Don't do the error.kind extraction.
-        //        Instead, parse functions should return ErrorKind (→BareError) instead of Error
-
         Ok(match source {
             "aux-build" => {
-                self.parse_separator(Padding::Yes).map_err(|error| error.kind)?; // FIXME: audit AllowPadding
+                self.parse_separator(Padding::Yes)?; // FIXME: audit AllowPadding
                 let path = self.take_remaining_line();
                 DirectiveKind::AuxBuild { path }
             }
@@ -304,11 +340,11 @@ impl<'src> DirectiveParser<'src> {
             // at the time of writing. Therefore, we don't need to deal with them here either.
             // Neither does it support optional paths (`//@ aux-crate:name`).
             "aux-crate" => {
-                self.parse_separator(Padding::Yes).map_err(|error| error.kind)?; // FIXME: audit AllowPadding
+                self.parse_separator(Padding::Yes)?; // FIXME: audit AllowPadding
 
                 // We're doing this two-step process — (greedy) lexing followed by validation —
                 // to be able to provide a better error message.
-                let name = self.take_while(|char| char != '=' && !char.is_ascii_whitespace());
+                let name = self.take_while(|char| char != '=' && !char.is_whitespace())?;
                 let Ok(name) = CrateNameRef::parse(name) else {
                     return Err(ErrorKind::InvalidValue(name));
                 };
@@ -321,19 +357,20 @@ impl<'src> DirectiveParser<'src> {
             //        Should probably be sth. akin to Scope::Rustdoc(DocCk) then.
             "build-aux-docs" => DirectiveKind::BuildAuxDocs,
             "compile-flags" => {
-                self.parse_separator(Padding::Yes).map_err(|error| error.kind)?; // FIXME: audit AllowPadding (before)
+                self.parse_separator(Padding::Yes)?; // FIXME: audit AllowPadding (before)
 
                 // FIXME: Supported quotes arguments (they shouldn't be split in halves).
                 //        Use crate `shlex` for this.
-                let arguments = self.take_remaining_line().split_ascii_whitespace().collect();
+                let arguments = self.take_remaining_line().split_whitespace().collect();
                 DirectiveKind::CompileFlags(arguments)
             }
             "edition" => {
-                self.parse_separator(Padding::Yes).map_err(|error| error.kind)?; // FIXME: audit AllowPadding (before)
+                self.parse_separator(Padding::Yes)?; // FIXME: audit AllowPadding (before)
 
                 // We're doing this two-step process — (greedy) lexing followed by validation —
                 // to be able to provide a better error message.
-                let edition = self.take_while(|char| !char.is_ascii_whitespace());
+                let edition = self.take_while(|char| !char.is_whitespace())?;
+                // FIXME: Don't actually try to parse the edition!
                 let Ok(edition) = edition.parse() else {
                     return Err(ErrorKind::InvalidValue(edition));
                 };
@@ -343,13 +380,20 @@ impl<'src> DirectiveParser<'src> {
             "force-host" => DirectiveKind::ForceHost,
             "no-prefer-dynamic" => DirectiveKind::NoPreferDynamic,
             "revisions" => {
-                self.parse_separator(Padding::Yes).map_err(|error| error.kind)?; // FIXME: audit AllowPadding
-                let revisions = self.take_remaining_line().split_ascii_whitespace().collect();
+                self.parse_separator(Padding::Yes)?; // FIXME: audit AllowPadding
+                let mut revisions: Vec<_> = self.take_remaining_line().split_whitespace().collect();
+                let count = revisions.len();
+                revisions.sort_unstable();
+                revisions.dedup();
+                if count != revisions.len() {
+                    // FIXME: Proper more helpful error message.
+                    return Err(ErrorKind::DuplicateRevisions);
+                }
                 DirectiveKind::Revisions(revisions)
             }
             // `compiletest` only supports a single environment variable per directive.
             "rustc-env" => {
-                self.parse_separator(Padding::No).map_err(|error| error.kind)?;
+                self.parse_separator(Padding::No)?;
                 let line = self.take_remaining_line();
 
                 // FIXME: How does `compiletest` handle the edge cases here?
@@ -359,7 +403,7 @@ impl<'src> DirectiveParser<'src> {
                 DirectiveKind::RustcEnv { key, value }
             }
             "unset-rustc-env" => {
-                self.parse_separator(Padding::No).map_err(|error| error.kind)?;
+                self.parse_separator(Padding::No)?;
                 let variable = self.take_remaining_line();
                 DirectiveKind::UnsetRustcEnv(variable)
             }
@@ -428,12 +472,12 @@ impl<'src> DirectiveParser<'src> {
         false
     }
 
-    fn expect(&mut self, expected: char) -> Result<(), Error<'src>> {
+    fn expect(&mut self, expected: char) -> Result<(), ErrorKind<'src>> {
         let Some(char) = self.peek() else {
-            return Err(Error::new(ErrorKind::UnexpectedEndOfInput));
+            return Err(ErrorKind::UnexpectedEndOfInput);
         };
         if char != expected {
-            return Err(Error::new(ErrorKind::UnexpectedToken { found: char, expected }));
+            return Err(ErrorKind::UnexpectedToken { found: char, expected });
         }
         self.advance();
         Ok(())
@@ -449,13 +493,16 @@ impl<'src> DirectiveParser<'src> {
     }
 
     fn parse_whitespace(&mut self) {
-        self.advance_while(|char| char.is_ascii_whitespace());
+        self.advance_while(|char| char.is_whitespace());
     }
 
-    fn parse_separator(&mut self, padding: Padding) -> Result<(), Error<'src>> {
+    fn parse_separator(&mut self, padding: Padding) -> Result<(), ErrorKind<'src>> {
         if let Padding::Yes = padding {
             self.parse_whitespace();
         }
+        // FIXME: compiletest doesn't require ":" but silently ignores the whole directive
+        //        if it's absent. On --force we shouldn't expect but consume and notify
+        //        the caller that the directive should be discarded
         self.expect(':')?;
         if let Padding::Yes = padding {
             self.parse_whitespace();
@@ -463,29 +510,36 @@ impl<'src> DirectiveParser<'src> {
         Ok(())
     }
 
-    fn take_while(&mut self, predicate: impl Fn(char) -> bool) -> &'src str {
-        if let Some(&(start, char)) = self.chars.peek() {
-            let mut end = start + char.len_utf8();
-            while let Some(char) = self.peek() {
-                if !predicate(char) {
-                    break;
-                }
-                if let Some((index, char)) = self.chars.next() {
-                    end = index + char.len_utf8();
-                }
+    fn take_while(
+        &mut self,
+        predicate: impl Fn(char) -> bool,
+    ) -> Result<&'src str, ErrorKind<'src>> {
+        let mut start = None;
+        let mut end = None;
+
+        while let Some(&(index, char)) = self.chars.peek() {
+            if !predicate(char) {
+                break;
             }
-            return &self.source[start..end];
+            start.get_or_insert(index);
+            end = Some(index + char.len_utf8());
+            self.advance();
         }
 
-        ""
+        match start.zip(end) {
+            Some((start, end)) => Ok(&self.source[start..end]),
+            None => Err(ErrorKind::UnexpectedEndOfInput),
+        }
     }
 
     fn take_remaining_line(&mut self) -> &'src str {
-        self.take_while(|char| char != '\n')
+        // FIXME: Should we instead bail on empty lines?
+        self.take_while(|char| char != '\n').unwrap_or_default()
     }
 }
 
 #[derive(Default)]
+#[cfg_attr(test, derive(PartialEq, Eq, Debug))]
 struct ErrorBuffer<'src> {
     errors: Vec<Error<'src>>,
     unknowns: BTreeSet<&'src str>,
@@ -548,6 +602,7 @@ impl<'src> ErrorBuffer<'src> {
     }
 }
 
+#[cfg_attr(test, derive(PartialEq, Eq, Debug))]
 struct Error<'src> {
     kind: ErrorKind<'src>,
     context: Option<ErrorContext<'src>>,
@@ -573,6 +628,7 @@ impl fmt::Display for Error<'_> {
     }
 }
 
+#[cfg_attr(test, derive(PartialEq, Eq, Debug))]
 enum ErrorKind<'src> {
     UnknownDirective(&'src str),
     // FIXME: add scope?
@@ -580,6 +636,7 @@ enum ErrorKind<'src> {
     UnexpectedToken { found: char, expected: char },
     UnexpectedEndOfInput,
     InvalidValue(&'src str),
+    DuplicateRevisions,
 }
 
 impl fmt::Display for ErrorKind<'_> {
@@ -596,11 +653,13 @@ impl fmt::Display for ErrorKind<'_> {
             }
             Self::UnexpectedEndOfInput => write!(f, "unexpected end of input"),
             Self::InvalidValue(value) => write!(f, "invalid value `{value}`"),
+            Self::DuplicateRevisions => write!(f, "duplicate revisions"),
         }
     }
 }
 
 #[derive(Clone, Copy)]
+#[cfg_attr(test, derive(PartialEq, Eq, Debug))]
 enum ErrorContext<'src> {
     Directive(&'src str),
 }
@@ -613,6 +672,7 @@ impl fmt::Display for ErrorContext<'_> {
     }
 }
 
+// FIXME: Get rid of this if possible.
 #[derive(Clone, Copy)]
 enum Padding {
     Yes,

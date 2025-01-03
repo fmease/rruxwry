@@ -411,6 +411,7 @@ mod palette {
 }
 
 #[derive(Clone)]
+#[cfg_attr(test, derive(PartialEq, Eq, Debug))]
 pub(crate) enum ExternCrate<'src> {
     Unnamed { path: &'src str },
     Named { name: CrateNameRef<'src>, path: Option<Cow<'src, str>> },
@@ -434,6 +435,7 @@ pub(crate) struct VerbatimFlags<'a> {
 
 // FIXME: bad name, env is not "flags"
 #[derive(Clone, Default)]
+#[cfg_attr(test, derive(PartialEq, Eq, Debug))]
 pub(crate) struct VerbatimFlagsBuf<'a> {
     pub(crate) arguments: Vec<&'a str>,
     pub(crate) environment: Vec<(&'a str, Option<&'a str>)>,

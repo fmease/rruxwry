@@ -386,10 +386,10 @@ impl Edition {
             "D" => Self::RUSTC_DEFAULT,
             "S" => Self::LATEST_STABLE,
             "E" => Self::BLEEDING_EDGE,
-            "15" | "2015" => Self::Edition2015,
-            "18" | "2018" => Self::Edition2018,
-            "21" | "2021" => Self::Edition2021,
-            "24" | "2024" => Self::Edition2024,
+            "15" | "2015" => Self::Rust2015,
+            "18" | "2018" => Self::Rust2018,
+            "21" | "2021" => Self::Rust2021,
+            "24" | "2024" => Self::Rust2024,
         )(source)
         .map_err(possible_values)
     }
