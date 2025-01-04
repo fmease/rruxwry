@@ -53,9 +53,8 @@ fn build_compiletest(
 ) -> Result {
     // FIXME: Make sure `//@ compile-flags: --extern name` works as expected
     let source = std::fs::read_to_string(path)?; // FIXME: error context
-    let directives = directive::parse(&source, directive::Scope::Base);
-
-    let mut directives = directives.instantiated(flags.build.revision.as_deref())?;
+    let mut directives =
+        directive::gather(&source, directive::Scope::Base, flags.build.revision.as_deref())?;
 
     // FIXME: unwrap
     let auxiliary_base_path = LazyCell::new(|| path.parent().unwrap().join("auxiliary"));
@@ -100,13 +99,12 @@ fn build_compiletest_auxiliary<'a>(
     // FIXME: unwrap
     let crate_name = CrateName::adjust_and_parse_file_path(&path).unwrap();
 
-    let source = std::fs::read_to_string(&path); // FIXME: error context
+    // FIXME: Alternatively, just warn, don't bail on read failure.
+    let source = std::fs::read_to_string(&path)?; // FIXME: error context
 
-    // FIXME: What about instantiation???
-    let mut directives = source
-        .as_ref()
-        .map(|source| directive::parse(source, directive::Scope::Base))
-        .unwrap_or_default();
+    // FIXME: Pass PermitRevisionDeclaration::No
+    let mut directives =
+        directive::gather(&source, directive::Scope::Base, flags.build.revision.as_deref())?;
 
     let edition = directives.edition.unwrap_or(Edition::RUSTC_DEFAULT);
 
@@ -261,13 +259,13 @@ fn document_compiletest<'a>(
 ) -> Result<CrateNameCow<'a>> {
     // FIXME: Make sure `//@ compile-flags: --extern name` works as expected
     let source = std::fs::read_to_string(path)?; // FIXME: error context
+    // FIXME: Do we actually want to treat !`-j` as `rustdoc/` (Scope::HtmlDocCk)
+    //        instead of `rustdoc-ui/` ("Scope::Rustdoc")
     let scope = match doc_flags.backend {
         DocBackend::Html => directive::Scope::HtmlDocCk,
         DocBackend::Json => directive::Scope::JsonDocCk,
     };
-    let directives = directive::parse(&source, scope);
-
-    let mut directives = directives.instantiated(flags.build.revision.as_deref())?;
+    let mut directives = directive::gather(&source, scope, flags.build.revision.as_deref())?;
 
     // FIXME: unwrap
     let auxiliary_base_path = LazyCell::new(|| path.parent().unwrap().join("auxiliary"));
@@ -326,17 +324,19 @@ fn document_compiletest_auxiliary<'a>(
     // FIXME: unwrap
     let crate_name = CrateName::adjust_and_parse_file_path(&path).unwrap();
 
-    let source = std::fs::read_to_string(&path); // FIXME: error context
-
     // FIXME: DRY
+    // FIXME: Do we actually want to treat !`-j` as `rustdoc/` (Scope::HtmlDocCk)
+    //        instead of `rustdoc-ui/` ("Scope::Rustdoc")
     let scope = match doc_flags.backend {
         DocBackend::Html => directive::Scope::HtmlDocCk,
         DocBackend::Json => directive::Scope::JsonDocCk,
     };
 
-    // FIXME: What about instantiation???
-    let mut directives =
-        source.as_ref().map(|source| directive::parse(source, scope)).unwrap_or_default();
+    // FIXME: Alternatively, just warn, don't bail on read failure.
+    let source = std::fs::read_to_string(&path)?; // FIXME: error context
+
+    // FIXME: Pass PermitRevisionDeclaration::No
+    let mut directives = directive::gather(&source, scope, flags.build.revision.as_deref())?;
 
     let edition = directives.edition.unwrap_or(Edition::RUSTC_DEFAULT);
 

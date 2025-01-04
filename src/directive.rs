@@ -19,7 +19,7 @@
 //             * logic predicates inside revision "refs"
 //             * inline crates
 //             * path-less aux-crate etc.
-//        --- enum Flavor { Basic, Extended }
+//        --- enum Flavor { Vanilla, Rruxwry }
 
 use crate::{
     command::{ExternCrate, VerbatimFlagsBuf},
@@ -29,7 +29,6 @@ use crate::{
 };
 use std::{
     collections::{BTreeMap, BTreeSet},
-    fmt,
     iter::Peekable,
     mem,
     ops::{Deref, DerefMut},
@@ -39,14 +38,22 @@ use std::{
 #[cfg(test)]
 mod tests;
 
-pub(crate) fn parse(source: &str, scope: Scope) -> Directives<'_> {
-    let (directives, buffer) = try_parse(source, scope);
-    buffer.release();
-    directives
+pub(crate) fn gather<'src>(
+    source: &'src str,
+    scope: Scope,
+    revision: Option<&str>,
+) -> Result<Directives<'src>, EmittedError> {
+    let mut errors = ErrorBuffer::default();
+    let directives = parse(source, scope, &mut errors);
+    errors.release();
+    directives.instantiate(revision).map_err(|error| error.emit())
 }
 
-fn try_parse(source: &str, scope: Scope) -> (Directives<'_>, ErrorBuffer<'_>) {
-    let mut buffer = ErrorBuffer::default();
+fn parse<'src>(
+    source: &'src str,
+    scope: Scope,
+    errors: &mut ErrorBuffer<'src>,
+) -> Directives<'src> {
     let mut directives = Directives::default();
 
     for line in source.lines() {
@@ -54,11 +61,22 @@ fn try_parse(source: &str, scope: Scope) -> (Directives<'_>, ErrorBuffer<'_>) {
         let Some(directive) = line.strip_prefix("//@") else { continue };
         match Directive::parse(directive, scope) {
             Ok(directive) => directives.add(directive),
-            Err(error) => buffer.add(error),
+            Err(error) => errors.insert(error),
         }
     }
 
-    (directives, buffer)
+    errors.extend(
+        directives
+            .uninstantiated
+            .keys()
+            .filter(|&revision| !directives.revisions.contains(revision))
+            .map(|revision| Error::UndeclaredRevision {
+                revision,
+                available: directives.revisions.clone(),
+            }),
+    );
+
+    directives
 }
 
 #[derive(Clone, Copy)]
@@ -95,30 +113,21 @@ impl<'src> Directives<'src> {
 
     /// Instantiate all directives that are conditional on a revision.
     // FIXME: Return a proper error type (i.e., don't emit immediately).
-    pub(crate) fn instantiated(mut self, revision: Option<&str>) -> Result<Self, EmittedError> {
-        let available =
-            || self.revisions.iter().map(|revision| format!("`{revision}`")).list(Conjunction::And);
-
+    fn instantiate(mut self, revision: Option<&str>) -> Result<Self, InstantiationError<'src, '_>> {
         if let Some(revision) = revision {
             if !self.revisions.contains(revision) {
-                // FIXME: Emit a different error if `self.revisions.is_empty()`, one that makes no sense
-                return Err(emit!(
-                    Error("unknown revision `{revision}`")
-                        .note("available revisions are: {}", available())
-                ));
+                let available = mem::take(&mut self.revisions);
+                return Err(InstantiationError::UndeclaredActiveRevision { revision, available });
             }
 
-            if let Some(directives) = mem::take(&mut self.uninstantiated).get(revision) {
+            if let Some(directives) = self.uninstantiated.remove(revision) {
                 for directive in directives {
-                    self.adjoin(directive.clone());
+                    self.adjoin(directive);
                 }
             }
         } else if !self.revisions.is_empty() {
-            // FIXME: Return a proper error type, so the caller can suggest `--rev`
-            //        without it resulting in an abstraction layer violation.
-            return Err(emit!(
-                Error("no revision specified").note("available revisions are: {}", available())
-            ));
+            let available = mem::take(&mut self.revisions);
+            return Err(InstantiationError::MissingActiveRevision { available });
         }
 
         Ok(self)
@@ -139,6 +148,33 @@ impl DerefMut for Directives<'_> {
     }
 }
 
+#[cfg_attr(test, derive(PartialEq, Eq, Debug))]
+enum InstantiationError<'src, 'rev> {
+    UndeclaredActiveRevision { revision: &'rev str, available: BTreeSet<&'src str> },
+    MissingActiveRevision { available: BTreeSet<&'src str> },
+}
+
+impl InstantiationError<'_, '_> {
+    fn emit(self) -> EmittedError {
+        let list = |available: BTreeSet<_>| {
+            available.into_iter().map(|revision| format!("`{revision}`")).list(Conjunction::And)
+        };
+
+        // FIXME: Improve the phrasing of these diagnostics!
+        match self {
+            // FIXME: Emit a better error if `available.is_empty()`
+            Self::UndeclaredActiveRevision { revision, available } => emit!(
+                Error("undeclared revision `{revision}`")
+                    .note("available revisions are: {}", list(available))
+            ),
+            // FIXME: Suggest `--rev` without it resulting in an abstraction layer violation.
+            Self::MissingActiveRevision { available } => emit!(
+                Error("no revision specified").note("available revisions are: {}", list(available))
+            ),
+        }
+    }
+}
+
 #[derive(Default, Clone)]
 #[cfg_attr(test, derive(PartialEq, Eq, Debug))]
 pub(crate) struct InstantiatedDirectives<'src> {
@@ -147,10 +183,10 @@ pub(crate) struct InstantiatedDirectives<'src> {
     pub(crate) edition: Option<Edition>,
     pub(crate) force_host: bool,
     pub(crate) no_prefer_dynamic: bool,
-    pub(crate) revisions: BTreeSet<&'src str>,
     pub(crate) verbatim_flags: VerbatimFlagsBuf<'src>,
     pub(crate) htmldocck: Vec<(HtmlDocCkDirectiveKind, Polarity)>,
     pub(crate) jsondocck: Vec<(JsonDocCkDirectiveKind, Polarity)>,
+    revisions: BTreeSet<&'src str>,
 }
 
 impl<'src> InstantiatedDirectives<'src> {
@@ -167,7 +203,8 @@ impl<'src> InstantiatedDirectives<'src> {
             // However, that's just how it is, they are treated verbatim by `compiletest`, so we do the same.
             DirectiveKind::CompileFlags(flags) => self.verbatim_flags.arguments.extend(flags),
             // FIXME: Emit an error or warning if multiple `edition` directives were specified
-            //        just like `compiletest` does (what happens if some of the edition directives are conditional?).
+            //        just like `compiletest` does.
+            //        When encountering unconditional+conditional, emit a warning(-@)/error(-@@)
             DirectiveKind::Edition(edition) => self.edition = Some(edition),
             DirectiveKind::ForceHost => self.force_host = true,
             DirectiveKind::NoPreferDynamic => self.no_prefer_dynamic = true,
@@ -267,7 +304,7 @@ impl<'src> DirectiveParser<'src> {
 
         let revision = if self.consume(|char| char == '[') {
             let revision = self.take_while(|char| char != ']').unwrap_or_default();
-            self.expect(']').map_err(Error::new)?;
+            self.expect(']')?;
             // FIXME: Warn on empty/blank revision ("literally treated as a revision")
             //        Warn on padded revision ("treated literally (not trimmed)")
             //        Warn on quoted revision and commas inside the revision
@@ -279,9 +316,8 @@ impl<'src> DirectiveParser<'src> {
 
         self.parse_whitespace();
 
-        let directive = self
-            .take_while(|char| matches!(char, '-' | '!') || char.is_alphabetic())
-            .map_err(Error::new)?;
+        let directive =
+            self.take_while(|char| matches!(char, '-' | '!') || char.is_alphabetic())?;
 
         self.parse_directive_kind(directive).map(|kind| Directive { revision, kind })
     }
@@ -290,22 +326,20 @@ impl<'src> DirectiveParser<'src> {
         &mut self,
         source: &'src str,
     ) -> Result<DirectiveKind<'src>, Error<'src>> {
-        let context = ErrorContext::Directive(source);
-
         match self.parse_base_directive(source) {
             Ok(directive) => return Ok(directive),
-            Err(ErrorKind::UnknownDirective(_)) => {}
-            Err(error) => return Err(Error::new(error).context(context)),
+            Err(Error::UnknownDirective(_)) => {}
+            result @ Err(_) => return result,
         }
         let htmldocck = match Self::parse_htmldocck_directive(source) {
             Ok(directive) => Some(directive),
-            Err(ErrorKind::UnknownDirective(_)) => None,
-            Err(error) => return Err(Error::new(error).context(context)),
+            Err(Error::UnknownDirective(_)) => None,
+            result @ Err(_) => return result,
         };
         let jsondocck = match Self::parse_jsondocck_directive(source) {
             Ok(directive) => Some(directive),
-            Err(ErrorKind::UnknownDirective(_)) => None,
-            Err(error) => return Err(Error::new(error).context(context)),
+            Err(Error::UnknownDirective(_)) => None,
+            result @ Err(_) => return result,
         };
 
         match (self.scope, htmldocck, jsondocck) {
@@ -316,20 +350,20 @@ impl<'src> DirectiveParser<'src> {
             | (Scope::JsonDocCk | Scope::Base, Some(_), None)
             | (Scope::Base, Some(_), Some(_)) => {
                 // FIXME: Add more context to the error.
-                return Err(Error::new(ErrorKind::UnavailableDirective(source)));
+                return Err(Error::UnavailableDirective(source));
             }
             _ => {}
         }
 
         // FIXME: Import/maintain a list of "all directives" (including "parametrized" ones like `only-*``)
         //        currently recognized by compiletest and don't error/warn on them (unless --verbose ig).
-        Err(Error::new(ErrorKind::UnknownDirective(source)))
+        Err(Error::UnknownDirective(source))
     }
 
     fn parse_base_directive(
         &mut self,
         source: &'src str,
-    ) -> Result<DirectiveKind<'src>, ErrorKind<'src>> {
+    ) -> Result<DirectiveKind<'src>, Error<'src>> {
         Ok(match source {
             "aux-build" => {
                 self.parse_separator(Padding::Yes)?; // FIXME: audit AllowPadding
@@ -346,7 +380,7 @@ impl<'src> DirectiveParser<'src> {
                 // to be able to provide a better error message.
                 let name = self.take_while(|char| char != '=' && !char.is_whitespace())?;
                 let Ok(name) = CrateNameRef::parse(name) else {
-                    return Err(ErrorKind::InvalidValue(name));
+                    return Err(Error::InvalidValue(name));
                 };
 
                 let path = self.consume(|char| char == '=').then(|| self.take_remaining_line());
@@ -372,13 +406,17 @@ impl<'src> DirectiveParser<'src> {
                 let edition = self.take_while(|char| !char.is_whitespace())?;
                 // FIXME: Don't actually try to parse the edition!
                 let Ok(edition) = edition.parse() else {
-                    return Err(ErrorKind::InvalidValue(edition));
+                    return Err(Error::InvalidValue(edition));
                 };
 
                 DirectiveKind::Edition(edition)
             }
             "force-host" => DirectiveKind::ForceHost,
             "no-prefer-dynamic" => DirectiveKind::NoPreferDynamic,
+            // FIXME: Warn/error if we're inside of an auxiliary file.
+            //        ->Warn: "directive gets ignored // revisions are inherited in aux"
+            //        ->Error: "directive not permitted // revisions are inherited in aux"
+            //        For that, introduce a new parameter: PermitRevisionDeclarations::{Yes, No}.
             "revisions" => {
                 self.parse_separator(Padding::Yes)?; // FIXME: audit AllowPadding
                 let mut revisions: Vec<_> = self.take_remaining_line().split_whitespace().collect();
@@ -387,7 +425,7 @@ impl<'src> DirectiveParser<'src> {
                 revisions.dedup();
                 if count != revisions.len() {
                     // FIXME: Proper more helpful error message.
-                    return Err(ErrorKind::DuplicateRevisions);
+                    return Err(Error::DuplicateRevisions);
                 }
                 DirectiveKind::Revisions(revisions)
             }
@@ -398,7 +436,7 @@ impl<'src> DirectiveParser<'src> {
 
                 // FIXME: How does `compiletest` handle the edge cases here?
                 let Some((key, value)) = line.split_once('=') else {
-                    return Err(ErrorKind::InvalidValue(line));
+                    return Err(Error::InvalidValue(line));
                 };
                 DirectiveKind::RustcEnv { key, value }
             }
@@ -408,14 +446,12 @@ impl<'src> DirectiveParser<'src> {
                 DirectiveKind::UnsetRustcEnv(variable)
             }
             // FIXME: proc-macro, exec-env, unset-exec-env, run-flags, doc-flags
-            source => return Err(ErrorKind::UnknownDirective(source)),
+            source => return Err(Error::UnknownDirective(source)),
         })
     }
 
     // FIXME: Actually parse them fully and do sth. with them, otherwise turn this into a array lookup.
-    fn parse_htmldocck_directive(
-        source: &'src str,
-    ) -> Result<DirectiveKind<'src>, ErrorKind<'src>> {
+    fn parse_htmldocck_directive(source: &'src str) -> Result<DirectiveKind<'src>, Error<'src>> {
         let (source, polarity) = Self::parse_polarity(source);
         let kind = match source {
             "count" => HtmlDocCkDirectiveKind::Count,
@@ -426,15 +462,13 @@ impl<'src> DirectiveParser<'src> {
             "matches" => HtmlDocCkDirectiveKind::Matches,
             "matchesraw" => HtmlDocCkDirectiveKind::MatchesRaw,
             "snapshot" => HtmlDocCkDirectiveKind::Snapshot,
-            source => return Err(ErrorKind::UnknownDirective(source)),
+            source => return Err(Error::UnknownDirective(source)),
         };
         Ok(DirectiveKind::HtmlDocCk(kind, polarity))
     }
 
     // FIXME: Actually parse them fully and do sth. with them, otherwise turn this into a array lookup.
-    fn parse_jsondocck_directive(
-        source: &'src str,
-    ) -> Result<DirectiveKind<'src>, ErrorKind<'src>> {
+    fn parse_jsondocck_directive(source: &'src str) -> Result<DirectiveKind<'src>, Error<'src>> {
         let (source, polarity) = Self::parse_polarity(source);
         let kind = match source {
             "count" => JsonDocCkDirectiveKind::Count,
@@ -442,7 +476,7 @@ impl<'src> DirectiveParser<'src> {
             "is" => JsonDocCkDirectiveKind::Is,
             "ismany" => JsonDocCkDirectiveKind::IsMany,
             "set" => JsonDocCkDirectiveKind::Set,
-            source => return Err(ErrorKind::UnknownDirective(source)),
+            source => return Err(Error::UnknownDirective(source)),
         };
         Ok(DirectiveKind::JsonDocCk(kind, polarity))
     }
@@ -472,12 +506,12 @@ impl<'src> DirectiveParser<'src> {
         false
     }
 
-    fn expect(&mut self, expected: char) -> Result<(), ErrorKind<'src>> {
+    fn expect(&mut self, expected: char) -> Result<(), Error<'src>> {
         let Some(char) = self.peek() else {
-            return Err(ErrorKind::UnexpectedEndOfInput);
+            return Err(Error::UnexpectedEndOfInput);
         };
         if char != expected {
-            return Err(ErrorKind::UnexpectedToken { found: char, expected });
+            return Err(Error::UnexpectedToken { found: char, expected });
         }
         self.advance();
         Ok(())
@@ -496,7 +530,7 @@ impl<'src> DirectiveParser<'src> {
         self.advance_while(|char| char.is_whitespace());
     }
 
-    fn parse_separator(&mut self, padding: Padding) -> Result<(), ErrorKind<'src>> {
+    fn parse_separator(&mut self, padding: Padding) -> Result<(), Error<'src>> {
         if let Padding::Yes = padding {
             self.parse_whitespace();
         }
@@ -510,10 +544,7 @@ impl<'src> DirectiveParser<'src> {
         Ok(())
     }
 
-    fn take_while(
-        &mut self,
-        predicate: impl Fn(char) -> bool,
-    ) -> Result<&'src str, ErrorKind<'src>> {
+    fn take_while(&mut self, predicate: impl Fn(char) -> bool) -> Result<&'src str, Error<'src>> {
         let mut start = None;
         let mut end = None;
 
@@ -528,7 +559,7 @@ impl<'src> DirectiveParser<'src> {
 
         match start.zip(end) {
             Some((start, end)) => Ok(&self.source[start..end]),
-            None => Err(ErrorKind::UnexpectedEndOfInput),
+            None => Err(Error::UnexpectedEndOfInput),
         }
     }
 
@@ -547,20 +578,24 @@ struct ErrorBuffer<'src> {
 }
 
 impl<'src> ErrorBuffer<'src> {
-    fn add(&mut self, error: Error<'src>) {
+    fn insert(&mut self, error: Error<'src>) {
         // We coalesce certain kinds of errors where we assume they may occur in large
         // quantities in order to avoid "terminal spamming".
-        match error.kind {
+        match error {
             // FIXME: Add rationale
-            ErrorKind::UnknownDirective(directive) => {
+            Error::UnknownDirective(directive) => {
                 self.unknowns.insert(directive);
             }
             // FIXME: Add rationale
-            ErrorKind::UnavailableDirective(directive) => {
+            Error::UnavailableDirective(directive) => {
                 self.unavailables.insert(directive);
             }
             _ => self.errors.push(error),
         }
+    }
+
+    fn extend(&mut self, errors: impl IntoIterator<Item = Error<'src>>) {
+        errors.into_iter().for_each(|error| self.insert(error));
     }
 
     // FIXME: Shouldn't all these errors be emitted as (non-fatal) errors instead of warnings?
@@ -589,87 +624,62 @@ impl<'src> ErrorBuffer<'src> {
         }
 
         if !self.unavailables.is_empty() {
-            emit!(Warning(|p| {
+            emit!(Error(|p| {
                 // FIXME: Better error message.
                 write!(p, "unavailable directive{}: ", plural_s(&self.unavailables))?;
                 list(p, self.unavailables)
             }));
         }
 
-        for error in self.errors {
-            emit!(Warning("{error}"));
-        }
+        self.errors.into_iter().for_each(|error| error.emit());
+    }
+}
+
+impl Error<'_> {
+    fn emit(self) {
+        // FIXME: Emit as warning or error?
+        // FIXME: Improve the phrasing of these diagnostics!
+        match self {
+            // FIXME: This is awkward, model your errors better.
+            Self::UnknownDirective(_) | Self::UnavailableDirective(_) => {
+                // Handled in `ErrorBuffer::release`.
+                unreachable!()
+            }
+            Self::UnexpectedToken { found, expected } => {
+                emit!(Error("found `{found}` but expected `{expected}`"))
+            }
+            Self::UnexpectedEndOfInput => emit!(Error("unexpected end of input")),
+            Self::InvalidValue(value) => emit!(Error("invalid value `{value}`")),
+            Self::DuplicateRevisions => emit!(Error("duplicate revisions")),
+            Self::UndeclaredRevision { revision, available } => {
+                // FIXME: Dedupe w/ InstErr:
+                let list = |available: BTreeSet<_>| {
+                    available
+                        .into_iter()
+                        .map(|revision| format!("`{revision}`"))
+                        .list(Conjunction::And)
+                };
+
+                // FIXME: Emit a better diagnostic if available.is_empty()
+                emit!(
+                    Error("undeclared revision `{revision}`")
+                        .note("available revisions are: {}", list(available))
+                )
+            }
+        };
     }
 }
 
 #[cfg_attr(test, derive(PartialEq, Eq, Debug))]
-struct Error<'src> {
-    kind: ErrorKind<'src>,
-    context: Option<ErrorContext<'src>>,
-}
-
-impl<'src> Error<'src> {
-    fn new(kind: ErrorKind<'src>) -> Self {
-        Self { kind, context: None }
-    }
-
-    fn context(self, context: ErrorContext<'src>) -> Self {
-        Self { context: Some(context), ..self }
-    }
-}
-
-impl fmt::Display for Error<'_> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.kind)?;
-        if let Some(context) = self.context {
-            write!(f, " {context}")?;
-        }
-        Ok(())
-    }
-}
-
-#[cfg_attr(test, derive(PartialEq, Eq, Debug))]
-enum ErrorKind<'src> {
+enum Error<'src> {
     UnknownDirective(&'src str),
-    // FIXME: add scope?
+    // FIXME: Add scope!
     UnavailableDirective(&'src str),
     UnexpectedToken { found: char, expected: char },
     UnexpectedEndOfInput,
     InvalidValue(&'src str),
     DuplicateRevisions,
-}
-
-impl fmt::Display for ErrorKind<'_> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            // FIXME: This is unreachable. Model this better
-            Self::UnknownDirective(unknown) => write!(f, "unknown directive: `{unknown}`"),
-            // FIXME: THis is unreachable. Model this better
-            Self::UnavailableDirective(directive) => {
-                write!(f, "unavailable directive: `{directive}`")
-            }
-            Self::UnexpectedToken { found, expected } => {
-                write!(f, "found `{found}` but expected `{expected}`")
-            }
-            Self::UnexpectedEndOfInput => write!(f, "unexpected end of input"),
-            Self::InvalidValue(value) => write!(f, "invalid value `{value}`"),
-            Self::DuplicateRevisions => write!(f, "duplicate revisions"),
-        }
-    }
-}
-
-#[derive(Clone, Copy)]
-#[cfg_attr(test, derive(PartialEq, Eq, Debug))]
-enum ErrorContext<'src> {
-    Directive(&'src str),
-}
-
-impl fmt::Display for ErrorContext<'_> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Directive(name) => write!(f, "in directive `{name}`"),
-        }
-    }
+    UndeclaredRevision { revision: &'src str, available: BTreeSet<&'src str> },
 }
 
 // FIXME: Get rid of this if possible.
