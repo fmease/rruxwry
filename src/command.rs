@@ -11,7 +11,7 @@
 
 use crate::{
     data::{CrateName, CrateNameRef, CrateType, DocBackend, Edition, Identity},
-    diagnostic::{self, emit},
+    diagnostic::{self, debug},
     error::Result,
     interface,
     utility::default,
@@ -158,14 +158,13 @@ pub(crate) fn open(crate_name: CrateNameRef<'_>, flags: &interface::DebugFlags) 
     let path = std::env::current_dir()?.join("doc").join(crate_name.as_str()).join("index.html");
 
     if flags.verbose {
-        emit!(Note(|p| {
+        debug(|p| {
             let verb = if !flags.dry_run { "running" } else { "skipping" };
             write!(p, "{verb} ")?;
-            p.with(palette::COMMAND.on_default().effects(Effects::BOLD), |p| {
-                write!(p, "⟨browser⟩ ")
-            })?;
+            p.with(palette::COMMAND.on_default().bold(), |p| write!(p, "⟨browser⟩ "))?;
             p.with(AnsiColor::Green, |p| write!(p, "{}", path.display()))
-        }));
+        })
+        .finish();
     }
 
     if !flags.dry_run {
@@ -212,11 +211,12 @@ impl<'a> Command<'a> {
             return;
         }
 
-        emit!(Note(|p| {
+        debug(|p| {
             let verb = if !self.flags.dry_run { "running" } else { "skipping" };
             write!(p, "{verb} ")?;
             self.render_into(p)
-        }));
+        })
+        .finish();
     }
 
     fn set_toolchain(&mut self, flags: Flags<'_>) {
@@ -390,7 +390,7 @@ impl CommandExt for process::Command {
             p.unset()?;
         }
 
-        p.with(palette::COMMAND.on_default().effects(Effects::BOLD), |p| {
+        p.with(palette::COMMAND.on_default().bold(), |p| {
             write!(p, "{}", self.get_program().display())
         })?;
 

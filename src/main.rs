@@ -4,6 +4,7 @@
 #![feature(impl_trait_in_assoc_type)]
 #![feature(let_chains)]
 #![feature(os_str_display)]
+#![feature(substr_range)]
 #![feature(type_alias_impl_trait)]
 #![deny(rust_2018_idioms, unused_must_use, unused_crate_dependencies)]
 #![deny(clippy::all, clippy::pedantic)]

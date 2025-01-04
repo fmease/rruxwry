@@ -1,6 +1,6 @@
 //! Dealing with environment variables.
 
-use crate::command::emit;
+use crate::diagnostic::{fmt, warn};
 use std::{
     collections::HashMap,
     ffi::{OsStr, OsString},
@@ -60,16 +60,16 @@ fn parse_flags(
 }
 
 fn warn_env_contains_confusable_var(confusable: &OsStr, suggestion: &OsStr) {
-    emit!(
-        Warning("rruxwry does not read the environment variable `{}`", confusable.display())
-            .note("you might have meant `{}`", suggestion.display())
-    );
+    // FIXME: We now say "warning[rruxwry] rruxwry ..." which is meh. Rephrase!
+    warn(fmt!("rruxwry does not read the environment variable `{}`", confusable.display()))
+        .note(fmt!("you might have meant `{}`", suggestion.display()))
+        .finish();
 }
 
 fn warn_malformed_env_var(key: &OsStr, note: &'static str) {
-    emit!(
-        Warning("the environment variable `{}` is malformed", key.display())
-            .note("{note}")
-            .note("ignoring all flags potentially contained within it")
-    );
+    // FIXME: Make this a (hard/fatal) error.
+    warn(fmt!("the environment variable `{}` is malformed", key.display()))
+        .note(fmt!("{note}"))
+        .note(fmt!("ignoring all flags potentially contained within it"))
+        .finish();
 }

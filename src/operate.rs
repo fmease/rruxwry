@@ -54,7 +54,7 @@ fn build_compiletest(
     // FIXME: Make sure `//@ compile-flags: --extern name` works as expected
     let source = std::fs::read_to_string(path)?; // FIXME: error context
     let mut directives =
-        directive::gather(&source, directive::Scope::Base, flags.build.revision.as_deref())?;
+        directive::gather(&source, path, directive::Scope::Base, flags.build.revision.as_deref())?;
 
     // FIXME: unwrap
     let auxiliary_base_path = LazyCell::new(|| path.parent().unwrap().join("auxiliary"));
@@ -104,7 +104,7 @@ fn build_compiletest_auxiliary<'a>(
 
     // FIXME: Pass PermitRevisionDeclaration::No
     let mut directives =
-        directive::gather(&source, directive::Scope::Base, flags.build.revision.as_deref())?;
+        directive::gather(&source, &path, directive::Scope::Base, flags.build.revision.as_deref())?;
 
     let edition = directives.edition.unwrap_or(Edition::RUSTC_DEFAULT);
 
@@ -265,7 +265,7 @@ fn document_compiletest<'a>(
         DocBackend::Html => directive::Scope::HtmlDocCk,
         DocBackend::Json => directive::Scope::JsonDocCk,
     };
-    let mut directives = directive::gather(&source, scope, flags.build.revision.as_deref())?;
+    let mut directives = directive::gather(&source, path, scope, flags.build.revision.as_deref())?;
 
     // FIXME: unwrap
     let auxiliary_base_path = LazyCell::new(|| path.parent().unwrap().join("auxiliary"));
@@ -336,7 +336,7 @@ fn document_compiletest_auxiliary<'a>(
     let source = std::fs::read_to_string(&path)?; // FIXME: error context
 
     // FIXME: Pass PermitRevisionDeclaration::No
-    let mut directives = directive::gather(&source, scope, flags.build.revision.as_deref())?;
+    let mut directives = directive::gather(&source, &path, scope, flags.build.revision.as_deref())?;
 
     let edition = directives.edition.unwrap_or(Edition::RUSTC_DEFAULT);
 

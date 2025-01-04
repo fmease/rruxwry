@@ -8,49 +8,57 @@ use crate::utility::default;
 // FIXME: Add `conditional_directive*s*`
 // FIXME: Test shell-escaping for compile-flags etc once the parser support it
 
+fn parse_directive(source: &str, scope: Scope) -> Result<Directive<'_>, Error<'_>> {
+    Parser::new(source, scope, (0, 0)).parse_directive()
+}
+
+fn span(line: u32, start: u32, end: u32) -> LineSpan {
+    LineSpan { line, start, end }
+}
+
 #[test]
 fn empty_directive() {
-    assert_eq!(Directive::parse("", Scope::Base), Err(Error::UnexpectedEndOfInput));
+    assert_eq!(parse_directive("", Scope::Base), Err(Error::UnexpectedEndOfInput));
 }
 
 #[test]
 fn blank_directive() {
-    assert_eq!(Directive::parse("  \t   ", Scope::Base), Err(Error::UnexpectedEndOfInput))
+    assert_eq!(parse_directive("  \t   ", Scope::Base), Err(Error::UnexpectedEndOfInput))
 }
 
 #[test]
 fn unknown_directive() {
     assert_eq!(
-        Directive::parse("  undefined ", Scope::Base),
+        parse_directive("  undefined ", Scope::Base),
         Err(Error::UnknownDirective("undefined"))
     )
 }
 
 #[test]
 fn unavailable_directive_base() {
-    assert_eq!(Directive::parse("!has", Scope::Base), Err(Error::UnavailableDirective("!has")));
+    assert_eq!(parse_directive("!has", Scope::Base), Err(Error::UnavailableDirective("!has")));
 }
 
 #[test]
 fn unavailable_directive_htmldocck() {
-    assert_eq!(Directive::parse("is", Scope::HtmlDocCk), Err(Error::UnavailableDirective("is")));
+    assert_eq!(parse_directive("is", Scope::HtmlDocCk), Err(Error::UnavailableDirective("is")));
 }
 
 #[test]
 fn build_aux_docs_directive() {
     assert_eq!(
-        Directive::parse("build-aux-docs", Scope::Base),
-        Ok(Directive { revision: None, kind: DirectiveKind::BuildAuxDocs })
+        parse_directive("build-aux-docs", Scope::Base),
+        Ok(Directive { revision: None, bare: BareDirective::BuildAuxDocs })
     )
 }
 
 #[test]
 fn htmldocck_directive() {
     assert_eq!(
-        Directive::parse("has 'krate/constant.K.html'", Scope::HtmlDocCk),
+        parse_directive("has 'krate/constant.K.html'", Scope::HtmlDocCk),
         Ok(Directive {
             revision: None,
-            kind: DirectiveKind::HtmlDocCk(HtmlDocCkDirectiveKind::Has, Polarity::Positive),
+            bare: BareDirective::HtmlDocCk(HtmlDocCkDirective::Has, Polarity::Positive),
         })
     );
 }
@@ -59,7 +67,7 @@ fn htmldocck_directive() {
 fn edition_directive_no_colon() {
     // FIXME: This should only warn (under -@) and discard the whole directive
     assert_eq!(
-        Directive::parse("edition 2018", Scope::Base),
+        parse_directive("edition 2018", Scope::Base),
         Err(Error::UnexpectedToken { found: '2', expected: ':' })
     );
 }
@@ -67,10 +75,10 @@ fn edition_directive_no_colon() {
 #[test]
 fn revisions_directive() {
     assert_eq!(
-        Directive::parse("revisions: one \ttwo  three", Scope::Base),
+        parse_directive("revisions: one \ttwo  three", Scope::Base),
         Ok(Directive {
             revision: None,
-            kind: DirectiveKind::Revisions(vec!["one", "three", "two"])
+            bare: BareDirective::Revisions(vec!["one", "three", "two"])
         })
     );
 }
@@ -78,7 +86,7 @@ fn revisions_directive() {
 #[test]
 fn revisions_directive_duplicate_revisions() {
     assert_eq!(
-        Directive::parse("revisions: repeat repeat", Scope::Base),
+        parse_directive("revisions: repeat repeat", Scope::Base),
         Err(Error::DuplicateRevisions)
     );
 }
@@ -86,20 +94,23 @@ fn revisions_directive_duplicate_revisions() {
 #[test]
 fn conditional_directive() {
     assert_eq!(
-        Directive::parse("[rev] aux-build: file.rs", Scope::Base),
-        Ok(Directive { revision: Some("rev"), kind: DirectiveKind::AuxBuild { path: "file.rs" } })
+        parse_directive("[rev] aux-build: file.rs", Scope::Base),
+        Ok(Directive {
+            revision: Some(("rev", span(0, 1, 4))),
+            bare: BareDirective::AuxBuild { path: "file.rs" }
+        })
     );
 }
 
 #[test]
 fn empty_conditional_directive() {
-    assert_eq!(Directive::parse("[predicate]", Scope::Base), Err(Error::UnexpectedEndOfInput));
+    assert_eq!(parse_directive("[predicate]", Scope::Base), Err(Error::UnexpectedEndOfInput));
 }
 
 #[test]
 fn unknown_conditional_directive() {
     assert_eq!(
-        Directive::parse("[whatever] unknown", Scope::Base),
+        parse_directive("[whatever] unknown", Scope::Base),
         Err(Error::UnknownDirective("unknown"))
     );
 }
@@ -108,8 +119,11 @@ fn unknown_conditional_directive() {
 fn empty_revision() {
     // FIXME: This should also emit a warning.
     assert_eq!(
-        Directive::parse("[] edition: 2021", Scope::Base),
-        Ok(Directive { revision: Some(""), kind: DirectiveKind::Edition(Edition::Rust2021) })
+        parse_directive("[] edition: 2021", Scope::Base),
+        Ok(Directive {
+            revision: Some(("", span(0, 0, 0))),
+            bare: BareDirective::Edition(Edition::Rust2021)
+        })
     );
 }
 
@@ -117,10 +131,10 @@ fn empty_revision() {
 fn padded_revision_not_trimmed() {
     // FIXME: This should also emit a warning.
     assert_eq!(
-        Directive::parse(" [  padded \t] edition: 2015", Scope::Base),
+        parse_directive(" [  padded \t] edition: 2015", Scope::Base),
         Ok(Directive {
-            revision: Some("  padded \t"),
-            kind: DirectiveKind::Edition(Edition::Rust2015)
+            revision: Some(("  padded \t", span(0, 2, 12))),
+            bare: BareDirective::Edition(Edition::Rust2015)
         })
     );
 }
@@ -129,10 +143,10 @@ fn padded_revision_not_trimmed() {
 fn quoted_revision_not_unquoted() {
     // FIXME: This should also emit a warning.
     assert_eq!(
-        Directive::parse("[\"literally\"] compile-flags:", Scope::Base),
+        parse_directive("[\"literally\"] compile-flags:", Scope::Base),
         Ok(Directive {
-            revision: Some("\"literally\""),
-            kind: DirectiveKind::CompileFlags(Vec::new())
+            revision: Some(("\"literally\"", span(0, 1, 12))),
+            bare: BareDirective::CompileFlags(Vec::new())
         })
     )
 }
@@ -141,8 +155,11 @@ fn quoted_revision_not_unquoted() {
 fn commas_inside_revision() {
     // FIXME: This should also emit a warning.
     assert_eq!(
-        Directive::parse("[one,two] compile-flags:", Scope::Base),
-        Ok(Directive { revision: Some("one,two"), kind: DirectiveKind::CompileFlags(Vec::new()) })
+        parse_directive("[one,two] compile-flags:", Scope::Base),
+        Ok(Directive {
+            revision: Some(("one,two", span(0, 1, 8))),
+            bare: BareDirective::CompileFlags(Vec::new())
+        })
     );
 }
 
@@ -151,8 +168,11 @@ fn commas_inside_revision() {
 fn conditional_directives_directive() {
     // FIXME: This should also emit a warning.
     assert_eq!(
-        Directive::parse("[recur] revisions: recur", Scope::Base),
-        Ok(Directive { revision: Some("recur"), kind: DirectiveKind::Revisions(vec!["recur"]) })
+        parse_directive("[recur] revisions: recur", Scope::Base),
+        Ok(Directive {
+            revision: Some(("recur", span(0, 1, 6))),
+            bare: BareDirective::Revisions(vec!["recur"])
+        })
     );
 }
 
@@ -202,12 +222,41 @@ fn conditional_directives() {
             verbatim_flags: VerbatimFlagsBuf { arguments: vec!["--crate-type=lib"], ..default() },
             ..default()
         },
-        uninstantiated: BTreeMap::from_iter([
-            ("one", vec![DirectiveKind::Edition(Edition::Rust2018),]),
-            ("two", vec![DirectiveKind::CompileFlags(vec!["-Zparse-crate-root-only"])])
-        ])
+        uninstantiated: vec![
+            (("one", span(1, 4, 7)), BareDirective::Edition(Edition::Rust2018)),
+            (("two", span(3, 4, 7)), BareDirective::CompileFlags(vec!["-Zparse-crate-root-only"]))
+        ]
     });
     assert_eq!(errors, default());
+}
+
+#[test]
+fn instantiate_conditional_directives() {
+    let mut errors = ErrorBuffer::default();
+    let directives = parse(
+        "//@ revisions: one two\n\
+         //@[one] edition: 2018\n\
+         //@ compile-flags: --crate-type=lib\n\
+         //@[two] compile-flags: -Zparse-crate-root-only",
+        Scope::Base,
+        &mut errors,
+    )
+    .instantiate(Some("two"));
+    assert_eq!(errors, default());
+    assert_eq!(
+        directives,
+        Ok(Directives {
+            instantiated: InstantiatedDirectives {
+                revisions: default(),
+                verbatim_flags: VerbatimFlagsBuf {
+                    arguments: vec!["--crate-type=lib", "-Zparse-crate-root-only"],
+                    ..default()
+                },
+                ..default()
+            },
+            uninstantiated: default()
+        })
+    );
 }
 
 #[test]
@@ -221,7 +270,10 @@ fn conditional_directives_revision_declared_after_use() {
     );
     assert_eq!(directives, Directives {
         instantiated: InstantiatedDirectives { revisions: ["classic", "next"].into(), ..default() },
-        uninstantiated: [("next", vec![DirectiveKind::CompileFlags(vec!["-Znext-solver"])])].into(),
+        uninstantiated: vec![(
+            ("next", span(0, 4, 8)),
+            BareDirective::CompileFlags(vec!["-Znext-solver"])
+        )],
     });
     assert_eq!(errors, default());
 }
@@ -237,16 +289,15 @@ fn conditional_directives_undeclared_revisions() {
     );
     assert_eq!(directives, Directives {
         instantiated: default(),
-        uninstantiated: [
-            ("block", vec![DirectiveKind::CompileFlags(vec!["--crate-type", "lib"]),]),
-            ("wall", vec![DirectiveKind::Edition(Edition::Rust2021)]),
+        uninstantiated: vec![
+            (("block", span(0, 4, 9)), BareDirective::CompileFlags(vec!["--crate-type", "lib"])),
+            (("wall", span(1, 4, 8)), BareDirective::Edition(Edition::Rust2021)),
         ]
-        .into()
     });
     assert_eq!(errors, ErrorBuffer {
         errors: vec![
-            Error::UndeclaredRevision { revision: "block", available: default() },
-            Error::UndeclaredRevision { revision: "wall", available: default() },
+            Error::UndeclaredRevision { revision: ("block", span(0, 4, 9)), available: default() },
+            Error::UndeclaredRevision { revision: ("wall", span(1, 4, 8)), available: default() },
         ],
         ..default()
     });

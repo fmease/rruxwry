@@ -1,4 +1,4 @@
-use crate::diagnostic::{EmittedError, emit};
+use crate::diagnostic::{EmittedError, error, fmt};
 use std::{io, process};
 
 pub(crate) type Result<T = (), E = Error> = std::result::Result<T, E>;
@@ -12,8 +12,8 @@ pub(crate) enum Error {
 impl Error {
     pub(crate) fn emit(self) {
         match self {
-            Self::Io(error) => emit!(Error("{error}")),
-            Self::Process(error) => emit!(Error("{error}")),
+            Self::Io(error) => self::error(fmt!("{error}")).finish(),
+            Self::Process(error) => self::error(fmt!("{error}")).finish(),
             Self::Emitted(error) => error,
         };
     }
