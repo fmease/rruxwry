@@ -15,6 +15,7 @@
 
 use attribute::Attributes;
 use data::{CrateNameBuf, CrateNameCow, CrateType, Edition};
+use diagnostic::{bug, fmt};
 use std::{path::Path, process::ExitCode};
 
 mod attribute;
@@ -43,6 +44,8 @@ fn main() -> ExitCode {
 }
 
 fn try_main() -> error::Result {
+    set_panic_hook();
+
     let args = interface::arguments();
 
     match args.color {
@@ -166,4 +169,41 @@ fn compute_crate_name_and_type<'src>(
             (crate_name, crate_type)
         }
     })
+}
+
+fn set_panic_hook() {
+    const ENV_VAR: &str = "RRUXWRY_BACKTRACE";
+
+    std::panic::set_hook(Box::new(|information| {
+        let payload = information.payload();
+
+        let message = payload
+            .downcast_ref::<&str>()
+            .copied()
+            .or_else(|| payload.downcast_ref::<String>().map(String::as_str))
+            .unwrap_or("<unknown cause>");
+
+        let backtrace = std::env::var(ENV_VAR)
+            .is_ok_and(|variable| variable != "0")
+            .then(std::backtrace::Backtrace::force_capture);
+
+        let error = bug(fmt!("{message}"));
+        let error = match information.location() {
+            Some(location) => error.note(fmt!("at `{location}`")),
+            None => error,
+        };
+        let error = match std::thread::current().name() {
+            Some(name) => error.note(fmt!("in thread `{name}`")),
+            None => error.note(fmt!("in an unknown thread")),
+        };
+        let error = error.note(fmt!(
+            "rruxwry unexpectedly panicked. this is a bug. we would appreciate a bug report"
+        ));
+        let error = match backtrace {
+            Some(backtrace) => error.note(fmt!("with the following backtrace:\n{backtrace}")),
+            None => error
+                .note(fmt!("rerun with environment variable `{ENV_VAR}=1` to display a backtrace")),
+        };
+        error.finish();
+    }));
 }

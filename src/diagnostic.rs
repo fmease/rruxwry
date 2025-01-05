@@ -9,6 +9,10 @@ use unicode_width::UnicodeWidthStr;
 
 pub(crate) type Painter = utility::paint::Painter<io::BufWriter<io::StderrLock<'static>>>;
 
+pub(crate) fn bug(message: impl FnOnce(&mut Painter) -> io::Result<()>) -> Diagnostic {
+    Diagnostic::new(Severity::Bug, message)
+}
+
 pub(crate) fn error(message: impl FnOnce(&mut Painter) -> io::Result<()>) -> Diagnostic {
     Diagnostic::new(Severity::Error, message)
 }
@@ -37,16 +41,13 @@ impl Diagnostic {
     //        constructing a new painter for each `emit!()` which is semi-expensive!
     //  NOTE: if we do that change, don't keep the lock the entire time!
     //        we want rustc to print to stderr too!
-    pub(crate) fn new(
-        severity: Severity,
-        message: impl FnOnce(&mut Painter) -> io::Result<()>,
-    ) -> Self {
+    fn new(severity: Severity, message: impl FnOnce(&mut Painter) -> io::Result<()>) -> Self {
         let stderr = io::stderr().lock();
         let colorize = anstream::AutoStream::choice(&stderr) != ColorChoice::Never;
         let mut p = Painter::new(io::BufWriter::new(stderr), colorize);
         (|| {
             p.set(Effects::BOLD)?;
-            p.with(severity.color(), |p| write!(p, "{}[rruxwry]", severity.name()))?;
+            p.with(severity.color(), |p| write!(p, "[rruxwry] {}", severity.name()))?;
             if !severity.is_serious() {
                 p.unset()?;
             }
@@ -108,6 +109,7 @@ impl Diagnostic {
         self.aux(AuxSeverity::Help, message)
     }
 
+    // FIXME: Split message by line and properly offset each resulting line.
     fn aux(
         mut self,
         severity: AuxSeverity,
@@ -139,6 +141,7 @@ pub(crate) struct EmittedError(());
 
 #[derive(Clone, Copy)]
 pub(crate) enum Severity {
+    Bug,
     Error,
     Warning,
     Debug,
@@ -147,6 +150,7 @@ pub(crate) enum Severity {
 impl Severity {
     const fn name(self) -> &'static str {
         match self {
+            Self::Bug => "internal error",
             Self::Error => "error",
             Self::Warning => "warning",
             Self::Debug => "",
@@ -155,9 +159,9 @@ impl Severity {
 
     const fn color(self) -> AnsiColor {
         match self {
-            Self::Error => AnsiColor::BrightRed,
-            Self::Warning => AnsiColor::Yellow,
-            Self::Debug => AnsiColor::Blue,
+            Self::Bug | Self::Error => AnsiColor::BrightRed,
+            Self::Warning => AnsiColor::BrightYellow,
+            Self::Debug => AnsiColor::BrightBlue,
         }
     }
 

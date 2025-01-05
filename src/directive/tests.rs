@@ -23,7 +23,7 @@ fn empty_directive() {
 
 #[test]
 fn blank_directive() {
-    assert_eq!(parse_directive("  \t   ", Scope::Base), Err(Error::UnexpectedEndOfInput))
+    assert_eq!(parse_directive("  \t   ", Scope::Base), Err(Error::UnexpectedEndOfInput));
 }
 
 #[test]
@@ -31,7 +31,7 @@ fn unknown_directive() {
     assert_eq!(
         parse_directive("  undefined ", Scope::Base),
         Err(Error::UnknownDirective("undefined"))
-    )
+    );
 }
 
 #[test]
@@ -49,7 +49,7 @@ fn build_aux_docs_directive() {
     assert_eq!(
         parse_directive("build-aux-docs", Scope::Base),
         Ok(Directive { revision: None, bare: BareDirective::BuildAuxDocs })
-    )
+    );
 }
 
 #[test]
@@ -148,7 +148,7 @@ fn quoted_revision_not_unquoted() {
             revision: Some(("\"literally\"", span(0, 1, 12))),
             bare: BareDirective::CompileFlags(Vec::new())
         })
-    )
+    );
 }
 
 #[test]

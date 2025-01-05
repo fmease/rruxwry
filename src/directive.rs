@@ -50,7 +50,7 @@ pub(crate) fn gather<'src>(
     let mut errors = ErrorBuffer::default();
     let directives = parse(source, scope, &mut errors);
     errors.release(source, path);
-    directives.instantiate(revision).map_err(|error| error.emit())
+    directives.instantiate(revision).map_err(InstantiationError::emit)
 }
 
 fn parse<'src>(
@@ -547,7 +547,7 @@ impl<'src> Parser<'src> {
     }
 
     fn parse_whitespace(&mut self) {
-        self.advance_while(|char| char.is_whitespace());
+        self.advance_while(char::is_whitespace);
     }
 
     fn parse_separator(&mut self, padding: Padding) -> Result<(), Error<'src>> {
