@@ -17,15 +17,17 @@
 
 use crate::{
     command::{ExternCrate, VerbatimFlagsBuf},
+    context::Context,
     data::{CrateNameRef, Edition},
-    diagnostic::{EmittedError, LineSpan, Location, error, fmt, warn},
+    diagnostic::{EmittedError, error, fmt, warn},
+    source::{LocalSpan, SourceFileRef, Span},
     utility::{Conjunction, ListingExt},
 };
 use std::{
     collections::BTreeSet,
     iter::Peekable,
     mem,
-    ops::{Deref, DerefMut, Range},
+    ops::{Deref, DerefMut},
     path::Path,
     str::CharIndices,
 };
@@ -33,52 +35,62 @@ use std::{
 #[cfg(test)]
 mod tests;
 
-pub(crate) fn gather<'src>(
-    source: &'src str,
+pub(crate) fn gather<'cx>(
     path: &Path,
     scope: Scope,
     flavor: Flavor,
     revision: Option<&str>,
-) -> Result<Directives<'src>, EmittedError> {
+    cx: Context<'cx>,
+) -> Result<Directives<'cx>, crate::error::Error> {
+    // FIXME: The error handling is pretty awkward!
     let mut errors = ErrorBuffer::default();
-    let directives = parse(source, scope, flavor, &mut errors);
-    errors.release(source, path);
-    directives.instantiate(revision).map_err(InstantiationError::emit)
+    let directives = parse(cx.map().get(cx.map().add(path)?), scope, flavor, &mut errors);
+    errors.release(cx);
+    directives.instantiate(revision).map_err(|error| error.emit().into())
 }
 
-fn parse<'src>(
-    source: &'src str,
+fn parse<'cx>(
+    file: SourceFileRef<'cx>,
     scope: Scope,
     flavor: Flavor,
-    errors: &mut ErrorBuffer<'src>,
-) -> Directives<'src> {
+    errors: &mut ErrorBuffer<'cx>,
+) -> Directives<'cx> {
     let mut directives = Directives::default();
 
-    for (index, line) in source.lines().enumerate() {
-        let Some(directive) = line.trim_start().strip_prefix("//@") else { continue };
-        let offset = (
-            index.try_into().unwrap(),
-            line.substr_range(directive).unwrap().start.try_into().unwrap(),
-        );
+    let mut index = 0u32;
+    // `\r` gets strpped as whitespace later on.
+    for line in file.contents.split('\n') {
+        if let Some(directive) = line.trim_start().strip_prefix("//@") {
+            // FIXME: This is super awkward! Replace this!
+            let offset = line.substr_range(directive).unwrap().start;
+            let offset = index + file.span.start + u32::try_from(offset).unwrap();
 
-        match Parser::new(directive, scope, flavor, offset).parse_directive() {
-            Ok(directive) => directives.add(directive),
-            Err(error) => errors.insert(error),
-        }
+            match Parser::new(directive, scope, flavor, offset).parse_directive() {
+                Ok(directive) => directives.add(directive),
+                Err(error) => errors.insert(error),
+            }
+        };
+
+        // FIXME: Is this really correct (empty lines, trailing line breaks, …)?
+        index += u32::try_from(line.len()).unwrap() + 1;
     }
 
-    errors.extend(
-        directives
-            .uninstantiated
-            .iter()
-            .filter(|&((revision, _), _)| !directives.revisions.contains(revision))
-            .map(|&(revision, _)| Error::UndeclaredRevision {
-                revision,
-                available: directives.revisions.clone(),
-            }),
-    );
+    // FIXME: Move this into `gather` (tests need to be updated to use a custom `gather` over `parse`).
+    validate(&directives, errors);
 
     directives
+}
+
+fn validate<'cx>(directives: &Directives<'cx>, errors: &mut ErrorBuffer<'cx>) {
+    directives
+        .uninstantiated
+        .iter()
+        .filter(|&((revision, _), _)| !directives.revisions.contains(revision))
+        .map(|&(revision, _)| Error::UndeclaredRevision {
+            revision,
+            available: directives.revisions.clone(),
+        })
+        .collect_into(errors);
 }
 
 #[derive(Clone, Copy)]
@@ -230,11 +242,11 @@ impl<'src> InstantiatedDirectives<'src> {
     }
 }
 
-type UninstantiatedDirectives<'src> = Vec<((&'src str, LineSpan), BareDirective<'src>)>;
+type UninstantiatedDirectives<'src> = Vec<((&'src str, Span), BareDirective<'src>)>;
 
 #[cfg_attr(test, derive(PartialEq, Eq, Debug))]
 struct Directive<'src> {
-    revision: Option<(&'src str, LineSpan)>,
+    revision: Option<(&'src str, Span)>,
     bare: BareDirective<'src>,
 }
 
@@ -310,11 +322,11 @@ struct Parser<'src> {
     source: &'src str,
     scope: Scope,
     flavor: Flavor,
-    offset: (u32, u32),
+    offset: u32,
 }
 
 impl<'src> Parser<'src> {
-    fn new(source: &'src str, scope: Scope, flavor: Flavor, offset: (u32, u32)) -> Self {
+    fn new(source: &'src str, scope: Scope, flavor: Flavor, offset: u32) -> Self {
         Self { chars: source.char_indices().peekable(), source, scope, flavor, offset }
     }
 
@@ -331,10 +343,11 @@ impl<'src> Parser<'src> {
             // FIXME: Do we want to trim on Flavor::Rruxwry?
             // FIXME: Under Flavor::Rruxwry support cfg-like logic predicates here (n-ary `not`, `any`, `all`; `false`, `true`).
             // FIXME: 0..0 is incorrect for empty revision, should be cur_idx..cur_idx
-            let range = self.take_while(|char| char != ']').unwrap_or(0..0);
+            let dummy = LocalSpan { start: 0, end: 0 };
+            let span = self.take_while(|char| char != ']').unwrap_or(dummy);
             self.expect(']')?;
 
-            Some((self.source(range.clone()), self.span(range)))
+            Some((self.source(span), self.span(span)))
         } else {
             None
         };
@@ -661,10 +674,7 @@ impl<'src> Parser<'src> {
         Ok(())
     }
 
-    fn take_while(
-        &mut self,
-        predicate: impl Fn(char) -> bool,
-    ) -> Result<Range<usize>, Error<'src>> {
+    fn take_while(&mut self, predicate: impl Fn(char) -> bool) -> Result<LocalSpan, Error<'src>> {
         let mut start = None;
         let mut end = None;
 
@@ -678,26 +688,28 @@ impl<'src> Parser<'src> {
         }
 
         match start.zip(end) {
-            Some((start, end)) => Ok(start..end),
+            Some((start, end)) => {
+                let start = start.try_into().unwrap();
+                let end = end.try_into().unwrap();
+                Ok(LocalSpan { start, end })
+            }
             None => Err(Error::UnexpectedEndOfInput),
         }
     }
 
     fn take_remaining_line(&mut self) -> &'src str {
         // FIXME: Should we instead bail on empty lines?
-        self.take_while(|char| char != '\n').map(|range| self.source(range)).unwrap_or_default()
+        self.take_while(|char| char != '\n').map(|span| self.source(span)).unwrap_or_default()
     }
 
-    fn source(&self, range: Range<usize>) -> &'src str {
-        &self.source[range]
+    fn source(&self, span: LocalSpan) -> &'src str {
+        &self.source[span.range()]
     }
 
-    fn span(&self, range: Range<usize>) -> LineSpan {
-        LineSpan {
-            line: self.offset.0,
-            start: u32::try_from(range.start).unwrap() + self.offset.1,
-            end: u32::try_from(range.end).unwrap() + self.offset.1,
-        }
+    fn span(&self, span: LocalSpan) -> Span {
+        // FIXME: Consider utilizing (the currently unused) `Span::global`
+        //        here once we no longer need to shift by offset.
+        span.shift(self.offset).reinterpret()
     }
 }
 
@@ -730,12 +742,8 @@ impl<'src> ErrorBuffer<'src> {
         }
     }
 
-    fn extend(&mut self, errors: impl IntoIterator<Item = Error<'src>>) {
-        errors.into_iter().for_each(|error| self.insert(error));
-    }
-
     // FIXME: Shouldn't all these errors be emitted as (non-fatal) errors instead of warnings?
-    fn release(self, source: &str, path: &Path) {
+    fn release(self, cx: Context<'_>) {
         use std::io::Write;
 
         let emit_grouped = |name: &str, mut errors: BTreeSet<_>| {
@@ -762,12 +770,18 @@ impl<'src> ErrorBuffer<'src> {
         emit_grouped("unsupported", self.unsupported);
         emit_grouped("unknown", self.unknown);
 
-        self.errors.into_iter().for_each(|error| error.emit(source, path));
+        self.errors.into_iter().for_each(|error| error.emit(cx));
+    }
+}
+
+impl<'src> Extend<Error<'src>> for ErrorBuffer<'src> {
+    fn extend<T: IntoIterator<Item = Error<'src>>>(&mut self, errors: T) {
+        errors.into_iter().for_each(|error| self.insert(error));
     }
 }
 
 impl Error<'_> {
-    fn emit(self, source: &str, path: &Path) {
+    fn emit(self, cx: Context<'_>) {
         // FIXME: Improve the phrasing of these diagnostics!
         match self {
             // FIXME: This is awkward, model your errors better.
@@ -783,7 +797,6 @@ impl Error<'_> {
             Self::UnexpectedEndOfInput => error(fmt!("unexpected end of input")),
             Self::InvalidValue(value) => error(fmt!("invalid value `{value}`")),
             Self::DuplicateRevisions => error(fmt!("duplicate revisions")),
-            // FIXME: Incorporate the location!
             Self::UndeclaredRevision { revision: (revision, span), available } => {
                 // FIXME: Dedupe w/ InstErr:
                 let list = |available: BTreeSet<_>| {
@@ -793,11 +806,7 @@ impl Error<'_> {
                         .list(Conjunction::And)
                 };
 
-                let error = error(fmt!("undeclared revision `{revision}`")).location(Location {
-                    source,
-                    path,
-                    span,
-                });
+                let error = error(fmt!("undeclared revision `{revision}`")).highlight(span, cx);
 
                 if available.is_empty() {
                     error.help(fmt!("consider declaring a revision with the `revisions` directive"))
@@ -820,7 +829,7 @@ enum Error<'src> {
     UnexpectedEndOfInput,
     InvalidValue(&'src str),
     DuplicateRevisions,
-    UndeclaredRevision { revision: (&'src str, LineSpan), available: BTreeSet<&'src str> },
+    UndeclaredRevision { revision: (&'src str, Span), available: BTreeSet<&'src str> },
 }
 
 // FIXME: Get rid of this if possible.

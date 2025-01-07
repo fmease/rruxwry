@@ -5,16 +5,30 @@ use crate::utility::default;
 // FIXME: Test padded colons `  :  `.
 // FIXME: Test `revisions: one, two, three` (what does compiletest do??).
 // FIXME: Test non-alphanum revision "names" in `revisions` directive (what does compiletest do??).
-// FIXME: Add `conditional_directive*s*`
-// FIXME: Test shell-escaping for compile-flags etc once the parser support it
+// FIXME: Test shell-escaping for compile-flags etc once the parser supports it
+// FIXME: Test CRLF.
+
+fn parse_directives<'cx>(
+    source: &'cx str,
+    scope: Scope,
+    flavor: Flavor,
+    errors: &mut ErrorBuffer<'cx>,
+) -> Directives<'cx> {
+    parse(
+        SourceFileRef { path: Path::new(""), contents: source, span: Span { start: 0, end: 0 } },
+        scope,
+        flavor,
+        errors,
+    )
+}
 
 fn parse_directive(source: &str, scope: Scope) -> Result<Directive<'_>, Error<'_>> {
     // FIXME: Make flavor a parameter.
-    Parser::new(source, scope, Flavor::Vanilla, (0, 0)).parse_directive()
+    Parser::new(source, scope, Flavor::Vanilla, 0).parse_directive()
 }
 
-fn span(line: u32, start: u32, end: u32) -> LineSpan {
-    LineSpan { line, start, end }
+fn span(start: u32, end: u32) -> Span {
+    Span { start, end }
 }
 
 #[test]
@@ -113,7 +127,7 @@ fn conditional_directive() {
     assert_eq!(
         parse_directive("[rev] aux-build: file.rs", Scope::Base),
         Ok(Directive {
-            revision: Some(("rev", span(0, 1, 4))),
+            revision: Some(("rev", span(1, 4))),
             bare: BareDirective::AuxBuild { path: "file.rs" }
         })
     );
@@ -138,7 +152,7 @@ fn empty_revision() {
     assert_eq!(
         parse_directive("[] edition: 2021", Scope::Base),
         Ok(Directive {
-            revision: Some(("", span(0, 0, 0))),
+            revision: Some(("", span(0, 0))),
             bare: BareDirective::Edition(Edition::Rust2021)
         })
     );
@@ -150,7 +164,7 @@ fn padded_revision_not_trimmed() {
     assert_eq!(
         parse_directive(" [  padded \t] edition: 2015", Scope::Base),
         Ok(Directive {
-            revision: Some(("  padded \t", span(0, 2, 12))),
+            revision: Some(("  padded \t", span(2, 12))),
             bare: BareDirective::Edition(Edition::Rust2015)
         })
     );
@@ -162,7 +176,7 @@ fn quoted_revision_not_unquoted() {
     assert_eq!(
         parse_directive("[\"literally\"] compile-flags:", Scope::Base),
         Ok(Directive {
-            revision: Some(("\"literally\"", span(0, 1, 12))),
+            revision: Some(("\"literally\"", span(1, 12))),
             bare: BareDirective::CompileFlags(Vec::new())
         })
     );
@@ -174,7 +188,7 @@ fn commas_inside_revision() {
     assert_eq!(
         parse_directive("[one,two] compile-flags:", Scope::Base),
         Ok(Directive {
-            revision: Some(("one,two", span(0, 1, 8))),
+            revision: Some(("one,two", span(1, 8))),
             bare: BareDirective::CompileFlags(Vec::new())
         })
     );
@@ -187,7 +201,7 @@ fn conditional_directives_directive() {
     assert_eq!(
         parse_directive("[recur] revisions: recur", Scope::Base),
         Ok(Directive {
-            revision: Some(("recur", span(0, 1, 6))),
+            revision: Some(("recur", span(1, 6))),
             bare: BareDirective::Revisions(vec!["recur"])
         })
     );
@@ -196,7 +210,7 @@ fn conditional_directives_directive() {
 #[test]
 fn no_directives() {
     let mut errors = ErrorBuffer::default();
-    let directives = parse(
+    let directives = parse_directives(
         "#![crate_type = \"lib\"]\nfn main() {}\n",
         Scope::Base,
         Flavor::Vanilla,
@@ -208,7 +222,7 @@ fn no_directives() {
 #[test]
 fn compile_flags_directives() {
     let mut errors = ErrorBuffer::default();
-    let directives = parse(
+    let directives = parse_directives(
         "\n  \t  //@  compile-flags: --crate-type lib\n\
         //@compile-flags:--edition=2021",
         Scope::Base,
@@ -231,7 +245,7 @@ fn compile_flags_directives() {
 #[test]
 fn conditional_directives() {
     let mut errors = ErrorBuffer::default();
-    let directives = parse(
+    let directives = parse_directives(
         "//@ revisions: one two\n\
          //@[one] edition: 2018\n\
          //@ compile-flags: --crate-type=lib\n\
@@ -247,8 +261,8 @@ fn conditional_directives() {
             ..default()
         },
         uninstantiated: vec![
-            (("one", span(1, 4, 7)), BareDirective::Edition(Edition::Rust2018)),
-            (("two", span(3, 4, 7)), BareDirective::CompileFlags(vec!["-Zparse-crate-root-only"]))
+            (("one", span(27, 30)), BareDirective::Edition(Edition::Rust2018)),
+            (("two", span(86, 89)), BareDirective::CompileFlags(vec!["-Zparse-crate-root-only"]))
         ]
     });
     assert_eq!(errors, default());
@@ -257,7 +271,7 @@ fn conditional_directives() {
 #[test]
 fn instantiate_conditional_directives() {
     let mut errors = ErrorBuffer::default();
-    let directives = parse(
+    let directives = parse_directives(
         "//@ revisions: one two\n\
          //@[one] edition: 2018\n\
          //@ compile-flags: --crate-type=lib\n\
@@ -287,7 +301,7 @@ fn instantiate_conditional_directives() {
 #[test]
 fn conditional_directives_revision_declared_after_use() {
     let mut errors = ErrorBuffer::default();
-    let directives = parse(
+    let directives = parse_directives(
         "//@[next] compile-flags: -Znext-solver\n\
          //@ revisions: classic next",
         Scope::Base,
@@ -297,7 +311,7 @@ fn conditional_directives_revision_declared_after_use() {
     assert_eq!(directives, Directives {
         instantiated: InstantiatedDirectives { revisions: ["classic", "next"].into(), ..default() },
         uninstantiated: vec![(
-            ("next", span(0, 4, 8)),
+            ("next", span(4, 8)),
             BareDirective::CompileFlags(vec!["-Znext-solver"])
         )],
     });
@@ -307,7 +321,7 @@ fn conditional_directives_revision_declared_after_use() {
 #[test]
 fn conditional_directives_undeclared_revisions() {
     let mut errors = ErrorBuffer::default();
-    let directives = parse(
+    let directives = parse_directives(
         "//@[block] compile-flags: --crate-type lib\n\
          //@[wall] edition: 2021",
         Scope::Base,
@@ -317,14 +331,14 @@ fn conditional_directives_undeclared_revisions() {
     assert_eq!(directives, Directives {
         instantiated: default(),
         uninstantiated: vec![
-            (("block", span(0, 4, 9)), BareDirective::CompileFlags(vec!["--crate-type", "lib"])),
-            (("wall", span(1, 4, 8)), BareDirective::Edition(Edition::Rust2021)),
+            (("block", span(4, 9)), BareDirective::CompileFlags(vec!["--crate-type", "lib"])),
+            (("wall", span(47, 51)), BareDirective::Edition(Edition::Rust2021)),
         ]
     });
     assert_eq!(errors, ErrorBuffer {
         errors: vec![
-            Error::UndeclaredRevision { revision: ("block", span(0, 4, 9)), available: default() },
-            Error::UndeclaredRevision { revision: ("wall", span(1, 4, 8)), available: default() },
+            Error::UndeclaredRevision { revision: ("block", span(4, 9)), available: default() },
+            Error::UndeclaredRevision { revision: ("wall", span(47, 51)), available: default() },
         ],
         ..default()
     });
@@ -345,7 +359,7 @@ fn undeclared_active_revision() {
 fn missing_active_revision() {
     let mut errors = ErrorBuffer::default();
     let directives =
-        parse("//@ revisions: first second", Scope::Base, Flavor::Vanilla, &mut errors);
+        parse_directives("//@ revisions: first second", Scope::Base, Flavor::Vanilla, &mut errors);
     assert_eq!(errors, default());
     assert_eq!(
         directives.instantiate(None),

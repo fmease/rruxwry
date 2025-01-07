@@ -1,11 +1,15 @@
+// Features //
+#![feature(adt_const_params)]
 #![feature(decl_macro)]
 #![feature(exact_size_is_empty)]
 #![feature(exit_status_error)]
 #![feature(impl_trait_in_assoc_type)]
+#![feature(iter_collect_into)]
 #![feature(let_chains)]
 #![feature(os_str_display)]
 #![feature(substr_range)]
 #![feature(type_alias_impl_trait)]
+// Lints //
 #![deny(rust_2018_idioms, unused_must_use, unused_crate_dependencies)]
 #![deny(clippy::all, clippy::pedantic)]
 #![allow(clippy::if_not_else)] // I disagree
@@ -21,16 +25,15 @@ use std::{path::Path, process::ExitCode};
 
 mod attribute;
 mod command;
+mod context;
 mod data;
 mod diagnostic;
 mod directive;
 mod error;
 mod interface;
 mod operate;
+mod source;
 mod utility;
-
-// FIXME: respect `compile-flags: --test`
-// FIXME: Support for `-r`/`--release` maybe?
 
 fn main() -> ExitCode {
     let result = try_main();
@@ -73,12 +76,12 @@ fn try_main() -> error::Result {
         &mut source,
     )?;
 
-    // FIXME: this is akward ... can we do this inside cli smh (not the ref op ofc)
+    // FIXME: this is awkward ... can we do this inside cli smh (not the ref op ofc)
     let verbatim_flags = command::VerbatimFlagsBuf {
         arguments: args.verbatim.iter().map(String::as_str).collect(),
         environment: Vec::new(),
     };
-    // FIXME: this is akward ... can we do this inside cli smh (not the ref op ofc)
+    // FIXME: this is awkward ... can we do this inside cli smh (not the ref op ofc)
     let flags = command::Flags {
         toolchain: args.toolchain.as_deref(),
         build: &args.build,
@@ -89,16 +92,19 @@ fn try_main() -> error::Result {
     let crate_ =
         operate::Crate { path: &args.path, name: crate_name.as_ref(), type_: crate_type, edition };
 
+    let cx = context::ContextData::default();
+    let cx = context::Context::new(&cx);
+
     match args.command {
         interface::Command::Build { run, mode } => {
-            operate::build(mode, crate_, flags)?;
+            operate::build(mode, crate_, flags, cx)?;
 
             if run {
                 command::execute(Path::new(".").join(crate_name.as_str()), flags.debug)?;
             }
         }
         interface::Command::Doc { open, mode, flags: doc_flags } => {
-            let crate_name = operate::document(mode, crate_, flags, &doc_flags)?;
+            let crate_name = operate::document(mode, crate_, flags, &doc_flags, cx)?;
 
             if open {
                 command::open(crate_name.as_ref(), &args.debug)?;

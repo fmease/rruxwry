@@ -1,3 +1,4 @@
+pub(crate) mod monotonic;
 pub(crate) mod paint;
 pub(crate) mod parse;
 

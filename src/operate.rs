@@ -2,8 +2,12 @@
 //!
 //! The low-level build commands are defined in [`crate::command`].
 
+// FIXME: Create test for `//@ compile-flags: --extern name` + aux-build
+// FIXME: Create test for `//@ compile-flags: --test`.
+
 use crate::{
     command::{self, ExternCrate, Flags, Strictness},
+    context::Context,
     data::{CrateName, CrateNameCow, CrateNameRef, CrateType, DocBackend, Edition},
     directive,
     error::Result,
@@ -19,10 +23,15 @@ pub(crate) struct Crate<'a> {
     pub(crate) edition: Edition,
 }
 
-pub(crate) fn build(mode: BuildMode, crate_: Crate<'_>, flags: Flags<'_>) -> Result {
+pub(crate) fn build(
+    mode: BuildMode,
+    crate_: Crate<'_>,
+    flags: Flags<'_>,
+    cx: Context<'_>,
+) -> Result {
     match mode {
         BuildMode::Default => build_default(crate_, flags),
-        BuildMode::Compiletest(flavor) => build_compiletest(crate_, flags, flavor),
+        BuildMode::Compiletest(flavor) => build_compiletest(crate_, flags, flavor, cx),
     }
 }
 
@@ -38,28 +47,31 @@ fn build_default(crate_: Crate<'_>, flags: Flags<'_>) -> Result {
     )
 }
 
-fn build_compiletest(crate_: Crate<'_>, flags: Flags<'_>, flavor: directive::Flavor) -> Result {
+fn build_compiletest(
+    crate_: Crate<'_>,
+    flags: Flags<'_>,
+    flavor: directive::Flavor,
+    cx: Context<'_>,
+) -> Result {
     // FIXME: Respect the CLI edition, it should override `//@ edition`. It's okay that
     //        it would lead to a failure on e.g., `//@ compile-flags: --edition`.
     let _ = crate_.edition;
 
-    // FIXME: Make sure `//@ compile-flags: --extern name` works as expected
-    let source = std::fs::read_to_string(crate_.path)?; // FIXME: error context
     let mut directives = directive::gather(
-        &source,
         crate_.path,
         directive::Scope::Base,
         flavor,
         flags.build.revision.as_deref(),
+        cx,
     )?;
 
     // FIXME: unwrap
     let aux_base_path = LazyCell::new(|| crate_.path.parent().unwrap().join("auxiliary"));
 
-    let deps: Vec<_> = directives
+    let dependencies: Vec<_> = directives
         .dependencies
         .iter()
-        .map(|dependency| build_compiletest_auxiliary(dependency, &aux_base_path, flags, flavor))
+        .map(|dep| build_compiletest_auxiliary(dep, &aux_base_path, flags, flavor, cx))
         .collect::<Result<_>>()?;
 
     let verbatim_flags = mem::take(&mut directives.verbatim_flags).extended(flags.verbatim);
@@ -72,7 +84,7 @@ fn build_compiletest(crate_: Crate<'_>, flags: Flags<'_>, flavor: directive::Fla
         crate_.type_,
         directives.edition.unwrap_or(Edition::RUSTC_DEFAULT),
         // FIXME: Once we support `//@ proc-macro` we need to add `proc_macro` (to the client) similar to `extern_prelude_for` here.
-        &deps,
+        &dependencies,
         flags,
         Strictness::Strict,
     )
@@ -85,6 +97,7 @@ fn build_compiletest_auxiliary<'a>(
     base_path: &Path,
     flags: Flags<'_>,
     flavor: directive::Flavor,
+    cx: Context<'_>,
 ) -> Result<ExternCrate<'a>> {
     let path = match extern_crate {
         ExternCrate::Unnamed { path } => base_path.join(path),
@@ -97,16 +110,13 @@ fn build_compiletest_auxiliary<'a>(
     // FIXME: unwrap
     let crate_name = CrateName::adjust_and_parse_file_path(&path).unwrap();
 
-    // FIXME: Alternatively, just warn, don't bail on read failure.
-    let source = std::fs::read_to_string(&path)?; // FIXME: error context
-
     // FIXME: Pass PermitRevisionDeclaration::No
     let mut directives = directive::gather(
-        &source,
         &path,
         directive::Scope::Base,
         flavor,
         flags.build.revision.as_deref(),
+        cx,
     )?;
 
     let edition = directives.edition.unwrap_or(Edition::RUSTC_DEFAULT);
@@ -150,11 +160,12 @@ pub(crate) fn document<'a>(
     flags: Flags<'_>,
     // FIXME: temporary
     doc_flags: &crate::interface::DocFlags,
+    cx: Context<'_>,
 ) -> Result<CrateNameCow<'a>> {
     match mode {
         DocMode::Default => document_default(crate_, flags, doc_flags),
         DocMode::CrossCrate => document_cross_crate(crate_, flags, doc_flags),
-        DocMode::Compiletest(flavor) => document_compiletest(crate_, flags, doc_flags, flavor),
+        DocMode::Compiletest(flavor) => document_compiletest(crate_, flags, doc_flags, flavor, cx),
     }
 }
 
@@ -240,13 +251,12 @@ fn document_compiletest<'a>(
     // FIXME: tempory
     doc_flags: &crate::interface::DocFlags,
     flavor: directive::Flavor,
+    cx: Context<'_>,
 ) -> Result<CrateNameCow<'a>> {
     // FIXME: Respect the CLI edition, it should override `//@ edition`. It's okay that
     //        it would lead to a failure on e.g., `//@ compile-flags: --edition`.
     let _ = crate_.edition;
 
-    // FIXME: Make sure `//@ compile-flags: --extern name` works as expected
-    let source = std::fs::read_to_string(crate_.path)?; // FIXME: error context
     // FIXME: Do we actually want to treat !`-j` as `rustdoc/` (Scope::HtmlDocCk)
     //        instead of `rustdoc-ui/` ("Scope::Rustdoc")
     let scope = match doc_flags.backend {
@@ -254,22 +264,23 @@ fn document_compiletest<'a>(
         DocBackend::Json => directive::Scope::JsonDocCk,
     };
     let mut directives =
-        directive::gather(&source, crate_.path, scope, flavor, flags.build.revision.as_deref())?;
+        directive::gather(crate_.path, scope, flavor, flags.build.revision.as_deref(), cx)?;
 
     // FIXME: unwrap
-    let auxiliary_base_path = LazyCell::new(|| crate_.path.parent().unwrap().join("auxiliary"));
+    let aux_base_path = LazyCell::new(|| crate_.path.parent().unwrap().join("auxiliary"));
 
     let dependencies: Vec<_> = directives
         .dependencies
         .iter()
-        .map(|dependency| {
+        .map(|dep| {
             document_compiletest_auxiliary(
-                dependency,
-                &auxiliary_base_path,
+                dep,
+                &aux_base_path,
                 directives.build_aux_docs,
                 flags,
                 doc_flags,
                 flavor,
+                cx,
             )
         })
         .collect::<Result<_>>()?;
@@ -303,6 +314,7 @@ fn document_compiletest_auxiliary<'a>(
     // FIXME: temporary
     doc_flags: &crate::interface::DocFlags,
     flavor: directive::Flavor,
+    cx: Context<'_>,
 ) -> Result<ExternCrate<'a>> {
     let path = match extern_crate {
         ExternCrate::Unnamed { path } => base_path.join(path),
@@ -323,12 +335,9 @@ fn document_compiletest_auxiliary<'a>(
         DocBackend::Json => directive::Scope::JsonDocCk,
     };
 
-    // FIXME: Alternatively, just warn, don't bail on read failure.
-    let source = std::fs::read_to_string(&path)?; // FIXME: error context
-
     // FIXME: Pass PermitRevisionDeclaration::No
     let mut directives =
-        directive::gather(&source, &path, scope, flavor, flags.build.revision.as_deref())?;
+        directive::gather(&path, scope, flavor, flags.build.revision.as_deref(), cx)?;
 
     let edition = directives.edition.unwrap_or(Edition::RUSTC_DEFAULT);
 

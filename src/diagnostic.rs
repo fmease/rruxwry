@@ -1,11 +1,13 @@
-use crate::utility;
+use crate::{
+    context::Context,
+    source::{LocalSpan, Span},
+    utility,
+};
 use anstream::ColorChoice;
 use anstyle::{AnsiColor, Effects};
-use std::{
-    io::{self, Write},
-    path::Path,
-};
-use unicode_width::UnicodeWidthStr;
+use std::io::{self, Write as _};
+use unicode_segmentation::UnicodeSegmentation as _;
+use unicode_width::UnicodeWidthStr as _;
 
 pub(crate) type Painter = utility::paint::Painter<io::BufWriter<io::StderrLock<'static>>>;
 
@@ -37,8 +39,9 @@ pub(crate) struct Diagnostic {
 }
 
 impl Diagnostic {
-    // FIXME: actually take the painter as a parameter!!! right now we're
+    // FIXME: Actually take the painter as a parameter!!! right now we're
     //        constructing a new painter for each `emit!()` which is semi-expensive!
+    // Update: Obtain the painter from `cx: Content<'_>` once that contains one.
     //  NOTE: if we do that change, don't keep the lock the entire time!
     //        we want rustc to print to stderr too!
     fn new(severity: Severity, message: impl FnOnce(&mut Painter) -> io::Result<()>) -> Self {
@@ -62,26 +65,19 @@ impl Diagnostic {
         Self { p, aux_offset: None, aux_seen: false }
     }
 
-    pub(crate) fn location(mut self, location: Location<'_>) -> Self {
+    pub(crate) fn highlight(mut self, span: Span, cx: Context<'_>) -> Self {
+        let file = cx.map().by_span(span);
+        let span = span.local(file);
+        let (line_number, line, span) = resolve(file.contents, span);
+        let column_number = line[..span.start as usize].graphemes(true).count() + 1;
+        let underline_offset = line[..span.start as usize].width();
+        let underline_width = line[span.range()].width();
+
         let p = &mut self.p;
         (|| {
-            writeln!(
-                p,
-                "   {}:{}:{}",
-                location.path.display(),
-                location.span.line + 1,
-                // FIXME: column isn't measured in bytes but either in Unicode scalar
-                // values or Unicode grapheme clusters, I don't remember.
-                location.span.start + 1
-            )?;
+            writeln!(p, "   {}:{line_number}:{column_number}", file.path.display())?;
 
-            // FIXME: Replace this with slicing instead (smh obtain the span of the line)
-            let line = location.source.lines().nth(location.span.line as _).unwrap();
             writeln!(p, "{line}")?;
-
-            let underline_offset = location.source[..location.span.start as usize].width();
-            let underline_width =
-                location.source[location.span.start as usize..location.span.end as usize].width();
 
             let (underline, underline_width) = match (underline_offset, underline_width) {
                 (0, 0) => ("\\".into(), const { "\\".len() }),
@@ -186,18 +182,18 @@ impl AuxSeverity {
     }
 }
 
-#[derive(Clone, Copy)]
-#[cfg_attr(test, derive(PartialEq, Eq, Debug))]
-pub(crate) struct Location<'a> {
-    pub(crate) source: &'a str,
-    pub(crate) path: &'a Path,
-    pub(crate) span: LineSpan,
-}
+fn resolve(source: &str, span: LocalSpan) -> (usize, &str, LocalSpan) {
+    let needle = &source[span.range()];
 
-#[derive(Clone, Copy)]
-#[cfg_attr(test, derive(PartialEq, Eq, Debug))]
-pub(crate) struct LineSpan {
-    pub(crate) line: u32,
-    pub(crate) start: u32,
-    pub(crate) end: u32,
+    // We assume that hightlights only span a single line.
+    for (index, line) in source.split('\n').enumerate() {
+        if let Some(range) = line.substr_range(needle) {
+            return (index + 1, line, LocalSpan {
+                start: range.start.try_into().unwrap(),
+                end: range.end.try_into().unwrap(),
+            });
+        }
+    }
+
+    unreachable!()
 }
