@@ -44,7 +44,7 @@ pub(crate) fn arguments() -> Arguments {
     fn compiletest() -> clap::Arg {
         clap::Arg::new(id::COMPILETEST)
             .short('@')
-            .long("directives")
+            .long("compiletest")
             // FIXME: Limit number of occurrences to 0..=2 (`max_occurences` no longer exists).
             .action(clap::ArgAction::Count)
             .help("Enable compiletest directives")

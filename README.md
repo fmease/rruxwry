@@ -140,7 +140,7 @@ Arguments:
 
 Options:
   -R, --run                   Run the built binary
-  -@, --compiletest           Enable compiletest directives
+  -@, --compiletest...        Enable compiletest directives
   -n, --crate-name <NAME>     Set the name of the (base) crate
   -t, --crate-type <TYPE>     Set the type of the (base) crate
   -e, --edition <EDITION>     Set the edition of the source files
@@ -175,7 +175,7 @@ Arguments:
 Options:
   -o, --open                     Open the generated docs in a browser
   -j, --json                     Output JSON instead of HTML
-  -@, --compiletest              Enable compiletest directives
+  -@, --compiletest...           Enable compiletest directives
   -X, --cross-crate              Enable the cross-crate re-export mode
   -n, --crate-name <NAME>        Set the name of the (base) crate
   -t, --crate-type <TYPE>        Set the type of the (base) crate
