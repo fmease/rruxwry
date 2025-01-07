@@ -16,6 +16,7 @@
 use attribute::Attributes;
 use data::{CrateNameBuf, CrateNameCow, CrateType, Edition};
 use diagnostic::{bug, fmt};
+use operate::Mode;
 use std::{path::Path, process::ExitCode};
 
 mod attribute;
@@ -57,23 +58,14 @@ fn try_main() -> error::Result {
     // FIXME: eagerly lower `-f`s to `--cfg`s here (or rather in `cli`?),
     // so we properly support them in `compiletest`+command
 
-    // FIXME: this is awkward
-    let edition = args.edition.unwrap_or_else(|| match args.command {
-        interface::Command::Build { mode, .. } => mode.edition(),
-        interface::Command::Doc { mode, .. } => mode.edition(),
-    });
+    let mode = args.command.mode();
+    let edition = args.edition.unwrap_or_else(|| mode.edition());
 
     let mut source = String::new();
     let (crate_name, crate_type) = compute_crate_name_and_type(
         args.crate_name,
         args.crate_type,
-        // FIXME: this is awkward
-        match args.command {
-            interface::Command::Build { mode, .. } => {
-                matches!(mode, operate::BuildMode::Compiletest)
-            }
-            interface::Command::Doc { mode, .. } => matches!(mode, operate::DocMode::Compiletest),
-        },
+        mode,
         &args.path,
         edition,
         &args.build.cfgs,
@@ -94,24 +86,19 @@ fn try_main() -> error::Result {
         debug: &args.debug,
     };
 
+    let crate_ =
+        operate::Crate { path: &args.path, name: crate_name.as_ref(), type_: crate_type, edition };
+
     match args.command {
         interface::Command::Build { run, mode } => {
-            operate::build(mode, &args.path, crate_name.as_ref(), crate_type, edition, flags)?;
+            operate::build(mode, crate_, flags)?;
 
             if run {
                 command::execute(Path::new(".").join(crate_name.as_str()), flags.debug)?;
             }
         }
         interface::Command::Doc { open, mode, flags: doc_flags } => {
-            let crate_name = operate::document(
-                mode,
-                &args.path,
-                crate_name.as_ref(),
-                crate_type,
-                edition,
-                flags,
-                &doc_flags,
-            )?;
+            let crate_name = operate::document(mode, crate_, flags, &doc_flags)?;
 
             if open {
                 command::open(crate_name.as_ref(), &args.debug)?;
@@ -126,7 +113,7 @@ fn try_main() -> error::Result {
 fn compute_crate_name_and_type<'src>(
     crate_name: Option<CrateNameBuf>,
     crate_type: Option<CrateType>,
-    compiletest: bool,
+    mode: Mode,
     path: &Path,
     edition: Edition,
     cfgs: &[String],
@@ -143,22 +130,24 @@ fn compute_crate_name_and_type<'src>(
             // NOTE: However, I don't want us to open the source file *twice* in compiletest
             // mode (once for attrs & once for directives). We should do it once if we go with
             // that approach
-            let (crate_name, crate_type): (Option<CrateNameCow<'_>>, _) = if compiletest {
-                (crate_name.map(Into::into), crate_type)
-            } else {
-                *source = std::fs::read_to_string(path)?; // FIXME: error context
-                let attributes = Attributes::parse(
-                    source,
-                    // FIXME: doesn't contain `-f`s; eagerly expand them into `--cfg`s in main
-                    cfgs,
-                    edition,
-                    debug_flags.verbose,
-                );
+            let (crate_name, crate_type): (Option<CrateNameCow<'_>>, _) = match mode {
+                Mode::Compiletest => (crate_name.map(Into::into), crate_type),
+                Mode::Other => {
+                    *source = std::fs::read_to_string(path)?; // FIXME: error context
+                    let attributes = Attributes::parse(
+                        source,
+                        // FIXME: doesn't contain `-f`s; eagerly expand them into `--cfg`s in main
+                        cfgs,
+                        edition,
+                        debug_flags.verbose,
+                    );
 
-                let crate_name: Option<CrateNameCow<'_>> =
-                    crate_name.map(Into::into).or_else(|| attributes.crate_name.map(Into::into));
+                    let crate_name: Option<CrateNameCow<'_>> = crate_name
+                        .map(Into::into)
+                        .or_else(|| attributes.crate_name.map(Into::into));
 
-                (crate_name, crate_type.or(attributes.crate_type))
+                    (crate_name, crate_type.or(attributes.crate_type))
+                }
             };
 
             // FIXME: unwrap

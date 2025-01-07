@@ -9,7 +9,8 @@ use crate::utility::default;
 // FIXME: Test shell-escaping for compile-flags etc once the parser support it
 
 fn parse_directive(source: &str, scope: Scope) -> Result<Directive<'_>, Error<'_>> {
-    Parser::new(source, scope, (0, 0)).parse_directive()
+    // FIXME: Make flavor a parameter.
+    Parser::new(source, scope, Flavor::Vanilla, (0, 0)).parse_directive()
 }
 
 fn span(line: u32, start: u32, end: u32) -> LineSpan {
@@ -27,21 +28,37 @@ fn blank_directive() {
 }
 
 #[test]
+fn unavailable_htmldocck_directive_base() {
+    assert_eq!(parse_directive("!has", Scope::Base), Err(Error::UnavailableDirective("!has")));
+}
+
+#[test]
+fn unavailable_rruxwry_directive_base() {
+    assert_eq!(
+        parse_directive("crate inner {", Scope::Base),
+        Err(Error::UnavailableDirective("crate"))
+    );
+}
+
+#[test]
+fn unavailable_jsondocck_directive_htmldocck() {
+    assert_eq!(parse_directive("is", Scope::HtmlDocCk), Err(Error::UnavailableDirective("is")));
+}
+
+#[test]
+fn unsupported_directive() {
+    assert_eq!(
+        parse_directive("check-pass", Scope::Base),
+        Err(Error::UnsupportedDirective("check-pass"))
+    );
+}
+
+#[test]
 fn unknown_directive() {
     assert_eq!(
         parse_directive("  undefined ", Scope::Base),
         Err(Error::UnknownDirective("undefined"))
     );
-}
-
-#[test]
-fn unavailable_directive_base() {
-    assert_eq!(parse_directive("!has", Scope::Base), Err(Error::UnavailableDirective("!has")));
-}
-
-#[test]
-fn unavailable_directive_htmldocck() {
-    assert_eq!(parse_directive("is", Scope::HtmlDocCk), Err(Error::UnavailableDirective("is")));
 }
 
 #[test]
@@ -179,7 +196,12 @@ fn conditional_directives_directive() {
 #[test]
 fn no_directives() {
     let mut errors = ErrorBuffer::default();
-    let directives = parse("#![crate_type = \"lib\"]\nfn main() {}\n", Scope::Base, &mut errors);
+    let directives = parse(
+        "#![crate_type = \"lib\"]\nfn main() {}\n",
+        Scope::Base,
+        Flavor::Vanilla,
+        &mut errors,
+    );
     assert_eq!((directives, errors), default());
 }
 
@@ -190,6 +212,7 @@ fn compile_flags_directives() {
         "\n  \t  //@  compile-flags: --crate-type lib\n\
         //@compile-flags:--edition=2021",
         Scope::Base,
+        Flavor::Vanilla,
         &mut errors,
     );
     assert_eq!(directives, Directives {
@@ -214,6 +237,7 @@ fn conditional_directives() {
          //@ compile-flags: --crate-type=lib\n\
          //@[two] compile-flags: -Zparse-crate-root-only",
         Scope::Base,
+        Flavor::Vanilla,
         &mut errors,
     );
     assert_eq!(directives, Directives {
@@ -239,6 +263,7 @@ fn instantiate_conditional_directives() {
          //@ compile-flags: --crate-type=lib\n\
          //@[two] compile-flags: -Zparse-crate-root-only",
         Scope::Base,
+        Flavor::Vanilla,
         &mut errors,
     )
     .instantiate(Some("two"));
@@ -266,6 +291,7 @@ fn conditional_directives_revision_declared_after_use() {
         "//@[next] compile-flags: -Znext-solver\n\
          //@ revisions: classic next",
         Scope::Base,
+        Flavor::Vanilla,
         &mut errors,
     );
     assert_eq!(directives, Directives {
@@ -285,6 +311,7 @@ fn conditional_directives_undeclared_revisions() {
         "//@[block] compile-flags: --crate-type lib\n\
          //@[wall] edition: 2021",
         Scope::Base,
+        Flavor::Vanilla,
         &mut errors,
     );
     assert_eq!(directives, Directives {
@@ -317,7 +344,8 @@ fn undeclared_active_revision() {
 #[test]
 fn missing_active_revision() {
     let mut errors = ErrorBuffer::default();
-    let directives = parse("//@ revisions: first second", Scope::Base, &mut errors);
+    let directives =
+        parse("//@ revisions: first second", Scope::Base, Flavor::Vanilla, &mut errors);
     assert_eq!(errors, default());
     assert_eq!(
         directives.instantiate(None),

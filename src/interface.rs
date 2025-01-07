@@ -2,7 +2,8 @@
 
 use crate::{
     data::{CrateNameBuf, CrateType, DocBackend, Edition, Identity},
-    operate::{BuildMode, DocMode},
+    directive::Flavor,
+    operate::{BuildMode, DocMode, Mode},
     utility::{Conjunction, ListingExt as _, parse},
 };
 use clap::ColorChoice;
@@ -43,10 +44,9 @@ pub(crate) fn arguments() -> Arguments {
     fn compiletest() -> clap::Arg {
         clap::Arg::new(id::COMPILETEST)
             .short('@')
-            .long("compiletest")
-            .action(clap::ArgAction::SetTrue)
-            // FIXME: Not entirely accurate: It switches to a new mode that
-            // affects edition, crate name, etc. Does it matter here though?
+            .long("directives")
+            // FIXME: Limit number of occurrences to 0..=2 (`max_occurences` no longer exists).
+            .action(clap::ArgAction::Count)
             .help("Enable compiletest directives")
     }
     fn crate_name_and_type() -> impl Iterator<Item = clap::Arg> {
@@ -259,20 +259,28 @@ pub(crate) fn arguments() -> Arguments {
     // unwrap: handled by `clap`.
     let (subcommand, mut matches) = matches.remove_subcommand().unwrap();
 
-    let compiletest = matches.remove_one(id::COMPILETEST).unwrap_or_default();
+    let compiletest = match matches.remove_one::<u8>(id::COMPILETEST).unwrap_or_default() {
+        0 => None,
+        1 => Some(Flavor::Vanilla),
+        // FIXME: Reject count > 2.
+        _ => Some(Flavor::Rruxwry),
+    };
 
     let command = match subcommand.as_str() {
         id::BUILD => Command::Build {
             run: matches.remove_one(id::RUN).unwrap_or_default(),
-            mode: if compiletest { BuildMode::Compiletest } else { BuildMode::Default },
+            mode: match compiletest {
+                Some(flavor) => BuildMode::Compiletest(flavor),
+                None => BuildMode::Default,
+            },
         },
         id::DOC => Command::Doc {
             open: matches.remove_one(id::OPEN).unwrap_or_default(),
             mode: match (matches.remove_one(id::CROSS_CRATE).unwrap_or_default(), compiletest) {
-                (true, false) => DocMode::CrossCrate,
-                (false, true) => DocMode::Compiletest,
-                (false, false) => DocMode::Default,
-                (true, true) => unreachable!(), // Already caught by `clap`.
+                (true, None) => DocMode::CrossCrate,
+                (false, Some(flavor)) => DocMode::Compiletest(flavor),
+                (false, None) => DocMode::Default,
+                (true, Some(_)) => unreachable!(), // Already caught by `clap`.
             },
             flags: DocFlags {
                 backend: if matches.remove_one(id::JSON).unwrap_or_default() {
@@ -345,6 +353,15 @@ pub(crate) struct Arguments {
 pub(crate) enum Command {
     Build { run: bool, mode: BuildMode },
     Doc { open: bool, mode: DocMode, flags: DocFlags },
+}
+
+impl Command {
+    pub(crate) fn mode(&self) -> Mode {
+        match *self {
+            Self::Build { mode, .. } => mode.into(),
+            Self::Doc { mode, .. } => mode.into(),
+        }
+    }
 }
 
 #[allow(clippy::struct_excessive_bools)] // not worth to address
