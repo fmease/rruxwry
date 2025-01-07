@@ -313,6 +313,11 @@ impl<'a> Command<'a> {
             self.arg("--cfg");
             self.arg(format!("feature=\"{feature}\""));
         }
+        // FIXME: This shouldn't be done here.
+        if let Some(revision) = &flags.revision {
+            self.arg("--cfg");
+            self.arg(revision);
+        }
     }
 
     fn set_rustc_features(&mut self, flags: &interface::BuildFlags) {
