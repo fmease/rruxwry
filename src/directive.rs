@@ -26,7 +26,7 @@
 use crate::{
     command::{ExternCrate, VerbatimFlagsBuf},
     data::{CrateNameRef, Edition},
-    diagnostic::{self, EmittedError, LineSpan, Location, error, fmt, warn},
+    diagnostic::{EmittedError, LineSpan, Location, error, fmt, warn},
     utility::{Conjunction, ListingExt},
 };
 use std::{
@@ -196,8 +196,6 @@ pub(crate) struct InstantiatedDirectives<'src> {
     pub(crate) dependencies: Vec<ExternCrate<'src>>,
     pub(crate) build_aux_docs: bool,
     pub(crate) edition: Option<Edition>,
-    pub(crate) force_host: bool,
-    pub(crate) no_prefer_dynamic: bool,
     pub(crate) verbatim_flags: VerbatimFlagsBuf<'src>,
     pub(crate) htmldocck: Vec<(HtmlDocCkDirective, Polarity)>,
     pub(crate) jsondocck: Vec<(JsonDocCkDirective, Polarity)>,
@@ -221,8 +219,6 @@ impl<'src> InstantiatedDirectives<'src> {
             //        just like `compiletest` does.
             //        When encountering unconditional+conditional, emit a warning(-@)/error(-@@)
             BareDirective::Edition(edition) => self.edition = Some(edition),
-            BareDirective::ForceHost => self.force_host = true,
-            BareDirective::NoPreferDynamic => self.no_prefer_dynamic = true,
             BareDirective::Revisions(_) => unreachable!(), // Already dealt with in `Directives::add`.
             BareDirective::RustcEnv { key, value } => {
                 self.verbatim_flags.environment.push((key, Some(value)));
@@ -257,10 +253,6 @@ enum BareDirective<'src> {
     BuildAuxDocs,
     CompileFlags(Vec<&'src str>),
     Edition(Edition),
-    // FIXME: Is this actually relevant for rruxwry?
-    ForceHost,
-    // FIXME: Is this actually relevant for rruxwry?
-    NoPreferDynamic,
     Revisions(Vec<&'src str>),
     RustcEnv { key: &'src str, value: &'src str },
     UnsetRustcEnv(&'src str),
@@ -431,8 +423,6 @@ impl<'src> Parser<'src> {
 
                 BareDirective::Edition(edition)
             }
-            "force-host" => BareDirective::ForceHost,
-            "no-prefer-dynamic" => BareDirective::NoPreferDynamic,
             // FIXME: Warn/error if we're inside of an auxiliary file.
             //        ->Warn: "directive gets ignored // revisions are inherited in aux"
             //        ->Error: "directive not permitted // revisions are inherited in aux"
@@ -465,8 +455,75 @@ impl<'src> Parser<'src> {
                 let variable = self.take_remaining_line();
                 BareDirective::UnsetRustcEnv(variable)
             }
-            // FIXME: proc-macro, exec-env, unset-exec-env, run-flags, doc-flags
-            source => return Err(Error::UnknownDirective(source)),
+            // FIXME: Actually support some of these flags. In order of importance:
+            //        `doc-flags`, `run-flags`, `exec-env`, `unset-exec-env`,
+            //        `proc-macro`, `aux-bin`,
+            //        `no-prefer-dynamic` (once our auxes are actually dylibs),
+            //        `unique-doc-out-dir` (I think),
+            //        `incremental`,
+            //        `no-auto-check-cfg` (once we actually automatically check-cfg)
+            | "add-core-stubs"
+            | "assembly-output"
+            | "aux-bin"
+            | "aux-codegen-backend"
+            | "build-fail"
+            | "build-pass"
+            | "check-fail"
+            | "check-pass"
+            | "check-run-results"
+            | "check-stdout"
+            | "check-test-line-numbers-match"
+            | "doc-flags"
+            | "dont-check-compiler-stderr"
+            | "dont-check-compiler-stdout"
+            | "dont-check-failure-status"
+            | "error-pattern"
+            | "exact-llvm-major-version"
+            | "exec-env"
+            | "failure-status"
+            | "filecheck-flags"
+            | "forbid-output"
+            | "force-host"
+            | "incremental"
+            | "known-bug"
+            | "llvm-cov-flags"
+            | "max-llvm-major-version"
+            | "min-cdb-version"
+            | "min-gdb-version"
+            | "min-lldb-version"
+            | "min-llvm-version"
+            | "min-system-llvm-version"
+            | "no-auto-check-cfg"
+            | "no-prefer-dynamic"
+            | "normalize-stderr-32bit"
+            | "normalize-stderr-64bit"
+            | "normalize-stderr-test"
+            | "normalize-stdout-test"
+            | "pp-exact"
+            | "pretty-compare-only"
+            | "pretty-mode"
+            | "proc-macro"
+            | "reference"
+            | "regex-error-pattern"
+            | "remap-src-base"
+            | "run-fail"
+            | "run-flags"
+            | "run-pass"
+            | "run-rustfix"
+            | "rustfix-only-machine-applicable"
+            | "should-fail"
+            | "should-ice"
+            | "stderr-per-bitwidth"
+            | "test-mir-pass"
+            | "unique-doc-out-dir"
+            | "unset-exec-env"
+            | "unused-revision-names" => {
+                return Err(Error::UnsupportedDirective(source));
+            }
+            _ if source.starts_with("ignore-") => return Err(Error::UnsupportedDirective(source)),
+            _ if source.starts_with("needs-") => return Err(Error::UnsupportedDirective(source)),
+            _ if source.starts_with("only-") => return Err(Error::UnsupportedDirective(source)),
+            _ => return Err(Error::UnknownDirective(source)),
         })
     }
 
@@ -608,8 +665,9 @@ impl<'src> Parser<'src> {
 #[cfg_attr(test, derive(PartialEq, Eq, Debug))]
 struct ErrorBuffer<'src> {
     errors: Vec<Error<'src>>,
-    unknowns: BTreeSet<&'src str>,
-    unavailables: BTreeSet<&'src str>,
+    unavailable: BTreeSet<&'src str>,
+    unsupported: BTreeSet<&'src str>,
+    unknown: BTreeSet<&'src str>,
 }
 
 impl<'src> ErrorBuffer<'src> {
@@ -618,12 +676,15 @@ impl<'src> ErrorBuffer<'src> {
         // quantities in order to avoid "terminal spamming".
         match error {
             // FIXME: Add rationale
-            Error::UnknownDirective(directive) => {
-                self.unknowns.insert(directive);
+            Error::UnavailableDirective(directive) => {
+                self.unavailable.insert(directive);
+            }
+            Error::UnsupportedDirective(directive) => {
+                self.unsupported.insert(directive);
             }
             // FIXME: Add rationale
-            Error::UnavailableDirective(directive) => {
-                self.unavailables.insert(directive);
+            Error::UnknownDirective(directive) => {
+                self.unknown.insert(directive);
             }
             _ => self.errors.push(error),
         }
@@ -634,40 +695,32 @@ impl<'src> ErrorBuffer<'src> {
     }
 
     // FIXME: Shouldn't all these errors be emitted as (non-fatal) errors instead of warnings?
-    //        So we can use warnings for something else?
     fn release(self, source: &str, path: &Path) {
         use std::io::Write;
 
-        // FIXME: Use utility::ListExt::list (once that supports painter/writer)
-        let list = |p: &mut diagnostic::Painter, mut elements: BTreeSet<_>| {
-            if let Some(element) = elements.pop_first() {
-                write!(p, "`{element}`")?;
+        let emit_grouped = |name: &str, mut errors: BTreeSet<_>| {
+            if !errors.is_empty() {
+                let s = if errors.len() == 1 { "" } else { "s" };
+
+                // FIXME: Better error message.
+                // FIXME: Use utility::ListExt::list (once that supports painter/writer)
+                warn(|p| {
+                    write!(p, "{name} directive{s}: ")?;
+                    if let Some(error) = errors.pop_first() {
+                        write!(p, "`{error}`")?;
+                    }
+                    for error in errors {
+                        write!(p, ", `{error}`")?;
+                    }
+                    Ok(())
+                })
+                .finish();
             }
-            for element in elements {
-                write!(p, ", `{element}`")?;
-            }
-            Ok(())
         };
 
-        let plural_s = |elements: &BTreeSet<_>| if elements.len() == 1 { "" } else { "s" };
-
-        if !self.unknowns.is_empty() {
-            warn(|p| {
-                write!(p, "unknown directive{}: ", plural_s(&self.unknowns))?;
-                list(p, self.unknowns)
-            })
-            .finish();
-        }
-
-        if !self.unavailables.is_empty() {
-            // FIXME: Warning vs. error.
-            warn(|p| {
-                // FIXME: Better error message.
-                write!(p, "unavailable directive{}: ", plural_s(&self.unavailables))?;
-                list(p, self.unavailables)
-            })
-            .finish();
-        }
+        emit_grouped("unavailable", self.unavailable);
+        emit_grouped("unsupported", self.unsupported);
+        emit_grouped("unknown", self.unknown);
 
         self.errors.into_iter().for_each(|error| error.emit(source, path));
     }
@@ -675,11 +728,12 @@ impl<'src> ErrorBuffer<'src> {
 
 impl Error<'_> {
     fn emit(self, source: &str, path: &Path) {
-        // FIXME: Emit as warning or error?
         // FIXME: Improve the phrasing of these diagnostics!
         match self {
             // FIXME: This is awkward, model your errors better.
-            Self::UnknownDirective(_) | Self::UnavailableDirective(_) => {
+            | Self::UnavailableDirective(_)
+            | Self::UnsupportedDirective(_)
+            | Self::UnknownDirective(_) => {
                 // Handled in `ErrorBuffer::release`.
                 unreachable!()
             }
@@ -719,9 +773,9 @@ impl Error<'_> {
 
 #[cfg_attr(test, derive(PartialEq, Eq, Debug))]
 enum Error<'src> {
-    UnknownDirective(&'src str),
-    // FIXME: Add scope!
     UnavailableDirective(&'src str),
+    UnsupportedDirective(&'src str),
+    UnknownDirective(&'src str),
     UnexpectedToken { found: char, expected: char },
     UnexpectedEndOfInput,
     InvalidValue(&'src str),
