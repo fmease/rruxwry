@@ -34,6 +34,7 @@ pub(crate) macro fmt {
 #[must_use = "use `Diagnostic::finish` to complete the diagnostic"]
 pub(crate) struct Diagnostic {
     p: Painter,
+    severity: Severity,
     aux_offset: Option<usize>,
     aux_seen: bool,
 }
@@ -50,7 +51,7 @@ impl Diagnostic {
         let mut p = Painter::new(io::BufWriter::new(stderr), colorize);
         (|| {
             p.set(Effects::BOLD)?;
-            p.with(severity.color(), |p| write!(p, "[rruxwry] {}", severity.name()))?;
+            p.with(severity.color().on_default().invert(), |p| write!(p, "{}", severity.name()))?;
             if !severity.is_serious() {
                 p.unset()?;
             }
@@ -62,7 +63,7 @@ impl Diagnostic {
             io::Result::Ok(())
         })()
         .unwrap();
-        Self { p, aux_offset: None, aux_seen: false }
+        Self { p, severity, aux_offset: None, aux_seen: false }
     }
 
     pub(crate) fn highlight(mut self, span: Span, cx: Context<'_>) -> Self {
@@ -75,7 +76,9 @@ impl Diagnostic {
 
         let p = &mut self.p;
         (|| {
-            writeln!(p, "   {}:{line_number}:{column_number}", file.path.display())?;
+            p.with(Effects::ITALIC, |p| {
+                writeln!(p, "   {}:{line_number}:{column_number}", file.path.display())
+            })?;
 
             writeln!(p, "{line}")?;
 
@@ -85,7 +88,7 @@ impl Diagnostic {
                 (_, width) => ("^".repeat(width), width),
             };
 
-            p.set(AnsiColor::BrightRed.on_default().bold())?;
+            p.set(self.severity.color().on_default().bold())?;
             write!(p, "{}{underline}", " ".repeat(underline_offset),)?;
             p.unset()?;
 
@@ -146,18 +149,18 @@ pub(crate) enum Severity {
 impl Severity {
     const fn name(self) -> &'static str {
         match self {
-            Self::Bug => "internal error",
+            Self::Bug => "internal rruxwry error",
             Self::Error => "error",
             Self::Warning => "warning",
-            Self::Debug => "",
+            Self::Debug => "debug",
         }
     }
 
     const fn color(self) -> AnsiColor {
         match self {
-            Self::Bug | Self::Error => AnsiColor::BrightRed,
-            Self::Warning => AnsiColor::BrightYellow,
-            Self::Debug => AnsiColor::BrightBlue,
+            Self::Bug | Self::Error => AnsiColor::Red,
+            Self::Warning => AnsiColor::Yellow,
+            Self::Debug => AnsiColor::Magenta,
         }
     }
 
