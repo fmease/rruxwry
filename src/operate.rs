@@ -11,6 +11,7 @@ use crate::{
     data::{CrateName, CrateNameCow, CrateNameRef, CrateType, DocBackend, Edition},
     directive,
     error::Result,
+    source::Spanned,
     utility::default,
 };
 use std::{borrow::Cow, cell::LazyCell, mem, path::Path};
@@ -58,7 +59,7 @@ fn build_compiletest(
     let _ = crate_.edition;
 
     let mut directives = directive::gather(
-        (crate_.path, None),
+        Spanned::sham(crate_.path),
         directive::Scope::Base,
         flavor,
         flags.build.revision.as_deref(),
@@ -99,20 +100,20 @@ fn build_compiletest_auxiliary<'a>(
     flavor: directive::Flavor,
     cx: Context<'_>,
 ) -> Result<ExternCrate<'a>> {
-    let (path, span) = match *extern_crate {
-        ExternCrate::Unnamed { path: (path, span) } => (base_path.join(path), span),
-        ExternCrate::Named { name, ref path } => match *path {
-            Some((ref path, span)) => (base_path.join(path.as_ref()), span),
-            None => (base_path.join(name.as_str()).with_extension("rs"), None),
+    let path = match extern_crate {
+        ExternCrate::Unnamed { path } => path.map(|path| base_path.join(path)),
+        ExternCrate::Named { name, path } => match path {
+            Some(path) => path.as_deref().map(|path| base_path.join(path)),
+            None => Spanned::sham(base_path.join(name.as_str()).with_extension("rs")),
         },
     };
 
     // FIXME: unwrap
-    let crate_name = CrateName::adjust_and_parse_file_path(&path).unwrap();
+    let crate_name = CrateName::adjust_and_parse_file_path(&path.bare).unwrap();
 
     // FIXME: Pass PermitRevisionDeclaration::No
     let mut directives = directive::gather(
-        (&path, span),
+        path.as_deref(),
         directive::Scope::Base,
         flavor,
         flags.build.revision.as_deref(),
@@ -125,7 +126,7 @@ fn build_compiletest_auxiliary<'a>(
     let flags = Flags { verbatim: verbatim_flags.as_ref(), ..flags };
 
     command::compile(
-        &path,
+        &path.bare,
         crate_name.as_ref(),
         // FIXME: Verify this works with `@compile-flags:--crate-type=proc-macro`
         // FIXME: I don't think it works rn
@@ -142,14 +143,14 @@ fn build_compiletest_auxiliary<'a>(
         // FIXME: For some reason `compiletest` doesn't support `//@ aux-crate: name=../`
         ExternCrate::Named { name, .. } => {
             // FIXME: unwrap
-            let crate_name = CrateName::adjust_and_parse_file_path(&path).unwrap();
+            let crate_name = CrateName::adjust_and_parse_file_path(&path.bare).unwrap();
 
             ExternCrate::Named {
                 name,
                 // FIXME: needs to be relative to the base_path
                 // FIXME: layer violation?? should this be the job of mod command?
                 path: (name != crate_name.as_ref())
-                    .then(|| (format!("lib{crate_name}.rlib").into(), None)),
+                    .then(|| Spanned::sham(format!("lib{crate_name}.rlib").into())),
             }
         }
     })
@@ -264,8 +265,13 @@ fn document_compiletest<'a>(
         DocBackend::Html => directive::Scope::HtmlDocCk,
         DocBackend::Json => directive::Scope::JsonDocCk,
     };
-    let mut directives =
-        directive::gather((crate_.path, None), scope, flavor, flags.build.revision.as_deref(), cx)?;
+    let mut directives = directive::gather(
+        Spanned::sham(crate_.path),
+        scope,
+        flavor,
+        flags.build.revision.as_deref(),
+        cx,
+    )?;
 
     // FIXME: unwrap
     let aux_base_path = LazyCell::new(|| crate_.path.parent().unwrap().join("auxiliary"));
@@ -317,16 +323,16 @@ fn document_compiletest_auxiliary<'a>(
     flavor: directive::Flavor,
     cx: Context<'_>,
 ) -> Result<ExternCrate<'a>> {
-    let (path, span) = match *extern_crate {
-        ExternCrate::Unnamed { path: (path, span) } => (base_path.join(path), span),
-        ExternCrate::Named { name, ref path } => match *path {
-            Some((ref path, span)) => (base_path.join(path.as_ref()), span),
-            None => (base_path.join(name.as_str()).with_extension("rs"), None),
+    let path = match extern_crate {
+        ExternCrate::Unnamed { path } => path.map(|path| base_path.join(path)),
+        ExternCrate::Named { name, path } => match path {
+            Some(path) => path.as_deref().map(|path| base_path.join(path)),
+            None => Spanned::sham(base_path.join(name.as_str()).with_extension("rs")),
         },
     };
 
     // FIXME: unwrap
-    let crate_name = CrateName::adjust_and_parse_file_path(&path).unwrap();
+    let crate_name = CrateName::adjust_and_parse_file_path(&path.bare).unwrap();
 
     // FIXME: DRY
     // FIXME: Do we actually want to treat !`-j` as `rustdoc/` (Scope::HtmlDocCk)
@@ -338,7 +344,7 @@ fn document_compiletest_auxiliary<'a>(
 
     // FIXME: Pass PermitRevisionDeclaration::No
     let mut directives =
-        directive::gather((&path, span), scope, flavor, flags.build.revision.as_deref(), cx)?;
+        directive::gather(path.as_deref(), scope, flavor, flags.build.revision.as_deref(), cx)?;
 
     let edition = directives.edition.unwrap_or(Edition::RUSTC_DEFAULT);
 
@@ -346,7 +352,7 @@ fn document_compiletest_auxiliary<'a>(
     let flags = Flags { verbatim: verbatim_flags.as_ref(), ..flags };
 
     command::compile(
-        &path,
+        &path.bare,
         crate_name.as_ref(),
         // FIXME: Verify this works with `@compile-flags:--crate-type=proc-macro`
         // FIXME: I don't think it works rn
@@ -360,7 +366,7 @@ fn document_compiletest_auxiliary<'a>(
     // FIXME: Is this how `//@ build-aux-docs` is supposed to work?
     if document {
         command::document(
-            &path,
+            &path.bare,
             crate_name.as_ref(),
             // FIXME: Verify this works with `@compile-flags:--crate-type=proc_macro`
             // FIXME: I don't think it works rn
@@ -380,14 +386,14 @@ fn document_compiletest_auxiliary<'a>(
         // FIXME: For some reason `compiletest` doesn't support `//@ aux-crate: name=../`
         ExternCrate::Named { name, .. } => {
             // FIXME: unwrap
-            let crate_name = CrateName::adjust_and_parse_file_path(&path).unwrap();
+            let crate_name = CrateName::adjust_and_parse_file_path(&path.bare).unwrap();
 
             ExternCrate::Named {
                 name,
                 // FIXME: needs to be relative to the base_path
                 // FIXME: layer violation?? should this be the job of mod command?
                 path: (name != crate_name.as_ref())
-                    .then(|| (format!("lib{crate_name}.rlib").into(), None)),
+                    .then(|| Spanned::sham(format!("lib{crate_name}.rlib").into())),
             }
         }
     })

@@ -15,7 +15,7 @@ fn parse_directives<'cx>(
     errors: &mut Errors<'cx>,
 ) -> Directives<'cx> {
     parse(
-        SourceFileRef { path: Path::new(""), contents: source, span: Span { start: 0, end: 0 } },
+        SourceFileRef { path: Path::new(""), contents: source, span: Span::SHAM },
         scope,
         flavor,
         errors,
@@ -24,11 +24,16 @@ fn parse_directives<'cx>(
 
 fn parse_directive(source: &str, scope: Scope) -> Result<Directive<'_>, Error<'_>> {
     // FIXME: Make flavor a parameter.
+    // FIXME: Actually set the offset to 1 from 0 make room for Span::SHAM.
     Parser::new(source, scope, Flavor::Vanilla, 0).parse_directive()
 }
 
 fn span(start: u32, end: u32) -> Span {
     Span { start, end }
+}
+
+fn spanned<T>(start: u32, end: u32, bare: T) -> Spanned<T> {
+    Spanned::new(span(start, end), bare)
 }
 
 #[test]
@@ -45,7 +50,7 @@ fn blank_directive() {
 fn unavailable_htmldocck_directive_base() {
     assert_eq!(
         parse_directive("!has", Scope::Base),
-        Err(Error::UnavailableDirective("!has", span(0, 4)))
+        Err(Error::UnavailableDirective(spanned(0, 4, "!has")))
     );
 }
 
@@ -53,7 +58,7 @@ fn unavailable_htmldocck_directive_base() {
 fn unavailable_rruxwry_directive_base() {
     assert_eq!(
         parse_directive("crate inner {", Scope::Base),
-        Err(Error::UnavailableDirective("crate", span(0, 5)))
+        Err(Error::UnavailableDirective(spanned(0, 5, "crate")))
     );
 }
 
@@ -61,7 +66,7 @@ fn unavailable_rruxwry_directive_base() {
 fn unavailable_jsondocck_directive_htmldocck() {
     assert_eq!(
         parse_directive("is", Scope::HtmlDocCk),
-        Err(Error::UnavailableDirective("is", span(0, 2)))
+        Err(Error::UnavailableDirective(spanned(0, 2, "is")))
     );
 }
 
@@ -69,7 +74,7 @@ fn unavailable_jsondocck_directive_htmldocck() {
 fn unsupported_directive() {
     assert_eq!(
         parse_directive("check-pass", Scope::Base),
-        Err(Error::UnsupportedDirective("check-pass", span(0, 10)))
+        Err(Error::UnsupportedDirective(spanned(0, 10, "check-pass")))
     );
 }
 
@@ -77,7 +82,7 @@ fn unsupported_directive() {
 fn unknown_directive() {
     assert_eq!(
         parse_directive("  undefined ", Scope::Base),
-        Err(Error::UnknownDirective("undefined", span(2, 11)))
+        Err(Error::UnknownDirective(spanned(2, 11, "undefined",)))
     );
 }
 
@@ -85,7 +90,7 @@ fn unknown_directive() {
 fn build_aux_docs_directive() {
     assert_eq!(
         parse_directive("build-aux-docs", Scope::Base),
-        Ok(Directive { revision: None, bare: BareDirective::BuildAuxDocs })
+        Ok(Directive { revision: None, bare: SimpleDirective::BuildAuxDocs })
     );
 }
 
@@ -95,7 +100,7 @@ fn htmldocck_directive() {
         parse_directive("has 'krate/constant.K.html'", Scope::HtmlDocCk),
         Ok(Directive {
             revision: None,
-            bare: BareDirective::HtmlDocCk(HtmlDocCkDirective::Has, Polarity::Positive),
+            bare: SimpleDirective::HtmlDocCk(HtmlDocCkDirective::Has, Polarity::Positive),
         })
     );
 }
@@ -105,7 +110,7 @@ fn edition_directive_no_colon() {
     // FIXME: This should only warn (under -@) and discard the whole directive
     assert_eq!(
         parse_directive("edition 2018", Scope::Base),
-        Err(Error::UnexpectedToken { found: ('2', span(8, 9)), expected: ':' })
+        Err(Error::UnexpectedToken { found: spanned(8, 9, '2'), expected: ':' })
     );
 }
 
@@ -115,7 +120,7 @@ fn revisions_directive() {
         parse_directive("revisions: one \ttwo  three", Scope::Base),
         Ok(Directive {
             revision: None,
-            bare: BareDirective::Revisions(vec!["one", "three", "two"])
+            bare: SimpleDirective::Revisions(vec!["one", "three", "two"])
         })
     );
 }
@@ -133,8 +138,8 @@ fn conditional_directive() {
     assert_eq!(
         parse_directive("[rev] aux-build: file.rs", Scope::Base),
         Ok(Directive {
-            revision: Some(("rev", span(1, 4))),
-            bare: BareDirective::AuxBuild { path: ("file.rs", span(17, 24)) }
+            revision: Some(spanned(1, 4, "rev")),
+            bare: SimpleDirective::AuxBuild { path: spanned(17, 24, "file.rs") }
         })
     );
 }
@@ -148,7 +153,7 @@ fn empty_conditional_directive() {
 fn unknown_conditional_directive() {
     assert_eq!(
         parse_directive("[whatever] unknown", Scope::Base),
-        Err(Error::UnknownDirective("unknown", span(11, 18)))
+        Err(Error::UnknownDirective(spanned(11, 18, "unknown")))
     );
 }
 
@@ -158,8 +163,8 @@ fn empty_revision() {
     assert_eq!(
         parse_directive("[] edition: 2021", Scope::Base),
         Ok(Directive {
-            revision: Some(("", span(0, 0))),
-            bare: BareDirective::Edition(Edition::Rust2021)
+            revision: Some(spanned(0, 0, "")), // FIXME: placeholder span
+            bare: SimpleDirective::Edition(Edition::Rust2021)
         })
     );
 }
@@ -170,8 +175,8 @@ fn padded_revision_not_trimmed() {
     assert_eq!(
         parse_directive(" [  padded \t] edition: 2015", Scope::Base),
         Ok(Directive {
-            revision: Some(("  padded \t", span(2, 12))),
-            bare: BareDirective::Edition(Edition::Rust2015)
+            revision: Some(spanned(2, 12, "  padded \t")),
+            bare: SimpleDirective::Edition(Edition::Rust2015)
         })
     );
 }
@@ -182,8 +187,8 @@ fn quoted_revision_not_unquoted() {
     assert_eq!(
         parse_directive("[\"literally\"] compile-flags:", Scope::Base),
         Ok(Directive {
-            revision: Some(("\"literally\"", span(1, 12))),
-            bare: BareDirective::CompileFlags(Vec::new())
+            revision: Some(spanned(1, 12, "\"literally\"")),
+            bare: SimpleDirective::CompileFlags(Vec::new())
         })
     );
 }
@@ -194,8 +199,8 @@ fn commas_inside_revision() {
     assert_eq!(
         parse_directive("[one,two] compile-flags:", Scope::Base),
         Ok(Directive {
-            revision: Some(("one,two", span(1, 8))),
-            bare: BareDirective::CompileFlags(Vec::new())
+            revision: Some(spanned(1, 8, "one,two")),
+            bare: SimpleDirective::CompileFlags(Vec::new())
         })
     );
 }
@@ -207,8 +212,8 @@ fn conditional_directives_directive() {
     assert_eq!(
         parse_directive("[recur] revisions: recur", Scope::Base),
         Ok(Directive {
-            revision: Some(("recur", span(1, 6))),
-            bare: BareDirective::Revisions(vec!["recur"])
+            revision: Some(spanned(1, 6, "recur")),
+            bare: SimpleDirective::Revisions(vec!["recur"])
         })
     );
 }
@@ -272,8 +277,11 @@ fn conditional_directives() {
             ..default()
         },
         uninstantiated: vec![
-            (("one", span(27, 30)), BareDirective::Edition(Edition::Rust2018)),
-            (("two", span(86, 89)), BareDirective::CompileFlags(vec!["-Zparse-crate-root-only"]))
+            (spanned(27, 30, "one"), SimpleDirective::Edition(Edition::Rust2018)),
+            (
+                spanned(86, 89, "two"),
+                SimpleDirective::CompileFlags(vec!["-Zparse-crate-root-only"])
+            )
         ]
     });
     assert_eq!(errors, default());
@@ -322,8 +330,8 @@ fn conditional_directives_revision_declared_after_use() {
     assert_eq!(directives, Directives {
         instantiated: InstantiatedDirectives { revisions: ["classic", "next"].into(), ..default() },
         uninstantiated: vec![(
-            ("next", span(4, 8)),
-            BareDirective::CompileFlags(vec!["-Znext-solver"])
+            spanned(4, 8, "next"),
+            SimpleDirective::CompileFlags(vec!["-Znext-solver"])
         )],
     });
     assert_eq!(errors, default());
@@ -342,15 +350,15 @@ fn conditional_directives_undeclared_revisions() {
     assert_eq!(directives, Directives {
         instantiated: default(),
         uninstantiated: vec![
-            (("block", span(4, 9)), BareDirective::CompileFlags(vec!["--crate-type", "lib"])),
-            (("wall", span(47, 51)), BareDirective::Edition(Edition::Rust2021)),
+            (spanned(4, 9, "block"), SimpleDirective::CompileFlags(vec!["--crate-type", "lib"])),
+            (spanned(47, 51, "wall"), SimpleDirective::Edition(Edition::Rust2021)),
         ]
     });
     assert_eq!(
         errors,
         Errors(vec![
-            Error::UndeclaredRevision { revision: ("block", span(4, 9)), available: default() },
-            Error::UndeclaredRevision { revision: ("wall", span(47, 51)), available: default() },
+            Error::UndeclaredRevision { revision: spanned(4, 9, "block"), available: default() },
+            Error::UndeclaredRevision { revision: spanned(47, 51, "wall"), available: default() },
         ])
     );
 }

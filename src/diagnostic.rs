@@ -68,7 +68,7 @@ impl Diagnostic {
 
     // FIXME: Add support for multiple highlights in the same line (for `DuplicateRevisions`).
     pub(crate) fn highlight(mut self, span: Span, cx: Context<'_>) -> Self {
-        let file = cx.map().by_span(span);
+        let Some(file) = cx.map().by_span(span) else { return self };
         let span = span.local(file);
         let (line_number, line, span) = resolve(file.contents, span);
         let column_number = line[..span.start as usize].graphemes(true).count() + 1;
@@ -200,10 +200,11 @@ fn resolve(source: &str, span: LocalSpan) -> (usize, &str, LocalSpan) {
     // We assume that hightlights only span a single line.
     for (index, line) in source.split('\n').enumerate() {
         if let Some(range) = line.substr_range(needle) {
-            return (index + 1, line, LocalSpan {
-                start: range.start.try_into().unwrap(),
-                end: range.end.try_into().unwrap(),
-            });
+            return (
+                index + 1,
+                line,
+                LocalSpan::new(range.start.try_into().unwrap(), range.end.try_into().unwrap()),
+            );
         }
     }
 
