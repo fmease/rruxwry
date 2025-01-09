@@ -103,7 +103,9 @@ impl Diagnostic {
 
     // FIXME: Temporary API until everybody has migrated to spans.
     pub(crate) fn path(mut self, file: SourceFileIndex, cx: Context<'_>) -> Self {
-        self.p.with(Effects::ITALIC, fmt!("   {}", cx.map().get(file).path.display())).unwrap();
+        self.p
+            .with(Effects::ITALIC, fmt!("   {}", cx.map().by_index(file).path.display()))
+            .unwrap();
         self
     }
 
@@ -156,7 +158,7 @@ pub(crate) enum Severity {
 impl Severity {
     const fn name(self) -> &'static str {
         match self {
-            Self::Bug => "internal rruxwry error",
+            Self::Bug => "rruxwry-internal error",
             Self::Error => "error",
             Self::Warning => "warning",
             Self::Debug => "debug",

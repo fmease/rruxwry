@@ -134,7 +134,7 @@ fn conditional_directive() {
         parse_directive("[rev] aux-build: file.rs", Scope::Base),
         Ok(Directive {
             revision: Some(("rev", span(1, 4))),
-            bare: BareDirective::AuxBuild { path: "file.rs" }
+            bare: BareDirective::AuxBuild { path: ("file.rs", span(17, 24)) }
         })
     );
 }

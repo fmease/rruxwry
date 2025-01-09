@@ -58,7 +58,7 @@ fn build_compiletest(
     let _ = crate_.edition;
 
     let mut directives = directive::gather(
-        crate_.path,
+        (crate_.path, None),
         directive::Scope::Base,
         flavor,
         flags.build.revision.as_deref(),
@@ -99,11 +99,11 @@ fn build_compiletest_auxiliary<'a>(
     flavor: directive::Flavor,
     cx: Context<'_>,
 ) -> Result<ExternCrate<'a>> {
-    let path = match extern_crate {
-        ExternCrate::Unnamed { path } => base_path.join(path),
-        ExternCrate::Named { name, path } => match path {
-            Some(path) => base_path.join(path.as_ref()),
-            None => base_path.join(name.as_str()).with_extension("rs"),
+    let (path, span) = match *extern_crate {
+        ExternCrate::Unnamed { path: (path, span) } => (base_path.join(path), span),
+        ExternCrate::Named { name, ref path } => match *path {
+            Some((ref path, span)) => (base_path.join(path.as_ref()), span),
+            None => (base_path.join(name.as_str()).with_extension("rs"), None),
         },
     };
 
@@ -112,7 +112,7 @@ fn build_compiletest_auxiliary<'a>(
 
     // FIXME: Pass PermitRevisionDeclaration::No
     let mut directives = directive::gather(
-        &path,
+        (&path, span),
         directive::Scope::Base,
         flavor,
         flags.build.revision.as_deref(),
@@ -148,7 +148,8 @@ fn build_compiletest_auxiliary<'a>(
                 name,
                 // FIXME: needs to be relative to the base_path
                 // FIXME: layer violation?? should this be the job of mod command?
-                path: (name != crate_name.as_ref()).then(|| format!("lib{crate_name}.rlib").into()),
+                path: (name != crate_name.as_ref())
+                    .then(|| (format!("lib{crate_name}.rlib").into(), None)),
             }
         }
     })
@@ -264,7 +265,7 @@ fn document_compiletest<'a>(
         DocBackend::Json => directive::Scope::JsonDocCk,
     };
     let mut directives =
-        directive::gather(crate_.path, scope, flavor, flags.build.revision.as_deref(), cx)?;
+        directive::gather((crate_.path, None), scope, flavor, flags.build.revision.as_deref(), cx)?;
 
     // FIXME: unwrap
     let aux_base_path = LazyCell::new(|| crate_.path.parent().unwrap().join("auxiliary"));
@@ -316,11 +317,11 @@ fn document_compiletest_auxiliary<'a>(
     flavor: directive::Flavor,
     cx: Context<'_>,
 ) -> Result<ExternCrate<'a>> {
-    let path = match extern_crate {
-        ExternCrate::Unnamed { path } => base_path.join(path),
-        ExternCrate::Named { name, path } => match path {
-            Some(path) => base_path.join(path.as_ref()),
-            None => base_path.join(name.as_str()).with_extension("rs"),
+    let (path, span) = match *extern_crate {
+        ExternCrate::Unnamed { path: (path, span) } => (base_path.join(path), span),
+        ExternCrate::Named { name, ref path } => match *path {
+            Some((ref path, span)) => (base_path.join(path.as_ref()), span),
+            None => (base_path.join(name.as_str()).with_extension("rs"), None),
         },
     };
 
@@ -337,7 +338,7 @@ fn document_compiletest_auxiliary<'a>(
 
     // FIXME: Pass PermitRevisionDeclaration::No
     let mut directives =
-        directive::gather(&path, scope, flavor, flags.build.revision.as_deref(), cx)?;
+        directive::gather((&path, span), scope, flavor, flags.build.revision.as_deref(), cx)?;
 
     let edition = directives.edition.unwrap_or(Edition::RUSTC_DEFAULT);
 
@@ -385,7 +386,8 @@ fn document_compiletest_auxiliary<'a>(
                 name,
                 // FIXME: needs to be relative to the base_path
                 // FIXME: layer violation?? should this be the job of mod command?
-                path: (name != crate_name.as_ref()).then(|| format!("lib{crate_name}.rlib").into()),
+                path: (name != crate_name.as_ref())
+                    .then(|| (format!("lib{crate_name}.rlib").into(), None)),
             }
         }
     })

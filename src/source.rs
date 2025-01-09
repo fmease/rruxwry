@@ -1,8 +1,9 @@
-use crate::utility::monotonic::MonotonicVec;
-use std::{
-    io,
-    path::{Path, PathBuf},
+use crate::{
+    context::Context,
+    diagnostic::{error, fmt},
+    utility::monotonic::MonotonicVec,
 };
+use std::path::{Path, PathBuf};
 
 #[derive(Default)]
 pub(crate) struct SourceMap {
@@ -16,11 +17,21 @@ impl SourceMap {
     }
 
     // FIXME: Detect circular/cyclic imports here.
-    pub(crate) fn add(&self, path: &Path) -> io::Result<SourceFileIndex> {
-        // FIXME: Provide a proper error context.
+    pub(crate) fn add(
+        &self,
+        (path, span): (&Path, Option<Span>),
+        cx: Context<'_>,
+    ) -> crate::error::Result<SourceFileIndex> {
         // FIXME: On `--force` (hypoth), we could suppress the error and
         //        create a sham/dummy SourceFile.
-        let contents = std::fs::read_to_string(path)?;
+        let contents = std::fs::read_to_string(path).map_err(|error| {
+            let it = self::error(fmt!("failed to read `{}`", path.display()));
+            let it = match span {
+                Some(span) => it.highlight(span, cx),
+                None => it,
+            };
+            it.note(fmt!("{error}")).finish()
+        })?;
 
         let index = self.files.push(SourceFile::new(path.to_owned(), contents, self.offset()));
 
@@ -41,7 +52,7 @@ impl SourceMap {
         }
     }
 
-    pub(crate) fn get(&self, index: SourceFileIndex) -> SourceFileRef<'_> {
+    pub(crate) fn by_index(&self, index: SourceFileIndex) -> SourceFileRef<'_> {
         let file = self.files.get(index.0).unwrap();
         // FIXME: Dry, safety comment
         SourceFileRef {

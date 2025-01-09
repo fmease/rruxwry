@@ -14,6 +14,7 @@ use crate::{
     diagnostic::{self, debug},
     error::Result,
     interface,
+    source::Span,
     utility::default,
 };
 use anstyle::{AnsiColor, Effects};
@@ -274,7 +275,7 @@ impl<'a> Command<'a> {
 
             self.arg("--extern");
             match path {
-                Some(path) => self.arg(format!("{name}={path}")),
+                Some((path, _)) => self.arg(format!("{name}={path}")),
                 None => self.arg(name.as_str()),
             };
         }
@@ -418,8 +419,8 @@ mod palette {
 #[derive(Clone)]
 #[cfg_attr(test, derive(PartialEq, Eq, Debug))]
 pub(crate) enum ExternCrate<'src> {
-    Unnamed { path: &'src str },
-    Named { name: CrateNameRef<'src>, path: Option<Cow<'src, str>> },
+    Unnamed { path: (&'src str, Option<Span>) },
+    Named { name: CrateNameRef<'src>, path: Option<(Cow<'src, str>, Option<Span>)> },
 }
 
 // FIXME: Should we / can we move this into `cli` somehow?

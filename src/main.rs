@@ -182,23 +182,23 @@ fn set_panic_hook() {
             .is_ok_and(|variable| variable != "0")
             .then(std::backtrace::Backtrace::force_capture);
 
-        let error = bug(fmt!("{message}"));
-        let error = match information.location() {
-            Some(location) => error.note(fmt!("at `{location}`")),
-            None => error,
+        let it = bug(fmt!("{message}"));
+        let it = match information.location() {
+            Some(location) => it.note(fmt!("at `{location}`")),
+            None => it,
         };
-        let error = match std::thread::current().name() {
-            Some(name) => error.note(fmt!("in thread `{name}`")),
-            None => error.note(fmt!("in an unknown thread")),
+        let it = match std::thread::current().name() {
+            Some(name) => it.note(fmt!("in thread `{name}`")),
+            None => it.note(fmt!("in an unknown thread")),
         };
-        let error = error.note(fmt!(
+        let it = it.note(fmt!(
             "rruxwry unexpectedly panicked. this is a bug. we would appreciate a bug report"
         ));
-        let error = match backtrace {
-            Some(backtrace) => error.note(fmt!("with the following backtrace:\n{backtrace}")),
-            None => error
+        let it = match backtrace {
+            Some(backtrace) => it.note(fmt!("with the following backtrace:\n{backtrace}")),
+            None => it
                 .note(fmt!("rerun with environment variable `{ENV_VAR}=1` to display a backtrace")),
         };
-        error.finish();
+        it.finish();
     }));
 }
