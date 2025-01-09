@@ -41,10 +41,17 @@ pub(crate) fn gather<'cx>(
     cx: Context<'cx>,
 ) -> Result<Directives<'cx>, crate::error::Error> {
     // FIXME: The error handling is pretty awkward!
-    let mut errors = ErrorBuffer::default();
+    let mut errors = Errors::default();
     let file = cx.map().add(path)?;
     let directives = parse(cx.map().get(file), scope, flavor, &mut errors);
-    errors.release(file, cx);
+    // FIXME: Certain kinds of errors likely occur in large quantities (e.g., unsupported and unavailable directives).
+    //        In order to avoid "terminal spamming", suppress duplicates. We actually used to *coalesce* certain
+    //        error kinds but that's not super compatible with source code highlighting.
+    //        Play around certain pathological inputs.
+    //        ---
+    //        Like, deduplication alone (" (and 5 more occurences)") doesn't help in the case where someone runs e.g.,
+    //        `rrc` on an rustdoc/ test. That'll probably lead to ~4 errors getting emitted post deduplication.
+    errors.emit(file, cx);
     directives.instantiate(revision).map_err(|error| error.emit().into())
 }
 
@@ -52,7 +59,7 @@ fn parse<'cx>(
     file: SourceFileRef<'cx>,
     scope: Scope,
     flavor: Flavor,
-    errors: &mut ErrorBuffer<'cx>,
+    errors: &mut Errors<'cx>,
 ) -> Directives<'cx> {
     let mut directives = Directives::default();
 
@@ -64,6 +71,9 @@ fn parse<'cx>(
             let offset = line.substr_range(directive).unwrap().start;
             let offset = index + file.span.start + u32::try_from(offset).unwrap();
 
+            // FIXME: Add support for hard error, too!
+            //        For example, DuplicateRevisions should lead to a hard error (unless `--force`d).
+            //        Also, under Flavor::Rruxwry a lot of the warnings should become hard errors, too.
             match Parser::new(directive, scope, flavor, offset).parse_directive() {
                 Ok(directive) => directives.add(directive),
                 Err(error) => errors.insert(error),
@@ -80,7 +90,7 @@ fn parse<'cx>(
     directives
 }
 
-fn validate<'cx>(directives: &Directives<'cx>, errors: &mut ErrorBuffer<'cx>) {
+fn validate<'cx>(directives: &Directives<'cx>, errors: &mut Errors<'cx>) {
     directives
         .uninstantiated
         .iter()
@@ -355,37 +365,26 @@ impl<'src> Parser<'src> {
         self.parse_whitespace();
 
         // FIXME: This is slightly hacky / "leaky".
-        let (directive, _span) =
+        let (directive, span) =
             self.take_while(|char| matches!(char, '-' | '!' | '}') || char.is_alphabetic())?;
 
-        self.parse_bare_directive(directive)
+        self.parse_bare_directive(directive, span)
             .map(|directive| Directive { revision, bare: directive })
     }
 
     fn parse_bare_directive(
         &mut self,
         source: &'src str,
+        span: Span,
     ) -> Result<BareDirective<'src>, Error<'src>> {
-        match self.parse_base_directive(source) {
-            Ok(directive) => return Ok(directive),
-            Err(Error::UnknownDirective(_)) => {}
-            result @ Err(_) => return result,
+        match self.parse_base_directive(source, span) {
+            Ok(Some(directive)) => return Ok(directive),
+            Ok(None) => {}
+            Err(error) => return Err(error),
         }
-        let htmldocck = match Self::parse_htmldocck_directive(source) {
-            Ok(directive) => Some(directive),
-            Err(Error::UnknownDirective(_)) => None,
-            result @ Err(_) => return result,
-        };
-        let jsondocck = match Self::parse_jsondocck_directive(source) {
-            Ok(directive) => Some(directive),
-            Err(Error::UnknownDirective(_)) => None,
-            result @ Err(_) => return result,
-        };
-        let rruxwry = match Self::parse_rruxwry_directive(source) {
-            Ok(directive) => Some(directive),
-            Err(Error::UnknownDirective(_)) => None,
-            result @ Err(_) => return result,
-        };
+        let htmldocck = Self::parse_htmldocck_directive(source)?;
+        let jsondocck = Self::parse_jsondocck_directive(source)?;
+        let rruxwry = Self::parse_rruxwry_directive(source)?;
         match (self.scope, htmldocck, jsondocck) {
             (Scope::HtmlDocCk, Some(directive), _) | (Scope::JsonDocCk, _, Some(directive)) => {
                 return Ok(directive);
@@ -394,25 +393,26 @@ impl<'src> Parser<'src> {
             | (Scope::JsonDocCk | Scope::Base, Some(_), None)
             | (Scope::Base, Some(_), Some(_)) => {
                 // FIXME: Add more context to the error. Namely, in which scopes the directive is actually available!
-                return Err(Error::UnavailableDirective(source));
+                return Err(Error::UnavailableDirective(source, span));
             }
             _ => {}
         }
         if let Some(directive) = rruxwry {
             return match self.flavor {
                 // FIXME: Add more context to the error. Namely, in which scopes the directive is actually available!
-                Flavor::Vanilla => Err(Error::UnavailableDirective(source)),
+                Flavor::Vanilla => Err(Error::UnavailableDirective(source, span)),
                 Flavor::Rruxwry => Ok(directive),
             };
         }
-        Err(Error::UnknownDirective(source))
+        Err(Error::UnknownDirective(source, span))
     }
 
     fn parse_base_directive(
         &mut self,
         source: &'src str,
-    ) -> Result<BareDirective<'src>, Error<'src>> {
-        Ok(match source {
+        span: Span,
+    ) -> Result<Option<BareDirective<'src>>, Error<'src>> {
+        Ok(Some(match source {
             "aux-build" => {
                 self.parse_separator(Padding::Yes)?; // FIXME: audit AllowPadding
                 let (path, _span) = self.take_remaining_line();
@@ -557,17 +557,22 @@ impl<'src> Parser<'src> {
             | "unique-doc-out-dir"
             | "unset-exec-env"
             | "unused-revision-names" => {
-                return Err(Error::UnsupportedDirective(source));
+                return Err(Error::UnsupportedDirective(source, span));
             }
-            _ if source.starts_with("ignore-") => return Err(Error::UnsupportedDirective(source)),
-            _ if source.starts_with("needs-") => return Err(Error::UnsupportedDirective(source)),
-            _ if source.starts_with("only-") => return Err(Error::UnsupportedDirective(source)),
-            _ => return Err(Error::UnknownDirective(source)),
-        })
+            _ if source.starts_with("ignore-")
+                || source.starts_with("needs-")
+                || source.starts_with("only-") =>
+            {
+                return Err(Error::UnsupportedDirective(source, span));
+            }
+            _ => return Ok(None),
+        }))
     }
 
     // FIXME: Actually parse them fully and do sth. with them, otherwise turn this into a array lookup.
-    fn parse_htmldocck_directive(source: &'src str) -> Result<BareDirective<'src>, Error<'src>> {
+    fn parse_htmldocck_directive(
+        source: &'src str,
+    ) -> Result<Option<BareDirective<'src>>, Error<'src>> {
         let (source, polarity) = Self::parse_polarity(source);
         let directive = match source {
             "count" => HtmlDocCkDirective::Count,
@@ -578,13 +583,15 @@ impl<'src> Parser<'src> {
             "matches" => HtmlDocCkDirective::Matches,
             "matchesraw" => HtmlDocCkDirective::MatchesRaw,
             "snapshot" => HtmlDocCkDirective::Snapshot,
-            _ => return Err(Error::UnknownDirective(source)),
+            _ => return Ok(None),
         };
-        Ok(BareDirective::HtmlDocCk(directive, polarity))
+        Ok(Some(BareDirective::HtmlDocCk(directive, polarity)))
     }
 
     // FIXME: Actually parse them fully and do sth. with them, otherwise turn this into a array lookup.
-    fn parse_jsondocck_directive(source: &'src str) -> Result<BareDirective<'src>, Error<'src>> {
+    fn parse_jsondocck_directive(
+        source: &'src str,
+    ) -> Result<Option<BareDirective<'src>>, Error<'src>> {
         let (source, polarity) = Self::parse_polarity(source);
         let directive = match source {
             "count" => JsonDocCkDirective::Count,
@@ -592,20 +599,22 @@ impl<'src> Parser<'src> {
             "is" => JsonDocCkDirective::Is,
             "ismany" => JsonDocCkDirective::IsMany,
             "set" => JsonDocCkDirective::Set,
-            _ => return Err(Error::UnknownDirective(source)),
+            _ => return Ok(None),
         };
-        Ok(BareDirective::JsonDocCk(directive, polarity))
+        Ok(Some(BareDirective::JsonDocCk(directive, polarity)))
     }
 
     // FIXME: Actually parse them fully.
-    fn parse_rruxwry_directive(source: &'src str) -> Result<BareDirective<'src>, Error<'src>> {
+    fn parse_rruxwry_directive(
+        source: &'src str,
+    ) -> Result<Option<BareDirective<'src>>, Error<'src>> {
         let directive = match source {
             "crate" => RruxwryDirective::AuxCrateBegin,
             "raw-crate" => RruxwryDirective::RawCrateBegin,
             "}" => RruxwryDirective::CrateEnd,
-            _ => return Err(Error::UnknownDirective(source)),
+            _ => return Ok(None),
         };
-        Ok(BareDirective::Rruxwry(directive))
+        Ok(Some(BareDirective::Rruxwry(directive)))
     }
 
     fn parse_polarity(source: &'src str) -> (&'src str, Polarity) {
@@ -714,67 +723,20 @@ impl<'src> Parser<'src> {
 
 #[derive(Default)]
 #[cfg_attr(test, derive(PartialEq, Eq, Debug))]
-struct ErrorBuffer<'src> {
-    errors: Vec<Error<'src>>,
-    unavailable: BTreeSet<&'src str>,
-    unsupported: BTreeSet<&'src str>,
-    unknown: BTreeSet<&'src str>,
-}
+struct Errors<'src>(Vec<Error<'src>>);
 
-impl<'src> ErrorBuffer<'src> {
+impl<'src> Errors<'src> {
     fn insert(&mut self, error: Error<'src>) {
-        // We coalesce certain kinds of errors where we assume they may occur in large
-        // quantities in order to avoid "terminal spamming".
-        match error {
-            // FIXME: Add rationale
-            Error::UnavailableDirective(directive) => {
-                self.unavailable.insert(directive);
-            }
-            Error::UnsupportedDirective(directive) => {
-                self.unsupported.insert(directive);
-            }
-            // FIXME: Add rationale
-            Error::UnknownDirective(directive) => {
-                self.unknown.insert(directive);
-            }
-            _ => self.errors.push(error),
-        }
+        self.0.push(error);
     }
 
     // FIXME: Shouldn't all these errors be emitted as (non-fatal) errors instead of warnings?
-    fn release(self, file: SourceFileIndex, cx: Context<'_>) {
-        use std::io::Write;
-
-        let emit_grouped = |name: &str, mut errors: BTreeSet<_>| {
-            if !errors.is_empty() {
-                let s = if errors.len() == 1 { "" } else { "s" };
-
-                // FIXME: Better error message.
-                // FIXME: Use utility::ListExt::list (once that supports painter/writer)
-                warn(|p| {
-                    write!(p, "{name} directive{s}: ")?;
-                    if let Some(error) = errors.pop_first() {
-                        write!(p, "`{error}`")?;
-                    }
-                    for error in errors {
-                        write!(p, ", `{error}`")?;
-                    }
-                    Ok(())
-                })
-                .path(file, cx)
-                .finish();
-            }
-        };
-
-        emit_grouped("unavailable", self.unavailable);
-        emit_grouped("unsupported", self.unsupported);
-        emit_grouped("unknown", self.unknown);
-
-        self.errors.into_iter().for_each(|error| error.emit(file, cx));
+    fn emit(self, file: SourceFileIndex, cx: Context<'_>) {
+        self.0.into_iter().for_each(|error| error.emit(file, cx));
     }
 }
 
-impl<'src> Extend<Error<'src>> for ErrorBuffer<'src> {
+impl<'src> Extend<Error<'src>> for Errors<'src> {
     fn extend<T: IntoIterator<Item = Error<'src>>>(&mut self, errors: T) {
         errors.into_iter().for_each(|error| self.insert(error));
     }
@@ -785,12 +747,14 @@ impl Error<'_> {
     fn emit(self, file: SourceFileIndex, cx: Context<'_>) {
         // FIXME: Improve the phrasing of these diagnostics!
         match self {
-            // FIXME: This is awkward, model your errors better.
-            | Self::UnavailableDirective(_)
-            | Self::UnsupportedDirective(_)
-            | Self::UnknownDirective(_) => {
-                // Handled in `ErrorBuffer::release`.
-                unreachable!()
+            Self::UnavailableDirective(name, span) => {
+                warn(fmt!("unavailable directive: `{name}`")).highlight(span, cx)
+            }
+            Self::UnsupportedDirective(name, span) => {
+                warn(fmt!("unsupported directive: `{name}`")).highlight(span, cx)
+            }
+            Self::UnknownDirective(name, span) => {
+                warn(fmt!("unknown directive: `{name}`")).highlight(span, cx)
             }
             Self::UnexpectedToken { found: (found, span), expected } => {
                 error(fmt!("found `{found}` but expected `{expected}`")).highlight(span, cx)
@@ -825,9 +789,9 @@ impl Error<'_> {
 
 #[cfg_attr(test, derive(PartialEq, Eq, Debug))]
 enum Error<'src> {
-    UnavailableDirective(&'src str),
-    UnsupportedDirective(&'src str),
-    UnknownDirective(&'src str),
+    UnavailableDirective(&'src str, Span),
+    UnsupportedDirective(&'src str, Span),
+    UnknownDirective(&'src str, Span),
     UnexpectedToken { found: (char, Span), expected: char },
     UnexpectedEndOfInput,
     InvalidValue(&'src str),

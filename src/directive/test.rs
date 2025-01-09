@@ -12,7 +12,7 @@ fn parse_directives<'cx>(
     source: &'cx str,
     scope: Scope,
     flavor: Flavor,
-    errors: &mut ErrorBuffer<'cx>,
+    errors: &mut Errors<'cx>,
 ) -> Directives<'cx> {
     parse(
         SourceFileRef { path: Path::new(""), contents: source, span: Span { start: 0, end: 0 } },
@@ -43,27 +43,33 @@ fn blank_directive() {
 
 #[test]
 fn unavailable_htmldocck_directive_base() {
-    assert_eq!(parse_directive("!has", Scope::Base), Err(Error::UnavailableDirective("!has")));
+    assert_eq!(
+        parse_directive("!has", Scope::Base),
+        Err(Error::UnavailableDirective("!has", span(0, 4)))
+    );
 }
 
 #[test]
 fn unavailable_rruxwry_directive_base() {
     assert_eq!(
         parse_directive("crate inner {", Scope::Base),
-        Err(Error::UnavailableDirective("crate"))
+        Err(Error::UnavailableDirective("crate", span(0, 5)))
     );
 }
 
 #[test]
 fn unavailable_jsondocck_directive_htmldocck() {
-    assert_eq!(parse_directive("is", Scope::HtmlDocCk), Err(Error::UnavailableDirective("is")));
+    assert_eq!(
+        parse_directive("is", Scope::HtmlDocCk),
+        Err(Error::UnavailableDirective("is", span(0, 2)))
+    );
 }
 
 #[test]
 fn unsupported_directive() {
     assert_eq!(
         parse_directive("check-pass", Scope::Base),
-        Err(Error::UnsupportedDirective("check-pass"))
+        Err(Error::UnsupportedDirective("check-pass", span(0, 10)))
     );
 }
 
@@ -71,7 +77,7 @@ fn unsupported_directive() {
 fn unknown_directive() {
     assert_eq!(
         parse_directive("  undefined ", Scope::Base),
-        Err(Error::UnknownDirective("undefined"))
+        Err(Error::UnknownDirective("undefined", span(2, 11)))
     );
 }
 
@@ -142,7 +148,7 @@ fn empty_conditional_directive() {
 fn unknown_conditional_directive() {
     assert_eq!(
         parse_directive("[whatever] unknown", Scope::Base),
-        Err(Error::UnknownDirective("unknown"))
+        Err(Error::UnknownDirective("unknown", span(11, 18)))
     );
 }
 
@@ -214,7 +220,7 @@ fn unterminated_revision_condition() {
 
 #[test]
 fn no_directives() {
-    let mut errors = ErrorBuffer::default();
+    let mut errors = Errors::default();
     let directives = parse_directives(
         "#![crate_type = \"lib\"]\nfn main() {}\n",
         Scope::Base,
@@ -226,7 +232,7 @@ fn no_directives() {
 
 #[test]
 fn compile_flags_directives() {
-    let mut errors = ErrorBuffer::default();
+    let mut errors = Errors::default();
     let directives = parse_directives(
         "\n  \t  //@  compile-flags: --crate-type lib\n\
         //@compile-flags:--edition=2021",
@@ -249,7 +255,7 @@ fn compile_flags_directives() {
 
 #[test]
 fn conditional_directives() {
-    let mut errors = ErrorBuffer::default();
+    let mut errors = Errors::default();
     let directives = parse_directives(
         "//@ revisions: one two\n\
          //@[one] edition: 2018\n\
@@ -275,7 +281,7 @@ fn conditional_directives() {
 
 #[test]
 fn instantiate_conditional_directives() {
-    let mut errors = ErrorBuffer::default();
+    let mut errors = Errors::default();
     let directives = parse_directives(
         "//@ revisions: one two\n\
          //@[one] edition: 2018\n\
@@ -305,7 +311,7 @@ fn instantiate_conditional_directives() {
 
 #[test]
 fn conditional_directives_revision_declared_after_use() {
-    let mut errors = ErrorBuffer::default();
+    let mut errors = Errors::default();
     let directives = parse_directives(
         "//@[next] compile-flags: -Znext-solver\n\
          //@ revisions: classic next",
@@ -325,7 +331,7 @@ fn conditional_directives_revision_declared_after_use() {
 
 #[test]
 fn conditional_directives_undeclared_revisions() {
-    let mut errors = ErrorBuffer::default();
+    let mut errors = Errors::default();
     let directives = parse_directives(
         "//@[block] compile-flags: --crate-type lib\n\
          //@[wall] edition: 2021",
@@ -340,13 +346,13 @@ fn conditional_directives_undeclared_revisions() {
             (("wall", span(47, 51)), BareDirective::Edition(Edition::Rust2021)),
         ]
     });
-    assert_eq!(errors, ErrorBuffer {
-        errors: vec![
+    assert_eq!(
+        errors,
+        Errors(vec![
             Error::UndeclaredRevision { revision: ("block", span(4, 9)), available: default() },
             Error::UndeclaredRevision { revision: ("wall", span(47, 51)), available: default() },
-        ],
-        ..default()
-    });
+        ])
+    );
 }
 
 #[test]
@@ -362,7 +368,7 @@ fn undeclared_active_revision() {
 
 #[test]
 fn missing_active_revision() {
-    let mut errors = ErrorBuffer::default();
+    let mut errors = Errors::default();
     let directives =
         parse_directives("//@ revisions: first second", Scope::Base, Flavor::Vanilla, &mut errors);
     assert_eq!(errors, default());
