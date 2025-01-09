@@ -1,6 +1,6 @@
 use crate::{
     context::Context,
-    source::{LocalSpan, Span},
+    source::{LocalSpan, SourceFileIndex, Span},
     utility,
 };
 use anstream::ColorChoice;
@@ -51,7 +51,7 @@ impl Diagnostic {
         let mut p = Painter::new(io::BufWriter::new(stderr), colorize);
         (|| {
             p.set(Effects::BOLD)?;
-            p.with(severity.color().on_default().invert(), |p| write!(p, "{}", severity.name()))?;
+            p.with(severity.color().on_default().invert(), fmt!("{}", severity.name()))?;
             if !severity.is_serious() {
                 p.unset()?;
             }
@@ -66,6 +66,7 @@ impl Diagnostic {
         Self { p, severity, aux_offset: None, aux_seen: false }
     }
 
+    // FIXME: Add support for multiple highlights in the same line (for `DuplicateRevisions`).
     pub(crate) fn highlight(mut self, span: Span, cx: Context<'_>) -> Self {
         let file = cx.map().by_span(span);
         let span = span.local(file);
@@ -76,10 +77,11 @@ impl Diagnostic {
 
         let p = &mut self.p;
         (|| {
-            p.with(Effects::ITALIC, |p| {
-                writeln!(p, "   {}:{line_number}:{column_number}", file.path.display())
-            })?;
-
+            p.with(
+                Effects::ITALIC,
+                fmt!("   {}:{line_number}:{column_number}", file.path.display()),
+            )?;
+            writeln!(p)?;
             writeln!(p, "{line}")?;
 
             let (underline, underline_width) = match (underline_offset, underline_width) {
@@ -88,15 +90,20 @@ impl Diagnostic {
                 (_, width) => ("^".repeat(width), width),
             };
 
-            p.set(self.severity.color().on_default().bold())?;
-            write!(p, "{}{underline}", " ".repeat(underline_offset),)?;
-            p.unset()?;
+            write!(p, "{}", " ".repeat(underline_offset))?;
+            p.with(self.severity.color().on_default().bold(), fmt!("{underline}"))?;
 
             self.aux_offset = Some(underline_offset + underline_width);
 
             io::Result::Ok(())
         })()
         .unwrap();
+        self
+    }
+
+    // FIXME: Temporary API until everybody has migrated to spans.
+    pub(crate) fn path(mut self, file: SourceFileIndex, cx: Context<'_>) -> Self {
+        self.p.with(Effects::ITALIC, fmt!("   {}", cx.map().get(file).path.display())).unwrap();
         self
     }
 
@@ -121,7 +128,7 @@ impl Diagnostic {
                 writeln!(p)?;
                 write!(p, "{}", " ".repeat(self.aux_offset.unwrap_or(DEFAULT_OFFSET)))?;
             }
-            p.with(AuxSeverity::COLOR.on_default().bold(), |p| write!(p, " {}", severity.name()))?;
+            p.with(AuxSeverity::COLOR.on_default().bold(), fmt!(" {}", severity.name()))?;
             write!(p, ": ")?;
             message(p)
         })()

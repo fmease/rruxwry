@@ -99,7 +99,7 @@ fn edition_directive_no_colon() {
     // FIXME: This should only warn (under -@) and discard the whole directive
     assert_eq!(
         parse_directive("edition 2018", Scope::Base),
-        Err(Error::UnexpectedToken { found: '2', expected: ':' })
+        Err(Error::UnexpectedToken { found: ('2', span(8, 9)), expected: ':' })
     );
 }
 
@@ -118,7 +118,7 @@ fn revisions_directive() {
 fn revisions_directive_duplicate_revisions() {
     assert_eq!(
         parse_directive("revisions: repeat repeat", Scope::Base),
-        Err(Error::DuplicateRevisions)
+        Err(Error::DuplicateRevisions(span(11, 24)))
     );
 }
 
@@ -205,6 +205,11 @@ fn conditional_directives_directive() {
             bare: BareDirective::Revisions(vec!["recur"])
         })
     );
+}
+
+#[test]
+fn unterminated_revision_condition() {
+    assert_eq!(parse_directive("[half-open", Scope::Base), Err(Error::UnexpectedEndOfInput));
 }
 
 #[test]

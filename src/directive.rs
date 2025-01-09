@@ -1,7 +1,5 @@
 //! The parser of `ui_test`-style `compiletest`, `htmldocck` and `jsondocck` directives.
 
-// FIXME: Source locations for errors!
-
 // FIXME: We should warn on `//@ compile-flags:`, `//@ compile-flags`, etc.
 // FIXME: Warn on `//@ revisions: single` cuz it's useless.
 
@@ -20,7 +18,7 @@ use crate::{
     context::Context,
     data::{CrateNameRef, Edition},
     diagnostic::{EmittedError, error, fmt, warn},
-    source::{LocalSpan, SourceFileRef, Span},
+    source::{LocalSpan, SourceFileIndex, SourceFileRef, Span},
     utility::{Conjunction, ListingExt},
 };
 use std::{
@@ -33,7 +31,7 @@ use std::{
 };
 
 #[cfg(test)]
-mod tests;
+mod test;
 
 pub(crate) fn gather<'cx>(
     path: &Path,
@@ -44,8 +42,9 @@ pub(crate) fn gather<'cx>(
 ) -> Result<Directives<'cx>, crate::error::Error> {
     // FIXME: The error handling is pretty awkward!
     let mut errors = ErrorBuffer::default();
-    let directives = parse(cx.map().get(cx.map().add(path)?), scope, flavor, &mut errors);
-    errors.release(cx);
+    let file = cx.map().add(path)?;
+    let directives = parse(cx.map().get(file), scope, flavor, &mut errors);
+    errors.release(file, cx);
     directives.instantiate(revision).map_err(|error| error.emit().into())
 }
 
@@ -342,12 +341,13 @@ impl<'src> Parser<'src> {
             //              However, emitting a more precise diagnostic feels nicer.
             // FIXME: Do we want to trim on Flavor::Rruxwry?
             // FIXME: Under Flavor::Rruxwry support cfg-like logic predicates here (n-ary `not`, `any`, `all`; `false`, `true`).
-            // FIXME: 0..0 is incorrect for empty revision, should be cur_idx..cur_idx
-            let dummy = LocalSpan { start: 0, end: 0 };
-            let span = self.take_while(|char| char != ']').unwrap_or(dummy);
+            let revision = self
+                .take_while(|char| char != ']')
+                // FIXME: 0..0 is incorrect for empty revision, should be cur_idx..cur_idx
+                .unwrap_or_else(|_| ("", self.span(LocalSpan { start: 0, end: 0 })));
             self.expect(']')?;
 
-            Some((self.source(span), self.span(span)))
+            Some(revision)
         } else {
             None
         };
@@ -355,9 +355,8 @@ impl<'src> Parser<'src> {
         self.parse_whitespace();
 
         // FIXME: This is slightly hacky / "leaky".
-        let directive = self
-            .take_while(|char| matches!(char, '-' | '!' | '}') || char.is_alphabetic())
-            .map(|range| self.source(range))?;
+        let (directive, _span) =
+            self.take_while(|char| matches!(char, '-' | '!' | '}') || char.is_alphabetic())?;
 
         self.parse_bare_directive(directive)
             .map(|directive| Directive { revision, bare: directive })
@@ -416,7 +415,7 @@ impl<'src> Parser<'src> {
         Ok(match source {
             "aux-build" => {
                 self.parse_separator(Padding::Yes)?; // FIXME: audit AllowPadding
-                let path = self.take_remaining_line();
+                let (path, _span) = self.take_remaining_line();
                 BareDirective::AuxBuild { path }
             }
             // `compiletest` doesn't support extern options like `priv`, `noprelude`, `nounused` or `force`
@@ -428,14 +427,13 @@ impl<'src> Parser<'src> {
 
                 // We're doing this two-step process — (greedy) lexing followed by validation —
                 // to be able to provide a better error message.
-                let name = self
-                    .take_while(|char| char != '=' && !char.is_whitespace())
-                    .map(|range| self.source(range))?;
+                let (name, _span) = self.take_while(|char| char != '=' && !char.is_whitespace())?;
+                // FIXME: Does compiletest also validate the crate name? I doubt it.
                 let Ok(name) = CrateNameRef::parse(name) else {
                     return Err(Error::InvalidValue(name));
                 };
 
-                let path = self.consume(|char| char == '=').then(|| self.take_remaining_line());
+                let path = self.consume(|char| char == '=').then(|| self.take_remaining_line().0);
                 BareDirective::AuxCrate { name, path }
             }
             // FIXME: Is this available outside of rustdoc tests, too? Check compiletest's behavior!
@@ -447,7 +445,7 @@ impl<'src> Parser<'src> {
 
                 // FIXME: Supported quotes arguments (they shouldn't be split in halves).
                 //        Use crate `shlex` for this.
-                let arguments = self.take_remaining_line().split_whitespace().collect();
+                let arguments = self.take_remaining_line().0.split_whitespace().collect();
                 BareDirective::CompileFlags(arguments)
             }
             "edition" => {
@@ -455,9 +453,7 @@ impl<'src> Parser<'src> {
 
                 // We're doing this two-step process — (greedy) lexing followed by validation —
                 // to be able to provide a better error message.
-                let edition = self
-                    .take_while(|char| !char.is_whitespace())
-                    .map(|range| self.source(range))?;
+                let (edition, _) = self.take_while(|char| !char.is_whitespace())?;
                 // FIXME: Don't actually try to parse the edition!
                 let Ok(edition) = edition.parse() else {
                     return Err(Error::InvalidValue(edition));
@@ -471,20 +467,21 @@ impl<'src> Parser<'src> {
             //        For that, introduce a new parameter: PermitRevisionDeclarations::{Yes, No}.
             "revisions" => {
                 self.parse_separator(Padding::Yes)?; // FIXME: audit AllowPadding
-                let mut revisions: Vec<_> = self.take_remaining_line().split_whitespace().collect();
+                let (line, span) = self.take_remaining_line();
+                let mut revisions: Vec<_> = line.split_whitespace().collect();
                 let count = revisions.len();
                 revisions.sort_unstable();
                 revisions.dedup();
                 if count != revisions.len() {
-                    // FIXME: Provide a richer and more helpful error.
-                    return Err(Error::DuplicateRevisions);
+                    // FIXME: Provide a more precise message and span.
+                    return Err(Error::DuplicateRevisions(span));
                 }
                 BareDirective::Revisions(revisions)
             }
             // `compiletest` only supports a single environment variable per directive.
             "rustc-env" => {
                 self.parse_separator(Padding::No)?;
-                let line = self.take_remaining_line();
+                let (line, _span) = self.take_remaining_line();
 
                 // FIXME: How does `compiletest` handle the edge cases here?
                 let Some((key, value)) = line.split_once('=') else {
@@ -494,7 +491,7 @@ impl<'src> Parser<'src> {
             }
             "unset-rustc-env" => {
                 self.parse_separator(Padding::No)?;
-                let variable = self.take_remaining_line();
+                let (variable, _span) = self.take_remaining_line();
                 BareDirective::UnsetRustcEnv(variable)
             }
             // FIXME: Actually support some of these flags. In order of importance:
@@ -618,8 +615,8 @@ impl<'src> Parser<'src> {
         }
     }
 
-    fn peek(&mut self) -> Option<(usize, char)> {
-        self.chars.peek().copied()
+    fn peek(&mut self) -> Option<(u32, char)> {
+        self.chars.peek().map(|&(index, char)| (index.try_into().unwrap(), char))
     }
 
     fn advance(&mut self) {
@@ -637,11 +634,12 @@ impl<'src> Parser<'src> {
     }
 
     fn expect(&mut self, expected: char) -> Result<(), Error<'src>> {
-        let Some((_, char)) = self.peek() else {
+        let Some((index, char)) = self.peek() else {
             return Err(Error::UnexpectedEndOfInput);
         };
         if char != expected {
-            return Err(Error::UnexpectedToken { found: char, expected });
+            let span = self.span(LocalSpan { start: index, end: index + char.len_utf8() as u32 });
+            return Err(Error::UnexpectedToken { found: (char, span), expected });
         }
         self.advance();
         Ok(())
@@ -674,7 +672,10 @@ impl<'src> Parser<'src> {
         Ok(())
     }
 
-    fn take_while(&mut self, predicate: impl Fn(char) -> bool) -> Result<LocalSpan, Error<'src>> {
+    fn take_while(
+        &mut self,
+        predicate: impl Fn(char) -> bool,
+    ) -> Result<(&'src str, Span), Error<'src>> {
         let mut start = None;
         let mut end = None;
 
@@ -683,23 +684,21 @@ impl<'src> Parser<'src> {
                 break;
             }
             start.get_or_insert(index);
-            end = Some(index + char.len_utf8());
+            end = Some(index + char.len_utf8() as u32);
             self.advance();
         }
 
-        match start.zip(end) {
-            Some((start, end)) => {
-                let start = start.try_into().unwrap();
-                let end = end.try_into().unwrap();
-                Ok(LocalSpan { start, end })
-            }
-            None => Err(Error::UnexpectedEndOfInput),
-        }
+        let Some((start, end)) = start.zip(end) else { return Err(Error::UnexpectedEndOfInput) };
+        let span = LocalSpan { start, end };
+
+        Ok((self.source(span), self.span(span)))
     }
 
-    fn take_remaining_line(&mut self) -> &'src str {
+    fn take_remaining_line(&mut self) -> (&'src str, Span) {
         // FIXME: Should we instead bail on empty lines?
-        self.take_while(|char| char != '\n').map(|span| self.source(span)).unwrap_or_default()
+        self.take_while(|char| char != '\n')
+            // FIXME: Don't create a dummy span
+            .unwrap_or_else(|_| ("", self.span(Span { start: 0, end: 0 })))
     }
 
     fn source(&self, span: LocalSpan) -> &'src str {
@@ -743,7 +742,7 @@ impl<'src> ErrorBuffer<'src> {
     }
 
     // FIXME: Shouldn't all these errors be emitted as (non-fatal) errors instead of warnings?
-    fn release(self, cx: Context<'_>) {
+    fn release(self, file: SourceFileIndex, cx: Context<'_>) {
         use std::io::Write;
 
         let emit_grouped = |name: &str, mut errors: BTreeSet<_>| {
@@ -762,6 +761,7 @@ impl<'src> ErrorBuffer<'src> {
                     }
                     Ok(())
                 })
+                .path(file, cx)
                 .finish();
             }
         };
@@ -770,7 +770,7 @@ impl<'src> ErrorBuffer<'src> {
         emit_grouped("unsupported", self.unsupported);
         emit_grouped("unknown", self.unknown);
 
-        self.errors.into_iter().for_each(|error| error.emit(cx));
+        self.errors.into_iter().for_each(|error| error.emit(file, cx));
     }
 }
 
@@ -781,7 +781,8 @@ impl<'src> Extend<Error<'src>> for ErrorBuffer<'src> {
 }
 
 impl Error<'_> {
-    fn emit(self, cx: Context<'_>) {
+    // FIXME: Equip all of these errors with source locations!
+    fn emit(self, file: SourceFileIndex, cx: Context<'_>) {
         // FIXME: Improve the phrasing of these diagnostics!
         match self {
             // FIXME: This is awkward, model your errors better.
@@ -791,12 +792,14 @@ impl Error<'_> {
                 // Handled in `ErrorBuffer::release`.
                 unreachable!()
             }
-            Self::UnexpectedToken { found, expected } => {
-                error(fmt!("found `{found}` but expected `{expected}`"))
+            Self::UnexpectedToken { found: (found, span), expected } => {
+                error(fmt!("found `{found}` but expected `{expected}`")).highlight(span, cx)
             }
-            Self::UnexpectedEndOfInput => error(fmt!("unexpected end of input")),
-            Self::InvalidValue(value) => error(fmt!("invalid value `{value}`")),
-            Self::DuplicateRevisions => error(fmt!("duplicate revisions")),
+            Self::UnexpectedEndOfInput => error(fmt!("unexpected end of input")).path(file, cx),
+            Self::InvalidValue(value) => error(fmt!("invalid value `{value}`")).path(file, cx),
+            Self::DuplicateRevisions(span) => {
+                error(fmt!("duplicate revisions")).highlight(span, cx)
+            }
             Self::UndeclaredRevision { revision: (revision, span), available } => {
                 // FIXME: Dedupe w/ InstErr:
                 let list = |available: BTreeSet<_>| {
@@ -825,10 +828,10 @@ enum Error<'src> {
     UnavailableDirective(&'src str),
     UnsupportedDirective(&'src str),
     UnknownDirective(&'src str),
-    UnexpectedToken { found: char, expected: char },
+    UnexpectedToken { found: (char, Span), expected: char },
     UnexpectedEndOfInput,
     InvalidValue(&'src str),
-    DuplicateRevisions,
+    DuplicateRevisions(Span),
     UndeclaredRevision { revision: (&'src str, Span), available: BTreeSet<&'src str> },
 }
 
