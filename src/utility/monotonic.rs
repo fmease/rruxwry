@@ -19,7 +19,7 @@ impl<T> MonotonicVec<T> {
     }
 
     pub(crate) fn iter(&self) -> impl Iterator<Item = Ref<'_, T>> {
-        (0..).filter_map(|index| self.get(index)).fuse()
+        (0..).map(|index| self.get(index)).take_while(|item| item.is_some()).flatten()
     }
 }
 
