@@ -46,6 +46,7 @@ fn build_default(crate_: Crate<'_>, flags: Flags<'_>) -> Result {
         flags,
         Strictness::Lenient,
     )
+    .map_err(Into::into)
 }
 
 fn build_compiletest(
@@ -89,6 +90,7 @@ fn build_compiletest(
         flags,
         Strictness::Strict,
     )
+    .map_err(Into::into)
 }
 
 // FIXME: Support nested auxiliaries!

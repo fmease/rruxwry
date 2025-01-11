@@ -18,9 +18,10 @@
 #![allow(clippy::too_many_lines)] // I disagree
 
 use attribute::Attrs;
+use context::Context;
 use data::{CrateNameBuf, CrateNameCow, CrateType, Edition};
-use diagnostic::{bug, fmt};
-use operate::Mode;
+use diagnostic::{bug, error, fmt};
+use source::Spanned;
 use std::{path::Path, process::ExitCode};
 
 mod attribute;
@@ -58,22 +59,21 @@ fn try_main() -> error::Result {
         clap::ColorChoice::Auto => {}
     }
 
+    context::initialize!(cx);
+
     // FIXME: eagerly lower `-f`s to `--cfg`s here (or rather in `cli`?),
     // so we properly support them in `compiletest`+command
 
-    let mode = args.command.mode();
-    let edition = args.edition.unwrap_or_else(|| mode.edition());
+    let edition = args.edition.unwrap_or_else(|| args.command.mode().edition());
 
-    let mut source = String::new();
     let (crate_name, crate_type) = locate_crate_name_and_type(
         args.crate_name,
         args.crate_type,
-        mode,
         &args.path,
         edition,
         &args.debug,
-        &mut source,
-    );
+        cx,
+    )?;
 
     // FIXME: this is awkward ... can we do this inside cli smh (not the ref op ofc)
     let verbatim_flags = command::VerbatimFlagsBuf {
@@ -91,22 +91,29 @@ fn try_main() -> error::Result {
     let crate_ =
         operate::Crate { path: &args.path, name: crate_name.as_ref(), type_: crate_type, edition };
 
-    let cx = context::ContextData::default();
-    let cx = context::Context::new(&cx);
-
     match args.command {
         interface::Command::Build { run, mode } => {
             operate::build(mode, crate_, flags, cx)?;
 
             if run {
-                command::execute(Path::new(".").join(crate_name.as_str()), flags.debug)?;
+                command::execute(Path::new(".").join(crate_name.as_str()), flags.debug).map_err(
+                    |error| {
+                        self::error(fmt!("failed to run the built binary"))
+                            .note(fmt!("{error}"))
+                            .finish()
+                    },
+                )?;
             }
         }
         interface::Command::Doc { open, mode, flags: doc_flags } => {
             let crate_name = operate::document(mode, crate_, flags, &doc_flags, cx)?;
 
             if open {
-                command::open(crate_name.as_ref(), &args.debug)?;
+                command::open(crate_name.as_ref(), &args.debug).map_err(|error| {
+                    self::error(fmt!("failed to open the generated docs in a browser"))
+                        .note(fmt!("{error}"))
+                        .finish()
+                })?;
             }
         }
     }
@@ -115,46 +122,30 @@ fn try_main() -> error::Result {
 }
 
 // FIXME: this is awkward
-fn locate_crate_name_and_type<'src>(
+fn locate_crate_name_and_type<'cx>(
     crate_name: Option<CrateNameBuf>,
     crate_type: Option<CrateType>,
-    mode: Mode,
     path: &Path,
     edition: Edition,
     debug_flags: &interface::DebugFlags,
-    source: &'src mut String,
-) -> (CrateNameCow<'src>, CrateType) {
-    match (crate_name, crate_type) {
+    cx: Context<'cx>,
+) -> crate::error::Result<(CrateNameCow<'cx>, CrateType)> {
+    Ok(match (crate_name, crate_type) {
         (Some(crate_name), Some(crate_type)) => (crate_name.into(), crate_type),
         (crate_name, crate_type) => {
-            // FIXME: Not computing the crate name in compiletest mode is actually incorrect
-            // since that leads to --open/--run failing to find the (correct) artifact.
-            // So either use `-o` to force the location and get rid of the attr parsing code
-            // or try to find it unconditionally.
-            // NOTE: However, I don't want us to open the source file *twice* in compiletest
-            // mode (once for attrs & once for directives). We should do it once if we go with
-            // that approach
-            let (crate_name, crate_type): (Option<CrateNameCow<'_>>, _) = match mode {
-                Mode::Compiletest => (crate_name.map(Into::into), crate_type),
-                Mode::Other => {
-                    *source = std::fs::read_to_string(path).unwrap_or_default();
-                    let attrs = Attrs::parse(source, edition, debug_flags.verbose);
-
-                    let crate_name: Option<CrateNameCow<'_>> =
-                        crate_name.map(Into::into).or_else(|| attrs.crate_name.map(Into::into));
-
-                    (crate_name, crate_type.or(attrs.crate_type))
-                }
-            };
+            let source = cx.map().add(Spanned::sham(path), cx)?.contents;
+            let attrs = Attrs::parse(source, edition, debug_flags.verbose);
 
             // FIXME: unwrap
             let crate_name = crate_name
+                .map(Into::into)
+                .or_else(|| attrs.crate_name.map(Into::into))
                 .unwrap_or_else(|| CrateNameBuf::adjust_and_parse_file_path(path).unwrap().into());
-            let crate_type = crate_type.unwrap_or_default();
+            let crate_type = crate_type.or(attrs.crate_type).unwrap_or_default();
 
             (crate_name, crate_type)
         }
-    }
+    })
 }
 
 fn set_panic_hook() {

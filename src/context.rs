@@ -1,5 +1,10 @@
 use crate::source::SourceMap;
 
+pub(crate) macro initialize($cx:ident) {
+    let cx = ContextData::default();
+    let $cx = Context::new(&cx);
+}
+
 // FIXME: Add a Painter to the context.
 
 #[derive(Clone, Copy)]

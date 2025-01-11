@@ -24,7 +24,14 @@ impl SourceMap {
         &self,
         path: Spanned<&Path>,
         cx: Context<'_>,
-    ) -> crate::error::Result<SourceFileIndex> {
+    ) -> crate::error::Result<SourceFileRef<'_>> {
+        // We don't care about canonicalization (this is just for caching).
+        // We don't care about TOC-TOU (not safety critical).
+        if let Some(file) = self.files.iter().find(|file| file.path == path.bare) {
+            // FIXME: Safety comment.
+            return Ok(unsafe { file.as_ref() });
+        }
+
         // FIXME: On `--force` (hypoth), we could suppress the error and
         //        create a sham/dummy SourceFile.
         let contents = std::fs::read_to_string(path.bare).map_err(|error| {
@@ -34,9 +41,11 @@ impl SourceMap {
                 .finish()
         })?;
 
-        let index = self.files.push(SourceFile::new(path.bare.to_owned(), contents, self.offset()));
-
-        Ok(SourceFileIndex(index))
+        let file = SourceFile::new(path.bare.to_owned(), contents, self.offset());
+        // FIXME: Safety comment.
+        let result = unsafe { file.as_ref() };
+        self.files.push(file);
+        Ok(result)
     }
 
     // FIXME: Use this comment again:
@@ -48,27 +57,10 @@ impl SourceMap {
         }
         // FIXME: Perform a binary search by span instead.
         let file = self.files.iter().find(|file| file.span.contains(span.start)).unwrap();
-        // FIXME: Dry, safety comment
-        Some(SourceFileRef {
-            path: unsafe { &*std::ptr::from_ref(file.path.as_path()) },
-            contents: unsafe { &*std::ptr::from_ref(file.contents.as_str()) },
-            span: file.span,
-        })
-    }
-
-    pub(crate) fn by_index(&self, index: SourceFileIndex) -> SourceFileRef<'_> {
-        let file = self.files.get(index.0).unwrap();
-        // FIXME: Dry, safety comment
-        SourceFileRef {
-            path: unsafe { &*std::ptr::from_ref(file.path.as_path()) },
-            contents: unsafe { &*std::ptr::from_ref(file.contents.as_str()) },
-            span: file.span,
-        }
+        // FIXME: Safety comment.
+        Some(unsafe { file.as_ref() })
     }
 }
-
-#[derive(Clone, Copy)]
-pub(crate) struct SourceFileIndex(usize);
 
 struct SourceFile {
     path: PathBuf,
@@ -80,6 +72,16 @@ impl SourceFile {
     fn new(path: PathBuf, contents: String, offset: u32) -> Self {
         let span = Span::new(offset, offset + u32::try_from(contents.len()).unwrap());
         Self { path, contents, span }
+    }
+
+    // FIXME: Safety conditions.
+    unsafe fn as_ref<'a>(&self) -> SourceFileRef<'a> {
+        // FIXME: Safety comments
+        SourceFileRef {
+            path: unsafe { &*std::ptr::from_ref(self.path.as_path()) },
+            contents: unsafe { &*std::ptr::from_ref(self.contents.as_str()) },
+            span: self.span,
+        }
     }
 }
 

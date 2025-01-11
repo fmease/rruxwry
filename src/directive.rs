@@ -18,7 +18,7 @@ use crate::{
     context::Context,
     data::{CrateNameRef, Edition},
     diagnostic::{EmittedError, error, fmt, warn},
-    source::{LocalSpan, SourceFileIndex, SourceFileRef, Span, Spanned},
+    source::{LocalSpan, SourceFileRef, Span, Spanned},
     utility::{Conjunction, ListingExt},
 };
 use std::{
@@ -42,8 +42,7 @@ pub(crate) fn gather<'cx>(
 ) -> crate::error::Result<Directives<'cx>> {
     // FIXME: The error handling is pretty awkward!
     let mut errors = Errors::default();
-    let file = cx.map().add(path, cx)?;
-    let directives = parse(cx.map().by_index(file), scope, flavor, &mut errors);
+    let directives = parse(cx.map().add(path, cx)?, scope, flavor, &mut errors);
     // FIXME: Certain kinds of errors likely occur in large quantities (e.g., unsupported and unavailable directives).
     //        In order to avoid "terminal spamming", suppress duplicates. We actually used to *coalesce* certain
     //        error kinds but that's not super compatible with source code highlighting.
@@ -51,7 +50,7 @@ pub(crate) fn gather<'cx>(
     //        ---
     //        Like, deduplication alone (" (and 5 more occurences)") doesn't help in the case where someone runs e.g.,
     //        `rrc` on an rustdoc/ test. That'll probably lead to ~4 errors getting emitted post deduplication.
-    errors.emit(file, cx);
+    errors.emit(cx);
     directives.instantiate(revision).map_err(|error| error.emit().into())
 }
 
@@ -735,8 +734,8 @@ impl<'src> Errors<'src> {
     }
 
     // FIXME: Shouldn't all these errors be emitted as (non-fatal) errors instead of warnings?
-    fn emit(self, file: SourceFileIndex, cx: Context<'_>) {
-        self.0.into_iter().for_each(|error| error.emit(file, cx));
+    fn emit(self, cx: Context<'_>) {
+        self.0.into_iter().for_each(|error| error.emit(cx));
     }
 }
 
@@ -748,7 +747,7 @@ impl<'src> Extend<Error<'src>> for Errors<'src> {
 
 impl Error<'_> {
     // FIXME: Equip all of these errors with source locations!
-    fn emit(self, file: SourceFileIndex, cx: Context<'_>) {
+    fn emit(self, cx: Context<'_>) {
         // FIXME: Improve the phrasing of these diagnostics!
         match self {
             Self::UnavailableDirective(name) => {
@@ -763,8 +762,10 @@ impl Error<'_> {
             Self::UnexpectedToken { found, expected } => {
                 error(fmt!("found `{found}` but expected `{expected}`")).highlight(found.span, cx)
             }
-            Self::UnexpectedEndOfInput => error(fmt!("unexpected end of input")).path(file, cx),
-            Self::InvalidValue(value) => error(fmt!("invalid value `{value}`")).path(file, cx),
+            // FIXME: Source span!
+            Self::UnexpectedEndOfInput => error(fmt!("unexpected end of input")),
+            // FIXME: Source span!
+            Self::InvalidValue(value) => error(fmt!("invalid value `{value}`")),
             Self::DuplicateRevisions(span) => {
                 error(fmt!("duplicate revisions")).highlight(span, cx)
             }

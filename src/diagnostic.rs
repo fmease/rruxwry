@@ -1,6 +1,6 @@
 use crate::{
     context::Context,
-    source::{LocalSpan, SourceFileIndex, Span},
+    source::{LocalSpan, Span},
     utility,
 };
 use anstream::ColorChoice;
@@ -98,14 +98,6 @@ impl Diagnostic {
             io::Result::Ok(())
         })()
         .unwrap();
-        self
-    }
-
-    // FIXME: Temporary API until everybody has migrated to spans.
-    pub(crate) fn path(mut self, file: SourceFileIndex, cx: Context<'_>) -> Self {
-        self.p
-            .with(Effects::ITALIC, fmt!("   {}", cx.map().by_index(file).path.display()))
-            .unwrap();
         self
     }
 

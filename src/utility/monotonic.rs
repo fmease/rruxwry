@@ -6,11 +6,8 @@ pub(crate) struct MonotonicVec<T> {
 }
 
 impl<T> MonotonicVec<T> {
-    pub(crate) fn push(&self, item: T) -> usize {
-        let mut items = self.items.borrow_mut();
-        let index = items.len();
-        items.push(item);
-        index
+    pub(crate) fn push(&self, item: T) {
+        self.items.borrow_mut().push(item);
     }
 
     pub(crate) fn get(&self, index: usize) -> Option<Ref<'_, T>> {

@@ -12,7 +12,6 @@
 use crate::{
     data::{CrateName, CrateNameRef, CrateType, DocBackend, Edition, Identity},
     diagnostic::{self, debug},
-    error::Result,
     interface,
     source::Spanned,
     utility::default,
@@ -37,7 +36,7 @@ pub(super) fn compile(
     extern_crates: &[ExternCrate<'_>],
     flags: Flags<'_>,
     strictness: Strictness,
-) -> Result {
+) -> io::Result<()> {
     let mut cmd = Command::new("rustc", flags.debug, strictness);
     cmd.set_toolchain(flags);
     cmd.arg(path);
@@ -81,7 +80,7 @@ pub(super) fn document(
     // FIXME: temporary; integrate into flags: Flags<D> above (D discriminant)
     doc_flags: &interface::DocFlags,
     strictness: Strictness,
-) -> Result {
+) -> io::Result<()> {
     let mut cmd = Command::new("rustdoc", flags.debug, strictness);
     cmd.set_toolchain(flags);
     cmd.arg(path);
@@ -151,11 +150,11 @@ pub(super) fn document(
     cmd.execute()
 }
 
-pub(crate) fn execute(program: impl AsRef<OsStr>, flags: &interface::DebugFlags) -> Result {
+pub(crate) fn execute(program: impl AsRef<OsStr>, flags: &interface::DebugFlags) -> io::Result<()> {
     Command::new(program, flags, Strictness::Strict).execute()
 }
 
-pub(crate) fn open(crate_name: CrateNameRef<'_>, flags: &interface::DebugFlags) -> Result {
+pub(crate) fn open(crate_name: CrateNameRef<'_>, flags: &interface::DebugFlags) -> io::Result<()> {
     let path = std::env::current_dir()?.join("doc").join(crate_name.as_str()).join("index.html");
 
     if flags.verbose {
@@ -196,12 +195,12 @@ impl<'a> Command<'a> {
         }
     }
 
-    fn execute(mut self) -> Result {
+    fn execute(mut self) -> io::Result<()> {
         self.set_unstable_options();
 
         self.print(); // FIXME partially inline this
         if !self.flags.dry_run {
-            self.status()?.exit_ok()?;
+            self.status()?.exit_ok().map_err(io::Error::other)?;
         }
 
         Ok(())
