@@ -1,18 +1,16 @@
-use super::Attributes;
+use super::Attrs;
 use crate::{
     data::{CrateName, CrateType, Edition},
     utility::default,
 };
 
-// FIXME: Test that we detect `#![crate_name = "0"]` (leading digits) to match rustc's behavior.
-
-fn parse(source: &str) -> Attributes<'_> {
-    Attributes::parse(source, &[], Edition::Rust2015, false)
+fn parse(source: &str) -> Attrs<'_> {
+    Attrs::parse(source, Edition::Rust2015, false)
 }
 
 #[test]
 fn crate_name() {
-    assert_eq!(parse(r#"#![crate_name = "name"]"#), Attributes {
+    assert_eq!(parse(r#"#![crate_name = "name"]"#), Attrs {
         crate_name: Some(CrateName::new_unchecked("name")),
         crate_type: None
     });
@@ -20,7 +18,7 @@ fn crate_name() {
 
 #[test]
 fn crate_type_crate_name() {
-    assert_eq!(parse(r#"#![crate_type = "proc-macro"]#![crate_name = "alias"]"#), Attributes {
+    assert_eq!(parse(r#"#![crate_type = "proc-macro"]#![crate_name = "alias"]"#), Attrs {
         crate_name: Some(CrateName::new_unchecked("alias")),
         crate_type: Some(CrateType::ProcMacro),
     });
@@ -28,7 +26,7 @@ fn crate_type_crate_name() {
 
 #[test]
 fn crate_name_spaced() {
-    assert_eq!(parse(r#" # ! [ crate_name = "name" ] "#), Attributes {
+    assert_eq!(parse(r#" # ! [ crate_name = "name" ] "#), Attrs {
         crate_name: Some(CrateName::new_unchecked("name")),
         crate_type: None,
     });
@@ -49,7 +47,7 @@ fn crate_name_interleaved_trivia() {
 ]
 "#
         ),
-        Attributes { crate_name: Some(CrateName::new_unchecked("alias")), crate_type: None }
+        Attrs { crate_name: Some(CrateName::new_unchecked("alias")), crate_type: None }
     );
 }
 
@@ -64,7 +62,7 @@ fn crate_name_leading_inner_attributes() {
 #![crate_name = "name"]
 "#,
         ),
-        Attributes { crate_name: Some(CrateName::new_unchecked("name")), crate_type: None }
+        Attrs { crate_name: Some(CrateName::new_unchecked("name")), crate_type: None }
     );
 }
 
@@ -104,7 +102,7 @@ fn crate_name_red_herrings() {
 #![crate_name = "yes"]
 "#
         ),
-        Attributes { crate_name: Some(CrateName::new_unchecked("yes")), crate_type: None }
+        Attrs { crate_name: Some(CrateName::new_unchecked("yes")), crate_type: None }
     );
 }
 
@@ -121,7 +119,7 @@ fn crate_name_semantically_malformed_leading_attributes() {
 #![crate_name = "krate"]
 "#
         ),
-        Attributes { crate_name: Some(CrateName::new_unchecked("krate")), crate_type: None }
+        Attrs { crate_name: Some(CrateName::new_unchecked("krate")), crate_type: None }
     );
 }
 
@@ -133,7 +131,7 @@ fn crate_type_invalid() {
 #[test]
 fn crate_name_multiple() {
     // Yes, this matches the behavior of rustc (with an without `--print=crate-name`).
-    assert_eq!(parse(r#"#![crate_name = "first"]#![crate_name = "second"]"#), Attributes {
+    assert_eq!(parse(r#"#![crate_name = "first"]#![crate_name = "second"]"#), Attrs {
         crate_name: Some(CrateName::new_unchecked("first")),
         crate_type: None,
     });
@@ -147,8 +145,39 @@ fn crate_name_garbage() {
 #[test]
 fn crate_name_leading_digit() {
     // Yes, this matches the behavior of rustc (with an without `--print=crate-name`).
-    assert_eq!(parse(r#"#![crate_name = "0"]"#), Attributes {
+    assert_eq!(parse(r#"#![crate_name = "0"]"#), Attrs {
         crate_name: Some(CrateName::new_unchecked("0")),
         crate_type: None,
     });
+}
+
+#[test]
+fn crate_name_raw_literal() {
+    assert_eq!(parse(r#"#![crate_name = r"raw"]"#), Attrs {
+        crate_name: Some(CrateName::new_unchecked("raw")),
+        crate_type: None,
+    });
+}
+
+#[test]
+fn crate_name_raw_literal_hash_delimiters() {
+    assert_eq!(parse(r##"#![crate_name = r#"raw"#]"##), Attrs {
+        crate_name: Some(CrateName::new_unchecked("raw")),
+        crate_type: None,
+    });
+}
+
+#[test]
+fn crate_name_c_literal() {
+    assert_eq!(Attrs::parse(r#"#![crate_name = c"C"]"#, Edition::Rust2021, false), default(),);
+}
+
+#[test]
+fn crate_name_byte_literal() {
+    assert_eq!(parse(r#"#![crate_name = b"byte"]"#), default());
+}
+
+#[test]
+fn crate_name_char_literal() {
+    assert_eq!(parse("#![crate_name = 'x']"), default());
 }

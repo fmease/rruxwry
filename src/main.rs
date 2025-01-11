@@ -17,7 +17,7 @@
 #![allow(clippy::too_many_arguments)] // low priority
 #![allow(clippy::too_many_lines)] // I disagree
 
-use attribute::Attributes;
+use attribute::Attrs;
 use data::{CrateNameBuf, CrateNameCow, CrateType, Edition};
 use diagnostic::{bug, fmt};
 use operate::Mode;
@@ -65,16 +65,15 @@ fn try_main() -> error::Result {
     let edition = args.edition.unwrap_or_else(|| mode.edition());
 
     let mut source = String::new();
-    let (crate_name, crate_type) = compute_crate_name_and_type(
+    let (crate_name, crate_type) = locate_crate_name_and_type(
         args.crate_name,
         args.crate_type,
         mode,
         &args.path,
         edition,
-        &args.build.cfgs,
         &args.debug,
         &mut source,
-    )?;
+    );
 
     // FIXME: this is awkward ... can we do this inside cli smh (not the ref op ofc)
     let verbatim_flags = command::VerbatimFlagsBuf {
@@ -116,17 +115,16 @@ fn try_main() -> error::Result {
 }
 
 // FIXME: this is awkward
-fn compute_crate_name_and_type<'src>(
+fn locate_crate_name_and_type<'src>(
     crate_name: Option<CrateNameBuf>,
     crate_type: Option<CrateType>,
     mode: Mode,
     path: &Path,
     edition: Edition,
-    cfgs: &[String],
     debug_flags: &interface::DebugFlags,
     source: &'src mut String,
-) -> error::Result<(CrateNameCow<'src>, CrateType)> {
-    Ok(match (crate_name, crate_type) {
+) -> (CrateNameCow<'src>, CrateType) {
+    match (crate_name, crate_type) {
         (Some(crate_name), Some(crate_type)) => (crate_name.into(), crate_type),
         (crate_name, crate_type) => {
             // FIXME: Not computing the crate name in compiletest mode is actually incorrect
@@ -139,20 +137,13 @@ fn compute_crate_name_and_type<'src>(
             let (crate_name, crate_type): (Option<CrateNameCow<'_>>, _) = match mode {
                 Mode::Compiletest => (crate_name.map(Into::into), crate_type),
                 Mode::Other => {
-                    *source = std::fs::read_to_string(path)?; // FIXME: error context
-                    let attributes = Attributes::parse(
-                        source,
-                        // FIXME: doesn't contain `-f`s; eagerly expand them into `--cfg`s in main
-                        cfgs,
-                        edition,
-                        debug_flags.verbose,
-                    );
+                    *source = std::fs::read_to_string(path).unwrap_or_default();
+                    let attrs = Attrs::parse(source, edition, debug_flags.verbose);
 
-                    let crate_name: Option<CrateNameCow<'_>> = crate_name
-                        .map(Into::into)
-                        .or_else(|| attributes.crate_name.map(Into::into));
+                    let crate_name: Option<CrateNameCow<'_>> =
+                        crate_name.map(Into::into).or_else(|| attrs.crate_name.map(Into::into));
 
-                    (crate_name, crate_type.or(attributes.crate_type))
+                    (crate_name, crate_type.or(attrs.crate_type))
                 }
             };
 
@@ -163,7 +154,7 @@ fn compute_crate_name_and_type<'src>(
 
             (crate_name, crate_type)
         }
-    })
+    }
 }
 
 fn set_panic_hook() {

@@ -7,7 +7,7 @@ use crate::{
     },
 };
 use ra_ap_rustc_lexer::{DocStyle, LiteralKind, Token, TokenKind};
-use std::ops::ControlFlow;
+use std::{io::Write as _, ops::ControlFlow};
 
 #[cfg(test)]
 mod test;
@@ -21,68 +21,90 @@ mod test;
 //   There is no `rustc --print=crate-type`.
 //   Very useful so users don't need to manually specify `--crate-type/-y`
 
-// FIXME: Check if we parse `c"crate_name"` (edition 2021) and `b"crate_name"`
-//        & skip them during lowering.
-
 #[derive(Default)]
 #[cfg_attr(test, derive(PartialEq, Eq, Debug))]
-pub(crate) struct Attributes<'src> {
+pub(crate) struct Attrs<'src> {
     pub(crate) crate_name: Option<CrateNameRef<'src>>,
     pub(crate) crate_type: Option<CrateType>,
 }
 
-impl<'src> Attributes<'src> {
-    pub(crate) fn parse(
-        source: &'src str,
-        cfgs: &[String],
-        edition: Edition,
-        verbose: bool,
-    ) -> Self {
-        let attributes = AttributeParser::new(source, edition).execute();
-        let amount = attributes.len();
+impl<'src> Attrs<'src> {
+    pub(crate) fn parse(source: &'src str, edition: Edition, verbose: bool) -> Self {
+        let attrs = AttrParser::new(source, edition).execute();
+        let amount = attrs.len();
 
         if verbose {
             let s = if amount == 1 { "" } else { "s" };
             debug(fmt!("parser: found {amount} crate attribute{s}")).finish();
         }
 
-        let attributes = Self::lower(attributes, cfgs, source);
+        let attrs = Self::lower(attrs, source);
 
         if amount != 0 && verbose {
             let verb = |present| if present { "found" } else { "did not find" };
 
-            debug(fmt!(
-                "lowerer: {} a well-formed `#![crate_name]`",
-                verb(attributes.crate_name.is_some()),
-            ))
+            debug(|p| {
+                let verb = verb(attrs.crate_name.is_some());
+                write!(p, "lowerer: {verb} a (well-formed) `#![crate_name]`")?;
+                if let Some(crate_name) = attrs.crate_name {
+                    write!(p, ": `{crate_name}`")?;
+                }
+                Ok(())
+            })
             .finish();
 
-            debug(fmt!(
-                "lowerer: {} a well-formed `#![crate_type]`",
-                verb(attributes.crate_type.is_some()),
-            ))
+            debug(|p| {
+                let verb = verb(attrs.crate_type.is_some());
+                write!(p, "lowerer: {verb} a (well-formed) `#![crate_type]`",)?;
+                if let Some(crate_type) = attrs.crate_type {
+                    write!(p, ": `{}`", crate_type.to_str())?;
+                }
+                Ok(())
+            })
             .finish();
         }
 
-        attributes
+        attrs
     }
 
-    // FIXME: Respect `cfgs`.
-    fn lower(attributes: Vec<Attribute<'src>>, _cfgs: &[String], source: &'src str) -> Self {
+    fn lower(attrs: Vec<Attr<'src>>, source: &'src str) -> Self {
         let mut crate_name = None;
         let mut crate_type = None;
 
-        for attribute in attributes {
+        for attr in attrs {
             // We found the attributes we're interested in, we can stop processing.
             if crate_name.is_some() && crate_type.is_some() {
                 break;
             }
 
-            let Some(ident) = attribute.path.ident() else {
+            let Some(ident) = attr.path.ident() else {
                 continue;
             };
 
+            let extract_eq_str = || {
+                if let Some(Meta::Assignment { value: expr }) = attr.meta
+                    && let [(token, span)] = &*expr
+                    && let TokenKind::Literal { kind: literal, .. } = token
+                {
+                    let (start, end) = match literal {
+                        LiteralKind::Str { terminated: true } => (1, 1),
+                        LiteralKind::RawStr { n_hashes } => {
+                            let n_hashes = n_hashes.unwrap_or(0) as usize;
+                            (1 + 1 + n_hashes, 1 + n_hashes)
+                        }
+                        _ => return None,
+                    };
+
+                    // FIXME: Unescape escape sequences inside `source` if we have `LiteralKind::Str`.
+                    let source = source.at(*span);
+                    Some(&source[..source.len().saturating_sub(end)][start..])
+                } else {
+                    None
+                }
+            };
+
             // We don't need to support `crate_{name,type}` inside `cfg_attr` because that's a hard error since 1.83.
+            // See also rust-lang/rust#91632.
             match ident {
                 "crate_name" => {
                     // We don't need to care about anything other than string literals since everything else
@@ -92,17 +114,8 @@ impl<'src> Attributes<'src> {
                     // T-lang has rules to make it a semantic error. Implemented in PR rust-lang/rust#127581
                     // (to be approved and merged).
                     if crate_name.is_none()
-                        && let Some(Meta::Assignment { value: expression }) = attribute.meta
-                        && let [(token, span)] = &*expression
-                        && let TokenKind::Literal {
-                            kind: LiteralKind::Str { terminated: true },
-                            ..
-                        } = token
+                        && let Some(name) = extract_eq_str()
                     {
-                        // FIXME: Unescape escape sequences.
-                        let name =
-                            source.at(*span).strip_prefix('"').unwrap().strip_suffix('"').unwrap();
-
                         crate_name = Some(match CrateName::parse(name) {
                             Ok(name) => name,
                             Err(()) => break, // like in rustc, an invalid crate name is fatal
@@ -113,16 +126,8 @@ impl<'src> Attributes<'src> {
                     // We don't need to care about anything other than string literals since everything else
                     // gets rejected semantically by rustc.
                     if crate_type.is_none()
-                        && let Some(Meta::Assignment { value: expression }) = attribute.meta
-                        && let [(token, span)] = &*expression
-                        && let TokenKind::Literal {
-                            kind: LiteralKind::Str { terminated: true },
-                            ..
-                        } = token
+                        && let Some(type_) = extract_eq_str()
                     {
-                        // FIXME: Unescape Rust escape sequences.
-                        let type_ =
-                            source.at(*span).strip_prefix('"').unwrap().strip_suffix('"').unwrap();
                         // Note this only accepts `lib`, `rlib`, `bin` and `proc-macro` at the time of writing.
                         // FIXME: At least warn on types unsupported by rruxwry.
                         crate_type = Some(match type_.parse() {
@@ -139,18 +144,18 @@ impl<'src> Attributes<'src> {
     }
 }
 
-struct AttributeParser<'src> {
+struct AttrParser<'src> {
     parser: SourceFileParser<'src>,
     edition: Edition,
 }
 
-impl<'src> AttributeParser<'src> {
+impl<'src> AttrParser<'src> {
     fn new(source: &'src str, edition: Edition) -> Self {
         Self { parser: SourceFileParser::new(source), edition }
     }
 
-    fn execute(mut self) -> Vec<Attribute<'src>> {
-        let mut attributes = Vec::new();
+    fn execute(mut self) -> Vec<Attr<'src>> {
+        let mut attrs = Vec::new();
 
         while let () = self.parse_trivia()
             && let Some(token) = self.parser.peek()
@@ -163,9 +168,9 @@ impl<'src> AttributeParser<'src> {
                 }
                 TokenKind::Pound => {
                     self.parser.advance();
-                    match self.finish_parsing_inner_attribute() {
+                    match self.finish_parsing_inner_attr() {
                         ControlFlow::Continue(attribute) => {
-                            attributes.push(attribute);
+                            attrs.push(attribute);
                         }
                         ControlFlow::Break(()) => break,
                     }
@@ -176,11 +181,11 @@ impl<'src> AttributeParser<'src> {
             }
         }
 
-        attributes
+        attrs
     }
 
     /// Finish parsing an inner attribute assuming the leading `#` has already been parsed.
-    fn finish_parsing_inner_attribute(&mut self) -> ControlFlow<(), Attribute<'src>> {
+    fn finish_parsing_inner_attr(&mut self) -> ControlFlow<(), Attr<'src>> {
         self.parse_trivia();
         // This `Break`s if this is the start of an outer attribute which is exactly what we want:
         // Once we encounter an outer attribute we know for a fact that no more inner attributes
@@ -189,7 +194,7 @@ impl<'src> AttributeParser<'src> {
         self.parse_trivia();
         self.parse(TokenKind::OpenBracket)?;
 
-        let path = self.parse_attribute_path()?;
+        let path = self.parse_attr_path()?;
 
         self.parse_trivia();
         let meta = match self.peek()?.kind {
@@ -228,10 +233,10 @@ impl<'src> AttributeParser<'src> {
         self.parse_trivia();
         self.parse(TokenKind::CloseBracket)?;
 
-        ControlFlow::Continue(Attribute { path, meta })
+        ControlFlow::Continue(Attr { path, meta })
     }
 
-    fn parse_attribute_path(&mut self) -> ControlFlow<(), Path<'src>> {
+    fn parse_attr_path(&mut self) -> ControlFlow<(), Path<'src>> {
         self.parse_trivia();
 
         let is_absolute = self.parse_path_separator().is_continue();
@@ -368,7 +373,7 @@ impl<'src> AttributeParser<'src> {
 }
 
 #[derive(Debug)]
-struct Attribute<'src> {
+struct Attr<'src> {
     path: Path<'src>,
     meta: Option<Meta>,
 }
