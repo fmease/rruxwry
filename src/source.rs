@@ -100,27 +100,35 @@ pub(crate) struct Span<const L: Locality = { Locality::Global }> {
 }
 
 impl<const L: Locality> Span<L> {
-    pub const fn new(start: u32, end: u32) -> Self {
+    pub(crate) const fn new(start: u32, end: u32) -> Self {
         Self { start, end }
+    }
+
+    pub(crate) const fn empty(index: u32) -> Self {
+        Self::new(index, index)
     }
 
     pub(crate) fn with_len(start: u32, length: u32) -> Self {
         Self::new(start, start + length)
     }
 
-    fn contains(self, index: u32) -> bool {
-        self.start <= index && index < self.end
+    pub(crate) const fn is_empty(self) -> bool {
+        self.start == self.end
     }
 
-    fn unshift(self, offset: u32) -> Self {
+    const fn contains(self, index: u32) -> bool {
+        self.start <= index && index <= self.end
+    }
+
+    const fn unshift(self, offset: u32) -> Self {
         Self::new(self.start - offset, self.end - offset)
     }
 
-    pub(crate) fn shift(self, offset: u32) -> Self {
+    pub(crate) const fn shift(self, offset: u32) -> Self {
         Self::new(self.start + offset, self.end + offset)
     }
 
-    pub(crate) fn reinterpret<const P: Locality>(self) -> Span<P> {
+    pub(crate) const fn reinterpret<const P: Locality>(self) -> Span<P> {
         Span::new(self.start, self.end)
     }
 }
@@ -128,12 +136,19 @@ impl<const L: Locality> Span<L> {
 impl Span {
     pub(crate) const SHAM: Self = Self::new(0, 0);
 
-    pub(crate) fn local(self, file: SourceFileRef<'_>) -> LocalSpan {
+    pub(crate) const fn local(self, file: SourceFileRef<'_>) -> LocalSpan {
         self.unshift(file.span.start).reinterpret()
     }
 
-    pub(crate) fn is_sham(self) -> bool {
+    pub(crate) const fn is_sham(self) -> bool {
         self.start == 0 && self.end == 0
+    }
+}
+
+#[cfg(test)]
+impl<const L: Locality> fmt::Debug for Span<L> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}..{}", self.start, self.end)
     }
 }
 
@@ -147,13 +162,6 @@ impl LocalSpan {
 
     pub(crate) fn range(self) -> std::ops::Range<usize> {
         self.start as usize..self.end as usize
-    }
-}
-
-#[cfg(test)]
-impl fmt::Debug for Span {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}..{}", self.start, self.end)
     }
 }
 

@@ -38,12 +38,15 @@ fn spanned<T>(start: u32, end: u32, bare: T) -> Spanned<T> {
 
 #[test]
 fn empty_directive() {
-    assert_eq!(parse_directive("", Scope::Base), Err(Error::UnexpectedEndOfInput));
+    assert_eq!(parse_directive("", Scope::Base), Err(Error::UnexpectedEndOfInput(span(0, 0))));
 }
 
 #[test]
 fn blank_directive() {
-    assert_eq!(parse_directive("  \t   ", Scope::Base), Err(Error::UnexpectedEndOfInput));
+    assert_eq!(
+        parse_directive("  \t   ", Scope::Base),
+        Err(Error::UnexpectedEndOfInput(span(6, 6)))
+    );
 }
 
 #[test]
@@ -146,7 +149,10 @@ fn conditional_directive() {
 
 #[test]
 fn empty_conditional_directive() {
-    assert_eq!(parse_directive("[predicate]", Scope::Base), Err(Error::UnexpectedEndOfInput));
+    assert_eq!(
+        parse_directive("[predicate]", Scope::Base),
+        Err(Error::UnexpectedEndOfInput(span(11, 11)))
+    );
 }
 
 #[test]
@@ -163,7 +169,7 @@ fn empty_revision() {
     assert_eq!(
         parse_directive("[] edition: 2021", Scope::Base),
         Ok(Directive {
-            revision: Some(spanned(0, 0, "")), // FIXME: placeholder span
+            revision: Some(spanned(1, 1, "")),
             bare: SimpleDirective::Edition(Edition::Rust2021)
         })
     );
@@ -220,7 +226,10 @@ fn conditional_directives_directive() {
 
 #[test]
 fn unterminated_revision_condition() {
-    assert_eq!(parse_directive("[half-open", Scope::Base), Err(Error::UnexpectedEndOfInput));
+    assert_eq!(
+        parse_directive("[half-open", Scope::Base),
+        Err(Error::UnexpectedEndOfInput(span(10, 10)))
+    );
 }
 
 #[test]

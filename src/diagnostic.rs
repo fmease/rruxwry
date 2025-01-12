@@ -72,8 +72,18 @@ impl Diagnostic {
         let span = span.local(file);
         let (line_number, line, span) = resolve(file.contents, span);
         let column_number = line[..span.start as usize].graphemes(true).count() + 1;
-        let underline_offset = line[..span.start as usize].width();
-        let underline_width = line[span.range()].width();
+
+        struct Underline {
+            string: String,
+            offset: usize,
+            width: usize,
+        }
+
+        let underline = match (line[..span.start as usize].width(), line[span.range()].width()) {
+            (0, 0) => Underline { string: "\\".into(), offset: 0, width: 1 },
+            (offset, 0) => Underline { string: "/\\".into(), offset: offset - 1, width: 2 },
+            (offset, width) => Underline { string: "^".repeat(width), offset, width },
+        };
 
         let p = &mut self.p;
         (|| {
@@ -84,16 +94,10 @@ impl Diagnostic {
             writeln!(p)?;
             writeln!(p, "{line}")?;
 
-            let (underline, underline_width) = match (underline_offset, underline_width) {
-                (0, 0) => ("\\".into(), const { "\\".len() }),
-                (_, 0) => ("/\\".into(), const { "/\\".len() }),
-                (_, width) => ("^".repeat(width), width),
-            };
+            write!(p, "{}", " ".repeat(underline.offset))?;
+            p.with(self.severity.color().on_default().bold(), fmt!("{}", underline.string))?;
 
-            write!(p, "{}", " ".repeat(underline_offset))?;
-            p.with(self.severity.color().on_default().bold(), fmt!("{underline}"))?;
-
-            self.aux_offset = Some(underline_offset + underline_width);
+            self.aux_offset = Some(underline.offset + underline.width);
 
             io::Result::Ok(())
         })()
