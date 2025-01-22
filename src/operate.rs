@@ -62,6 +62,7 @@ fn build_compiletest(
     let mut directives = directive::gather(
         Spanned::sham(crate_.path),
         directive::Scope::Base,
+        directive::Role::Principal,
         flavor,
         flags.build.revision.as_deref(),
         cx,
@@ -113,10 +114,10 @@ fn build_compiletest_auxiliary<'a>(
     // FIXME: unwrap
     let crate_name = CrateName::adjust_and_parse_file_path(&path.bare).unwrap();
 
-    // FIXME: Pass PermitRevisionDeclaration::No
     let mut directives = directive::gather(
         path.as_deref(),
         directive::Scope::Base,
+        directive::Role::Auxiliary,
         flavor,
         flags.build.revision.as_deref(),
         cx,
@@ -270,6 +271,7 @@ fn document_compiletest<'a>(
     let mut directives = directive::gather(
         Spanned::sham(crate_.path),
         scope,
+        directive::Role::Principal,
         flavor,
         flags.build.revision.as_deref(),
         cx,
@@ -344,9 +346,14 @@ fn document_compiletest_auxiliary<'a>(
         DocBackend::Json => directive::Scope::JsonDocCk,
     };
 
-    // FIXME: Pass PermitRevisionDeclaration::No
-    let mut directives =
-        directive::gather(path.as_deref(), scope, flavor, flags.build.revision.as_deref(), cx)?;
+    let mut directives = directive::gather(
+        path.as_deref(),
+        scope,
+        directive::Role::Auxiliary,
+        flavor,
+        flags.build.revision.as_deref(),
+        cx,
+    )?;
 
     let edition = directives.edition.unwrap_or(Edition::RUSTC_DEFAULT);
 

@@ -14,18 +14,20 @@ fn parse_directives<'cx>(
     flavor: Flavor,
     errors: &mut Errors<'cx>,
 ) -> Directives<'cx> {
+    // FIXME: Make role a parameter.
     parse(
         SourceFileRef { path: Path::new(""), contents: source, span: Span::SHAM },
         scope,
+        Role::Principal,
         flavor,
         errors,
     )
 }
 
 fn parse_directive(source: &str, scope: Scope) -> Result<Directive<'_>, Error<'_>> {
-    // FIXME: Make flavor a parameter.
+    // FIXME: Make role and flavor a parameter.
     // FIXME: Actually set the offset to 1 from 0 make room for Span::SHAM.
-    Parser::new(source, scope, Flavor::Vanilla, 0).parse_directive()
+    Parser::new(source, scope, Role::Principal, Flavor::Vanilla, 0).parse_directive()
 }
 
 fn span(start: u32, end: u32) -> Span {
@@ -241,7 +243,7 @@ fn no_directives() {
         Flavor::Vanilla,
         &mut errors,
     );
-    assert_eq!((directives, errors), default());
+    assert_eq!((directives, errors), (Directives::new(Role::Principal), default()));
 }
 
 #[test]
@@ -263,6 +265,7 @@ fn compile_flags_directives() {
             ..default()
         },
         uninstantiated: default(),
+        role: Role::Principal,
     });
     assert_eq!(errors, default());
 }
@@ -291,7 +294,8 @@ fn conditional_directives() {
                 spanned(86, 89, "two"),
                 SimpleDirective::CompileFlags(vec!["-Zparse-crate-root-only"])
             )
-        ]
+        ],
+        role: Role::Principal
     });
     assert_eq!(errors, default());
 }
@@ -321,7 +325,8 @@ fn instantiate_conditional_directives() {
                 },
                 ..default()
             },
-            uninstantiated: default()
+            uninstantiated: default(),
+            role: Role::Principal,
         })
     );
 }
@@ -342,6 +347,7 @@ fn conditional_directives_revision_declared_after_use() {
             spanned(4, 8, "next"),
             SimpleDirective::CompileFlags(vec!["-Znext-solver"])
         )],
+        role: Role::Principal
     });
     assert_eq!(errors, default());
 }
@@ -361,7 +367,8 @@ fn conditional_directives_undeclared_revisions() {
         uninstantiated: vec![
             (spanned(4, 9, "block"), SimpleDirective::CompileFlags(vec!["--crate-type", "lib"])),
             (spanned(47, 51, "wall"), SimpleDirective::Edition(Edition::Rust2021)),
-        ]
+        ],
+        role: Role::Principal
     });
     assert_eq!(
         errors,
@@ -375,7 +382,7 @@ fn conditional_directives_undeclared_revisions() {
 #[test]
 fn undeclared_active_revision() {
     assert_eq!(
-        Directives::default().instantiate(Some("flag")),
+        Directives::new(Role::Principal).instantiate(Some("flag")),
         Err(InstantiationError::UndeclaredActiveRevision {
             revision: "flag",
             available: default()

@@ -19,7 +19,7 @@ use crate::{
     data::{CrateNameRef, Edition},
     diagnostic::{EmittedError, error, fmt, warn},
     source::{LocalSpan, SourceFileRef, Span, Spanned},
-    utility::{Conjunction, ListingExt},
+    utility::{Conjunction, ListingExt, default},
 };
 use std::{
     collections::BTreeSet,
@@ -35,13 +35,14 @@ mod test;
 pub(crate) fn gather<'cx>(
     path: Spanned<&Path>,
     scope: Scope,
+    role: Role,
     flavor: Flavor,
     revision: Option<&str>,
     cx: Context<'cx>,
 ) -> crate::error::Result<Directives<'cx>> {
     // FIXME: The error handling is pretty awkward!
     let mut errors = Errors::default();
-    let directives = parse(cx.map().add(path, cx)?, scope, flavor, &mut errors);
+    let directives = parse(cx.map().add(path, cx)?, scope, role, flavor, &mut errors);
     // FIXME: Certain kinds of errors likely occur in large quantities (e.g., unsupported and unavailable directives).
     //        In order to avoid "terminal spamming", suppress duplicates. We actually used to *coalesce* certain
     //        error kinds but that's not super compatible with source code highlighting.
@@ -56,10 +57,11 @@ pub(crate) fn gather<'cx>(
 fn parse<'cx>(
     file: SourceFileRef<'cx>,
     scope: Scope,
+    role: Role,
     flavor: Flavor,
     errors: &mut Errors<'cx>,
 ) -> Directives<'cx> {
-    let mut directives = Directives::default();
+    let mut directives = Directives::new(role);
 
     let mut index = 0u32;
     // `\r` gets strpped as whitespace later on.
@@ -72,7 +74,7 @@ fn parse<'cx>(
             // FIXME: Add support for hard error, too!
             //        For example, DuplicateRevisions should lead to a hard error (unless `--force`d).
             //        Also, under Flavor::Rruxwry a lot of the warnings should become hard errors, too.
-            match Parser::new(directive, scope, flavor, offset).parse_directive() {
+            match Parser::new(directive, scope, role, flavor, offset).parse_directive() {
                 Ok(directive) => directives.add(directive),
                 Err(error) => errors.insert(error),
             }
@@ -107,6 +109,13 @@ pub(crate) enum Scope {
     JsonDocCk,
 }
 
+#[derive(Clone, Copy)]
+#[cfg_attr(test, derive(PartialEq, Eq, Debug))]
+pub(crate) enum Role {
+    Principal,
+    Auxiliary,
+}
+
 /// The flavor of ui_test-style compiletest directives.
 #[derive(Clone, Copy)]
 pub(crate) enum Flavor {
@@ -117,14 +126,18 @@ pub(crate) enum Flavor {
 // FIXME: If possible get rid of the instantiated vs. uninstantiated separation.
 //        Users can no longer specify multiple revisions at once, so we don't
 //        need to care about "optimizing" unconditional directives.
-#[derive(Default)]
 #[cfg_attr(test, derive(PartialEq, Eq, Debug))]
 pub(crate) struct Directives<'src> {
     instantiated: InstantiatedDirectives<'src>,
     uninstantiated: UninstantiatedDirectives<'src>,
+    role: Role,
 }
 
 impl<'src> Directives<'src> {
+    fn new(role: Role) -> Self {
+        Self { instantiated: default(), uninstantiated: default(), role }
+    }
+
     fn add(&mut self, directive: Directive<'src>) {
         if let SimpleDirective::Revisions(revisions) = directive.bare {
             // FIXME: Emit a warning for this:
@@ -148,7 +161,9 @@ impl<'src> Directives<'src> {
         let directives = mem::take(&mut self.uninstantiated);
 
         if let Some(active_revision) = active_revision {
-            if !revisions.contains(active_revision) {
+            if let Role::Principal = self.role
+                && !revisions.contains(active_revision)
+            {
                 return Err(InstantiationError::UndeclaredActiveRevision {
                     revision: active_revision,
                     available: revisions,
@@ -332,13 +347,14 @@ struct Parser<'src> {
     peeked: Option<Option<(usize, char)>>,
     source: &'src str,
     scope: Scope,
+    role: Role,
     flavor: Flavor,
     offset: u32,
 }
 
 impl<'src> Parser<'src> {
-    fn new(source: &'src str, scope: Scope, flavor: Flavor, offset: u32) -> Self {
-        Self { chars: source.char_indices(), peeked: None, source, scope, flavor, offset }
+    fn new(source: &'src str, scope: Scope, role: Role, flavor: Flavor, offset: u32) -> Self {
+        Self { chars: source.char_indices(), peeked: None, source, scope, role, flavor, offset }
     }
 
     fn parse_directive(mut self) -> Result<Directive<'src>, Error<'src>> {
@@ -462,6 +478,11 @@ impl<'src> Parser<'src> {
             //        ->Error: "directive not permitted // revisions are inherited in aux"
             //        For that, introduce a new parameter: PermitRevisionDeclarations::{Yes, No}.
             "revisions" => {
+                // FIXME: Add a unit test for this!
+                if let Role::Auxiliary = self.role {
+                    return Err(Error::AuxiliaryRevisionDeclaration(source.span));
+                }
+
                 self.parse_separator(Padding::Yes)?; // FIXME: audit AllowPadding
                 let line = self.parse_until_line_break();
                 let mut revisions: Vec<_> = line.bare.split_whitespace().collect();
@@ -797,6 +818,11 @@ impl Error<'_> {
                     it.note(fmt!("available revisions are: {}", list(available)))
                 }
             }
+            Self::AuxiliaryRevisionDeclaration(span) => {
+                error(fmt!("revision declaration in auxiliary file"))
+                    .highlight(span, cx)
+                    .note(fmt!("declared revisions are inherited from the principal file"))
+            }
         }
         .finish();
     }
@@ -812,6 +838,7 @@ enum Error<'src> {
     InvalidValue(&'src str),
     DuplicateRevisions(Span),
     UndeclaredRevision { revision: Spanned<&'src str>, available: BTreeSet<&'src str> },
+    AuxiliaryRevisionDeclaration(Span),
 }
 
 // FIXME: Get rid of this if possible.
