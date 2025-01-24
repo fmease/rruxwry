@@ -76,15 +76,15 @@ fn try_main() -> error::Result {
     )?;
 
     // FIXME: this is awkward ... can we do this inside cli smh (not the ref op ofc)
-    let verbatim_flags = command::VerbatimFlagsBuf {
+    let verbatim = command::VerbatimDataBuf {
         arguments: args.verbatim.iter().map(String::as_str).collect(),
-        environment: Vec::new(),
+        variables: Vec::new(),
     };
     // FIXME: this is awkward ... can we do this inside cli smh (not the ref op ofc)
     let flags = command::Flags {
         toolchain: args.toolchain.as_deref(),
         build: &args.build,
-        verbatim: verbatim_flags.as_ref(),
+        verbatim: verbatim.as_ref(),
         debug: &args.debug,
     };
 

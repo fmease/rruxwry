@@ -55,7 +55,11 @@ fn blank_directive() {
 fn unavailable_htmldocck_directive_base() {
     assert_eq!(
         parse_directive("!has", Scope::Base),
-        Err(Error::UnavailableDirective(spanned(0, 4, "!has")))
+        Err(Error::UnavailableDirective {
+            name: spanned(0, 4, "!has"),
+            actual: Scope::Base.into(),
+            expected: Scope::HtmlDocCk.into(), // FIXME: This should be "Rustdoc"
+        })
     );
 }
 
@@ -63,7 +67,11 @@ fn unavailable_htmldocck_directive_base() {
 fn unavailable_rruxwry_directive_base() {
     assert_eq!(
         parse_directive("crate inner {", Scope::Base),
-        Err(Error::UnavailableDirective(spanned(0, 5, "crate")))
+        Err(Error::UnavailableDirective {
+            name: spanned(0, 5, "crate"),
+            actual: Flavor::Vanilla.into(),
+            expected: Flavor::Rruxwry.into(),
+        })
     );
 }
 
@@ -71,7 +79,11 @@ fn unavailable_rruxwry_directive_base() {
 fn unavailable_jsondocck_directive_htmldocck() {
     assert_eq!(
         parse_directive("is", Scope::HtmlDocCk),
-        Err(Error::UnavailableDirective(spanned(0, 2, "is")))
+        Err(Error::UnavailableDirective {
+            name: spanned(0, 2, "is"),
+            actual: Scope::HtmlDocCk.into(),
+            expected: Scope::HtmlDocCk.into(), // FIXME: Should be Scope::JsonDocCk
+        })
     );
 }
 
@@ -94,7 +106,7 @@ fn unknown_directive() {
 #[test]
 fn build_aux_docs_directive() {
     assert_eq!(
-        parse_directive("build-aux-docs", Scope::Base),
+        parse_directive("build-aux-docs", Scope::HtmlDocCk),
         Ok(Directive { revision: None, bare: SimpleDirective::BuildAuxDocs })
     );
 }
@@ -115,7 +127,7 @@ fn edition_directive_no_colon() {
     // FIXME: This should only warn (under -@) and discard the whole directive
     assert_eq!(
         parse_directive("edition 2018", Scope::Base),
-        Err(Error::UnexpectedToken { found: spanned(8, 9, '2'), expected: ':' })
+        Err(Error::UnexpectedToken { actual: spanned(8, 9, '2'), expected: ':' })
     );
 }
 
@@ -196,7 +208,7 @@ fn quoted_revision_not_unquoted() {
         parse_directive("[\"literally\"] compile-flags:", Scope::Base),
         Ok(Directive {
             revision: Some(spanned(1, 12, "\"literally\"")),
-            bare: SimpleDirective::CompileFlags(Vec::new())
+            bare: SimpleDirective::Flags(Vec::new())
         })
     );
 }
@@ -208,7 +220,7 @@ fn commas_inside_revision() {
         parse_directive("[one,two] compile-flags:", Scope::Base),
         Ok(Directive {
             revision: Some(spanned(1, 8, "one,two")),
-            bare: SimpleDirective::CompileFlags(Vec::new())
+            bare: SimpleDirective::Flags(Vec::new())
         })
     );
 }
@@ -258,7 +270,7 @@ fn compile_flags_directives() {
     );
     assert_eq!(directives, Directives {
         instantiated: InstantiatedDirectives {
-            verbatim_flags: VerbatimFlagsBuf {
+            verbatim: VerbatimDataBuf {
                 arguments: vec!["--crate-type", "lib", "--edition=2021"],
                 ..default()
             },
@@ -285,15 +297,12 @@ fn conditional_directives() {
     assert_eq!(directives, Directives {
         instantiated: InstantiatedDirectives {
             revisions: ["one", "two"].into(),
-            verbatim_flags: VerbatimFlagsBuf { arguments: vec!["--crate-type=lib"], ..default() },
+            verbatim: VerbatimDataBuf { arguments: vec!["--crate-type=lib"], ..default() },
             ..default()
         },
         uninstantiated: vec![
             (spanned(27, 30, "one"), SimpleDirective::Edition(Edition::Rust2018)),
-            (
-                spanned(86, 89, "two"),
-                SimpleDirective::CompileFlags(vec!["-Zparse-crate-root-only"])
-            )
+            (spanned(86, 89, "two"), SimpleDirective::Flags(vec!["-Zparse-crate-root-only"]))
         ],
         role: Role::Principal
     });
@@ -319,7 +328,7 @@ fn instantiate_conditional_directives() {
         Ok(Directives {
             instantiated: InstantiatedDirectives {
                 revisions: default(),
-                verbatim_flags: VerbatimFlagsBuf {
+                verbatim: VerbatimDataBuf {
                     arguments: vec!["--crate-type=lib", "-Zparse-crate-root-only"],
                     ..default()
                 },
@@ -345,7 +354,7 @@ fn conditional_directives_revision_declared_after_use() {
         instantiated: InstantiatedDirectives { revisions: ["classic", "next"].into(), ..default() },
         uninstantiated: vec![(
             spanned(4, 8, "next"),
-            SimpleDirective::CompileFlags(vec!["-Znext-solver"])
+            SimpleDirective::Flags(vec!["-Znext-solver"])
         )],
         role: Role::Principal
     });
@@ -365,7 +374,7 @@ fn conditional_directives_undeclared_revisions() {
     assert_eq!(directives, Directives {
         instantiated: default(),
         uninstantiated: vec![
-            (spanned(4, 9, "block"), SimpleDirective::CompileFlags(vec!["--crate-type", "lib"])),
+            (spanned(4, 9, "block"), SimpleDirective::Flags(vec!["--crate-type", "lib"])),
             (spanned(47, 51, "wall"), SimpleDirective::Edition(Edition::Rust2021)),
         ],
         role: Role::Principal

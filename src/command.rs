@@ -54,7 +54,7 @@ pub(super) fn compile(
 
     cmd.set_internals_mode(flags.build);
 
-    cmd.set_verbatim_flags(flags.verbatim);
+    cmd.set_verbatim_data(flags.verbatim);
 
     if let Some(flags) = environment::rustc_flags() {
         cmd.args(flags);
@@ -134,7 +134,7 @@ pub(super) fn document(
 
     cmd.set_internals_mode(flags.build);
 
-    cmd.set_verbatim_flags(flags.verbatim);
+    cmd.set_verbatim_data(flags.verbatim);
 
     if let Some(flags) = environment::rustdoc_flags() {
         cmd.args(flags);
@@ -346,14 +346,14 @@ impl<'a> Command<'a> {
         }
     }
 
-    fn set_verbatim_flags(&mut self, flags: VerbatimFlags<'_>) {
-        for (key, value) in flags.environment {
+    fn set_verbatim_data(&mut self, verbatim: VerbatimData<'_>) {
+        for (key, value) in verbatim.variables {
             match value {
                 Some(value) => self.env(key, value),
                 None => self.env_remove(key),
             };
         }
-        self.args(flags.arguments);
+        self.args(verbatim.arguments);
     }
 }
 
@@ -427,34 +427,36 @@ pub(crate) enum ExternCrate<'src> {
 pub(crate) struct Flags<'a> {
     pub(crate) toolchain: Option<&'a OsStr>,
     pub(crate) build: &'a interface::BuildFlags,
-    pub(crate) verbatim: VerbatimFlags<'a>,
+    pub(crate) verbatim: VerbatimData<'a>,
     pub(crate) debug: &'a interface::DebugFlags,
 }
 
-// FIXME: bad name, env is not "flags"
 #[derive(Clone, Copy)]
-pub(crate) struct VerbatimFlags<'a> {
+pub(crate) struct VerbatimData<'a> {
+    /// Program arguments to be passed verbatim.
     pub(crate) arguments: &'a [&'a str],
-    pub(crate) environment: &'a [(&'a str, Option<&'a str>)],
+    /// Environment variables to be passed verbatim.
+    pub(crate) variables: &'a [(&'a str, Option<&'a str>)],
 }
 
-// FIXME: bad name, env is not "flags"
 #[derive(Clone, Default)]
 #[cfg_attr(test, derive(PartialEq, Eq, Debug))]
-pub(crate) struct VerbatimFlagsBuf<'a> {
+pub(crate) struct VerbatimDataBuf<'a> {
+    /// Program arguments to be passed verbatim.
     pub(crate) arguments: Vec<&'a str>,
-    pub(crate) environment: Vec<(&'a str, Option<&'a str>)>,
+    /// Environment variables to be passed verbatim.
+    pub(crate) variables: Vec<(&'a str, Option<&'a str>)>,
 }
 
-impl<'a> VerbatimFlagsBuf<'a> {
-    pub(crate) fn extended(mut self, other: VerbatimFlags<'a>) -> Self {
+impl<'a> VerbatimDataBuf<'a> {
+    pub(crate) fn extended(mut self, other: VerbatimData<'a>) -> Self {
         self.arguments.extend_from_slice(other.arguments);
-        self.environment.extend_from_slice(other.environment);
+        self.variables.extend_from_slice(other.variables);
         self
     }
 
-    pub(crate) fn as_ref(&self) -> VerbatimFlags<'_> {
-        VerbatimFlags { arguments: &self.arguments, environment: &self.environment }
+    pub(crate) fn as_ref(&self) -> VerbatimData<'_> {
+        VerbatimData { arguments: &self.arguments, variables: &self.variables }
     }
 }
 

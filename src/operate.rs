@@ -77,7 +77,7 @@ fn build_compiletest(
         .map(|dep| build_compiletest_auxiliary(dep, &aux_base_path, flags, flavor, cx))
         .collect::<Result<_>>()?;
 
-    let verbatim_flags = mem::take(&mut directives.verbatim_flags).extended(flags.verbatim);
+    let verbatim_flags = mem::take(&mut directives.verbatim).extended(flags.verbatim);
     let flags = Flags { verbatim: verbatim_flags.as_ref(), ..flags };
 
     command::compile(
@@ -125,7 +125,7 @@ fn build_compiletest_auxiliary<'a>(
 
     let edition = directives.edition.unwrap_or(Edition::RUSTC_DEFAULT);
 
-    let verbatim_flags = mem::take(&mut directives.verbatim_flags).extended(flags.verbatim);
+    let verbatim_flags = mem::take(&mut directives.verbatim).extended(flags.verbatim);
     let flags = Flags { verbatim: verbatim_flags.as_ref(), ..flags };
 
     command::compile(
@@ -296,7 +296,7 @@ fn document_compiletest<'a>(
         })
         .collect::<Result<_>>()?;
 
-    let verbatim_flags = mem::take(&mut directives.verbatim_flags).extended(flags.verbatim);
+    let verbatim_flags = mem::take(&mut directives.verbatim).extended(flags.verbatim);
     let flags = Flags { verbatim: verbatim_flags.as_ref(), ..flags };
 
     command::document(
@@ -357,7 +357,7 @@ fn document_compiletest_auxiliary<'a>(
 
     let edition = directives.edition.unwrap_or(Edition::RUSTC_DEFAULT);
 
-    let verbatim_flags = mem::take(&mut directives.verbatim_flags).extended(flags.verbatim);
+    let verbatim_flags = mem::take(&mut directives.verbatim).extended(flags.verbatim);
     let flags = Flags { verbatim: verbatim_flags.as_ref(), ..flags };
 
     command::compile(
