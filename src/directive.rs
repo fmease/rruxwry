@@ -21,13 +21,7 @@ use crate::{
     source::{LocalSpan, SourceFileRef, Span, Spanned},
     utility::{Conjunction, ListingExt, default},
 };
-use std::{
-    collections::BTreeSet,
-    fmt, mem,
-    ops::{Deref, DerefMut},
-    path::Path,
-    str::CharIndices,
-};
+use std::{collections::BTreeSet, fmt, mem, path::Path, str::CharIndices};
 
 #[cfg(test)]
 mod test;
@@ -39,7 +33,7 @@ pub(crate) fn gather<'cx>(
     flavor: Flavor,
     revision: Option<&str>,
     cx: Context<'cx>,
-) -> crate::error::Result<Directives<'cx>> {
+) -> crate::error::Result<InstantiatedDirectives<'cx>> {
     // FIXME: The error handling is pretty awkward!
     let mut errors = Errors::default();
     let directives = parse(cx.map().add(path, cx)?, scope, role, flavor, &mut errors);
@@ -129,7 +123,8 @@ pub(crate) enum Flavor {
 //        Users can no longer specify multiple revisions at once, so we don't
 //        need to care about "optimizing" unconditional directives.
 #[cfg_attr(test, derive(PartialEq, Eq, Debug))]
-pub(crate) struct Directives<'src> {
+struct Directives<'src> {
+    revisions: BTreeSet<&'src str>,
     instantiated: InstantiatedDirectives<'src>,
     uninstantiated: UninstantiatedDirectives<'src>,
     role: Role,
@@ -137,7 +132,7 @@ pub(crate) struct Directives<'src> {
 
 impl<'src> Directives<'src> {
     fn new(role: Role) -> Self {
-        Self { instantiated: default(), uninstantiated: default(), role }
+        Self { revisions: default(), instantiated: default(), uninstantiated: default(), role }
     }
 
     fn add(&mut self, directive: Directive<'src>) {
@@ -150,7 +145,7 @@ impl<'src> Directives<'src> {
         } else {
             // We immediately adjoin unconditional directives to prevent needlessly
             // instantiating them over and over later in `Self::instantiate`.
-            self.adjoin(directive.bare);
+            self.instantiated.adjoin(directive.bare);
         }
     }
 
@@ -158,7 +153,7 @@ impl<'src> Directives<'src> {
     fn instantiate(
         mut self,
         active_revision: Option<&str>,
-    ) -> Result<Self, InstantiationError<'src, '_>> {
+    ) -> Result<InstantiatedDirectives<'src>, InstantiationError<'src, '_>> {
         let revisions = mem::take(&mut self.revisions);
         let directives = mem::take(&mut self.uninstantiated);
 
@@ -174,28 +169,14 @@ impl<'src> Directives<'src> {
 
             for (revision, directive) in directives {
                 if revision.bare == active_revision {
-                    self.adjoin(directive);
+                    self.instantiated.adjoin(directive);
                 }
             }
         } else if !revisions.is_empty() {
             return Err(InstantiationError::MissingActiveRevision { available: revisions });
         }
 
-        Ok(self)
-    }
-}
-
-impl<'src> Deref for Directives<'src> {
-    type Target = InstantiatedDirectives<'src>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.instantiated
-    }
-}
-
-impl DerefMut for Directives<'_> {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.instantiated
+        Ok(self.instantiated)
     }
 }
 
@@ -234,7 +215,6 @@ pub(crate) struct InstantiatedDirectives<'src> {
     pub(crate) build_aux_docs: bool,
     pub(crate) edition: Option<Edition>,
     pub(crate) verbatim: VerbatimDataBuf<'src>,
-    revisions: BTreeSet<&'src str>,
 }
 
 impl<'src> InstantiatedDirectives<'src> {

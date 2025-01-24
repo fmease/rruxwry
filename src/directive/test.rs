@@ -269,6 +269,7 @@ fn compile_flags_directives() {
         &mut errors,
     );
     assert_eq!(directives, Directives {
+        revisions: default(),
         instantiated: InstantiatedDirectives {
             verbatim: VerbatimDataBuf {
                 arguments: vec!["--crate-type", "lib", "--edition=2021"],
@@ -295,8 +296,8 @@ fn conditional_directives() {
         &mut errors,
     );
     assert_eq!(directives, Directives {
+        revisions: ["one", "two"].into(),
         instantiated: InstantiatedDirectives {
-            revisions: ["one", "two"].into(),
             verbatim: VerbatimDataBuf { arguments: vec!["--crate-type=lib"], ..default() },
             ..default()
         },
@@ -325,17 +326,12 @@ fn instantiate_conditional_directives() {
     assert_eq!(errors, default());
     assert_eq!(
         directives,
-        Ok(Directives {
-            instantiated: InstantiatedDirectives {
-                revisions: default(),
-                verbatim: VerbatimDataBuf {
-                    arguments: vec!["--crate-type=lib", "-Zparse-crate-root-only"],
-                    ..default()
-                },
+        Ok(InstantiatedDirectives {
+            verbatim: VerbatimDataBuf {
+                arguments: vec!["--crate-type=lib", "-Zparse-crate-root-only"],
                 ..default()
             },
-            uninstantiated: default(),
-            role: Role::Principal,
+            ..default()
         })
     );
 }
@@ -351,7 +347,8 @@ fn conditional_directives_revision_declared_after_use() {
         &mut errors,
     );
     assert_eq!(directives, Directives {
-        instantiated: InstantiatedDirectives { revisions: ["classic", "next"].into(), ..default() },
+        revisions: ["classic", "next"].into(),
+        instantiated: default(),
         uninstantiated: vec![(
             spanned(4, 8, "next"),
             SimpleDirective::Flags(vec!["-Znext-solver"])
@@ -372,6 +369,7 @@ fn conditional_directives_undeclared_revisions() {
         &mut errors,
     );
     assert_eq!(directives, Directives {
+        revisions: default(),
         instantiated: default(),
         uninstantiated: vec![
             (spanned(4, 9, "block"), SimpleDirective::Flags(vec!["--crate-type", "lib"])),
