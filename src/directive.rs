@@ -16,7 +16,7 @@
 use crate::{
     command::{ExternCrate, VerbatimDataBuf},
     context::Context,
-    data::{CrateNameRef, Edition},
+    data::CrateNameRef,
     diagnostic::{EmittedError, error, fmt, warn},
     source::{LocalSpan, SourceFileRef, Span, Spanned},
     utility::{Conjunction, ListingExt, default},
@@ -213,7 +213,7 @@ impl InstantiationError<'_, '_> {
 pub(crate) struct InstantiatedDirectives<'src> {
     pub(crate) dependencies: Vec<ExternCrate<'src>>,
     pub(crate) build_aux_docs: bool,
-    pub(crate) edition: Option<Edition>,
+    pub(crate) edition: Option<Spanned<&'src str>>,
     pub(crate) verbatim: VerbatimDataBuf<'src>,
 }
 
@@ -270,7 +270,7 @@ enum SimpleDirective<'src> {
     },
     BuildAuxDocs,
     Flags(Vec<&'src str>),
-    Edition(Edition),
+    Edition(Spanned<&'src str>),
     Revisions(Vec<&'src str>),
     RustcEnv {
         key: &'src str,
@@ -474,17 +474,13 @@ impl<'src> Parser<'src> {
                 return self.parse_flags().map(Some);
             }
             "edition" => {
-                self.parse_separator(Padding::Yes)?; // FIXME: audit AllowPadding (before)
+                // FIXME: To be fully "compliant", under Flavor::Vanilla this should be
+                //        "PaddingStart::NoIgnoreDirectiveEntirelyAndWarn, PaddingEnd::Yes"
+                self.parse_separator(Padding::Yes)?;
 
-                // We're doing this two-step process — (greedy) lexing followed by validation —
-                // to be able to provide a better error message.
-                let edition = self.expect_many(|char| !char.is_whitespace())?.bare;
-                // FIXME: Don't actually try to parse the edition!
-                let Ok(edition) = edition.parse() else {
-                    return Err(Error::InvalidValue(edition));
-                };
-
-                SimpleDirective::Edition(edition)
+                // While tempting, don't validate the edition.
+                // Indeed, we parse until a line break and include things like whitespace!
+                SimpleDirective::Edition(self.parse_until_line_break())
             }
             // FIXME: Warn/error if we're inside of an auxiliary file.
             //        ->Warn: "directive gets ignored // revisions are inherited in aux"

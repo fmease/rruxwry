@@ -2,6 +2,7 @@
 //!
 //! The high-level build operations are defined in [`crate::operate`].
 
+// FIXME: Stop doing that, it's unnecessary and wasted effort:
 // Note that we try to avoid generating unnecessary flags where possible even if that means
 // doing more work on our side. The main motivation for this is being able to just copy/paste
 // the commands printed by `--verbose` for use in GitHub discussions without requiring any
@@ -10,7 +11,7 @@
 //        as well as those passed via the `RUST{,DOC}FLAGS` env vars.
 
 use crate::{
-    data::{CrateName, CrateNameRef, CrateType, DocBackend, Edition, Identity},
+    data::{self, CrateName, CrateNameRef, CrateType, DocBackend, Identity},
     diagnostic::{self, debug},
     interface,
     source::Spanned,
@@ -32,7 +33,7 @@ pub(super) fn compile(
     path: &Path,
     crate_name: CrateNameRef<'_>,
     crate_type: CrateType,
-    edition: Edition,
+    edition: Option<Edition<'_>>,
     extern_crates: &[ExternCrate<'_>],
     flags: Flags<'_>,
     strictness: Strictness,
@@ -74,7 +75,7 @@ pub(super) fn document(
     path: &Path,
     crate_name: CrateNameRef<'_>,
     crate_type: CrateType,
-    edition: Edition,
+    edition: Option<Edition<'_>>,
     extern_crates: &[ExternCrate<'_>],
     flags: Flags<'_>,
     // FIXME: temporary; integrate into flags: Flags<D> above (D discriminant)
@@ -247,16 +248,22 @@ impl<'a> Command<'a> {
         self.arg(crate_type.to_str());
     }
 
-    fn set_edition(&mut self, edition: Edition) {
-        if edition == Edition::RUSTC_DEFAULT {
-            return;
-        }
-        if !edition.is_stable() {
-            self.uses_unstable_options = true;
-        }
+    fn set_edition(&mut self, edition: Option<Edition<'_>>) {
+        let Some(edition) = edition else { return };
 
         self.arg("--edition");
-        self.arg(edition.to_str());
+
+        let edition = match edition {
+            Edition::Parsed(edition) => {
+                if !edition.is_stable() {
+                    self.uses_unstable_options = true;
+                }
+                edition.to_str()
+            }
+            Edition::Raw(edition) => edition,
+        };
+
+        self.arg(edition);
     }
 
     fn set_extern_crates(&mut self, extern_crates: &[ExternCrate<'_>]) {
@@ -463,4 +470,9 @@ impl<'a> VerbatimDataBuf<'a> {
 pub(crate) enum Strictness {
     Strict,
     Lenient,
+}
+
+pub(crate) enum Edition<'a> {
+    Parsed(data::Edition),
+    Raw(&'a str),
 }

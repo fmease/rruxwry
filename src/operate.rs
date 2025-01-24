@@ -6,9 +6,9 @@
 // FIXME: Create test for `//@ compile-flags: --test`.
 
 use crate::{
-    command::{self, ExternCrate, Flags, Strictness},
+    command::{self, Edition, ExternCrate, Flags, Strictness},
     context::Context,
-    data::{CrateName, CrateNameCow, CrateNameRef, CrateType, DocBackend, Edition},
+    data::{self, CrateName, CrateNameCow, CrateNameRef, CrateType, DocBackend},
     directive,
     error::Result,
     source::Spanned,
@@ -21,7 +21,7 @@ pub(crate) struct Crate<'a> {
     pub(crate) path: &'a Path,
     pub(crate) name: CrateNameRef<'a>,
     pub(crate) type_: CrateType,
-    pub(crate) edition: Edition,
+    pub(crate) edition: data::Edition,
 }
 
 pub(crate) fn build(
@@ -41,7 +41,7 @@ fn build_default(crate_: Crate<'_>, flags: Flags<'_>) -> Result {
         crate_.path,
         crate_.name,
         crate_.type_,
-        crate_.edition,
+        Some(Edition::Parsed(crate_.edition)),
         extern_prelude_for(crate_.type_),
         flags,
         Strictness::Lenient,
@@ -55,10 +55,6 @@ fn build_compiletest(
     flavor: directive::Flavor,
     cx: Context<'_>,
 ) -> Result {
-    // FIXME: Respect the CLI edition, it should override `//@ edition`. It's okay that
-    //        it would lead to a failure on e.g., `//@ compile-flags: --edition`.
-    let _ = crate_.edition;
-
     let mut directives = directive::gather(
         Spanned::sham(crate_.path),
         directive::Scope::Base,
@@ -77,15 +73,22 @@ fn build_compiletest(
         .map(|dep| build_compiletest_auxiliary(dep, &aux_base_path, flags, flavor, cx))
         .collect::<Result<_>>()?;
 
-    let verbatim_flags = mem::take(&mut directives.verbatim).extended(flags.verbatim);
-    let flags = Flags { verbatim: verbatim_flags.as_ref(), ..flags };
+    let verbatim = mem::take(&mut directives.verbatim).extended(flags.verbatim);
+    let flags = Flags { verbatim: verbatim.as_ref(), ..flags };
+
+    // FIXME: Should we generally emit a warning when CLI tests anything that *may* lead to clashes down the line?
+    //        E.g., on `--crate-name`, `--crate-type` and `--edition`? And what about CLI/env verbatim flags?
+
+    // FIXME: Once this one is an `Option<Edition>` instead, so we can tell if it was explicitly set by the user,
+    //        use it to overwrite `directives.edition`.
+    let _ = crate_.edition;
 
     command::compile(
         crate_.path,
         crate_.name,
         // FIXME: Once we support `//@ proc-macro` we need to honor the implicit crate_type==Lib (of the host) here.
         crate_.type_,
-        directives.edition.unwrap_or(Edition::RUSTC_DEFAULT),
+        directives.edition.map(|edition| Edition::Raw(edition.bare)),
         // FIXME: Once we support `//@ proc-macro` we need to add `proc_macro` (to the client) similar to `extern_prelude_for` here.
         &dependencies,
         flags,
@@ -123,10 +126,8 @@ fn build_compiletest_auxiliary<'a>(
         cx,
     )?;
 
-    let edition = directives.edition.unwrap_or(Edition::RUSTC_DEFAULT);
-
-    let verbatim_flags = mem::take(&mut directives.verbatim).extended(flags.verbatim);
-    let flags = Flags { verbatim: verbatim_flags.as_ref(), ..flags };
+    let verbatim = mem::take(&mut directives.verbatim).extended(flags.verbatim);
+    let flags = Flags { verbatim: verbatim.as_ref(), ..flags };
 
     command::compile(
         &path.bare,
@@ -134,7 +135,7 @@ fn build_compiletest_auxiliary<'a>(
         // FIXME: Verify this works with `@compile-flags:--crate-type=proc-macro`
         // FIXME: I don't think it works rn
         CrateType::Lib,
-        edition,
+        directives.edition.map(|edition| Edition::Raw(edition.bare)),
         &[],
         flags,
         Strictness::Strict,
@@ -184,7 +185,7 @@ fn document_default<'a>(
         crate_.path,
         crate_.name,
         crate_.type_,
-        crate_.edition,
+        Some(Edition::Parsed(crate_.edition)),
         extern_prelude_for(crate_.type_),
         flags,
         doc_flags,
@@ -204,7 +205,7 @@ fn document_cross_crate(
         crate_.path,
         crate_.name,
         crate_.type_.to_non_executable(),
-        crate_.edition,
+        Some(Edition::Parsed(crate_.edition)),
         extern_prelude_for(crate_.type_),
         flags,
         Strictness::Lenient,
@@ -229,7 +230,7 @@ fn document_cross_crate(
         &dependent_crate_path,
         dependent_crate_name.as_ref(),
         default(),
-        crate_.edition,
+        Some(Edition::Parsed(crate_.edition)),
         &[ExternCrate::Named { name: crate_.name.as_ref(), path: None }],
         flags,
         doc_flags,
@@ -258,10 +259,6 @@ fn document_compiletest<'a>(
     flavor: directive::Flavor,
     cx: Context<'_>,
 ) -> Result<CrateNameCow<'a>> {
-    // FIXME: Respect the CLI edition, it should override `//@ edition`. It's okay that
-    //        it would lead to a failure on e.g., `//@ compile-flags: --edition`.
-    let _ = crate_.edition;
-
     // FIXME: Do we actually want to treat !`-j` as `rustdoc/` (Scope::HtmlDocCk)
     //        instead of `rustdoc-ui/` ("Scope::Rustdoc")
     let scope = match doc_flags.backend {
@@ -296,15 +293,22 @@ fn document_compiletest<'a>(
         })
         .collect::<Result<_>>()?;
 
-    let verbatim_flags = mem::take(&mut directives.verbatim).extended(flags.verbatim);
-    let flags = Flags { verbatim: verbatim_flags.as_ref(), ..flags };
+    let verbatim = mem::take(&mut directives.verbatim).extended(flags.verbatim);
+    let flags = Flags { verbatim: verbatim.as_ref(), ..flags };
+
+    // FIXME: Should we generally emit a warning when CLI tests anything that *may* lead to clashes down the line?
+    //        E.g., on `--crate-name`, `--crate-type` and `--edition`? And what about CLI/env verbatim flags?
+
+    // FIXME: Once this one is an `Option<Edition>` instead, so we can tell if it was explicitly set by the user,
+    //        use it to overwrite `directives.edition`.
+    let _ = crate_.edition;
 
     command::document(
         crate_.path,
         crate_.name,
         // FIXME: Once we support `//@ proc-macro` we need to honor the implicit crate_type==Lib (of the host) here.
         crate_.type_,
-        directives.edition.unwrap_or(Edition::RUSTC_DEFAULT),
+        directives.edition.map(|edition| Edition::Raw(edition.bare)),
         // FIXME: Once we support `//@ proc-macro` we need to add `proc_macro` (to the client) similar to `extern_prelude_for` here.
         &dependencies,
         flags,
@@ -355,10 +359,8 @@ fn document_compiletest_auxiliary<'a>(
         cx,
     )?;
 
-    let edition = directives.edition.unwrap_or(Edition::RUSTC_DEFAULT);
-
-    let verbatim_flags = mem::take(&mut directives.verbatim).extended(flags.verbatim);
-    let flags = Flags { verbatim: verbatim_flags.as_ref(), ..flags };
+    let verbatim = mem::take(&mut directives.verbatim).extended(flags.verbatim);
+    let flags = Flags { verbatim: verbatim.as_ref(), ..flags };
 
     command::compile(
         &path.bare,
@@ -366,7 +368,7 @@ fn document_compiletest_auxiliary<'a>(
         // FIXME: Verify this works with `@compile-flags:--crate-type=proc-macro`
         // FIXME: I don't think it works rn
         CrateType::Lib,
-        edition,
+        directives.edition.map(|edition| Edition::Raw(edition.bare)),
         &[],
         flags,
         Strictness::Strict,
@@ -380,7 +382,7 @@ fn document_compiletest_auxiliary<'a>(
             // FIXME: Verify this works with `@compile-flags:--crate-type=proc_macro`
             // FIXME: I don't think it works rn
             default(),
-            edition,
+            directives.edition.map(|edition| Edition::Raw(edition.bare)),
             &[],
             flags,
             doc_flags,
@@ -449,10 +451,10 @@ pub(crate) enum Mode {
 }
 
 impl Mode {
-    pub(crate) fn edition(self) -> Edition {
+    pub(crate) fn edition(self) -> data::Edition {
         match self {
-            Self::Compiletest => Edition::RUSTC_DEFAULT,
-            Self::Other => Edition::LATEST_STABLE,
+            Self::Compiletest => data::Edition::RUSTC_DEFAULT,
+            Self::Other => data::Edition::LATEST_STABLE,
         }
     }
 }

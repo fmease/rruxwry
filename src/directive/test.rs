@@ -184,7 +184,7 @@ fn empty_revision() {
         parse_directive("[] edition: 2021", Scope::Base),
         Ok(Directive {
             revision: Some(spanned(1, 1, "")),
-            bare: SimpleDirective::Edition(Edition::Rust2021)
+            bare: SimpleDirective::Edition(spanned(12, 16, "2021"))
         })
     );
 }
@@ -196,7 +196,7 @@ fn padded_revision_not_trimmed() {
         parse_directive(" [  padded \t] edition: 2015", Scope::Base),
         Ok(Directive {
             revision: Some(spanned(2, 12, "  padded \t")),
-            bare: SimpleDirective::Edition(Edition::Rust2015)
+            bare: SimpleDirective::Edition(spanned(23, 27, "2015"))
         })
     );
 }
@@ -302,7 +302,7 @@ fn conditional_directives() {
             ..default()
         },
         uninstantiated: vec![
-            (spanned(27, 30, "one"), SimpleDirective::Edition(Edition::Rust2018)),
+            (spanned(27, 30, "one"), SimpleDirective::Edition(spanned(41, 45, "2018"))),
             (spanned(86, 89, "two"), SimpleDirective::Flags(vec!["-Zparse-crate-root-only"]))
         ],
         role: Role::Principal
@@ -373,7 +373,7 @@ fn conditional_directives_undeclared_revisions() {
         instantiated: default(),
         uninstantiated: vec![
             (spanned(4, 9, "block"), SimpleDirective::Flags(vec!["--crate-type", "lib"])),
-            (spanned(47, 51, "wall"), SimpleDirective::Edition(Edition::Rust2021)),
+            (spanned(47, 51, "wall"), SimpleDirective::Edition(spanned(62, 66, "2021"))),
         ],
         role: Role::Principal
     });
