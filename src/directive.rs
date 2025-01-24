@@ -193,14 +193,23 @@ impl InstantiationError<'_, '_> {
 
         // FIXME: Improve the phrasing of these diagnostics!
         match self {
-            // FIXME: Emit a better error if `available.is_empty()`
             Self::UndeclaredActiveRevision { revision, available } => {
-                error(fmt!("undeclared revision `{revision}`"))
-                    .note(fmt!("available revisions are: {}", list(available)))
-                    .finish()
+                // FIXME: Instead of saying "requested on the command line", .highlight()
+                //        the program args instead. Also, avoid violating abstraction layers
+                //        as we do right now (this module shouldn't know about the CLI)!
+                let it =
+                    error(fmt!("undeclared revision `{revision}` (requested on the command line)"));
+                let it = match available.len() {
+                    0 => it
+                        .note(fmt!("the crate does not declare any revisions"))
+                        .help(fmt!("remove `--rev {revision}` from the invocation")),
+                    _ => it.note(fmt!("available revisions are: {}", list(available))),
+                };
+                it.finish()
             }
-            // FIXME: Suggest `--rev` without it resulting in an abstraction layer violation.
+            // Avoid violating abstraction layers (this module shouldn't know about the CLI)!
             Self::MissingActiveRevision { available } => error(fmt!("no revision specified"))
+                .help(fmt!("specifiy a revision with `--rev <NAME>` on the command line"))
                 .note(fmt!("available revisions are: {}", list(available)))
                 .finish(),
         }
