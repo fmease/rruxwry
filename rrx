@@ -1,4 +1,4 @@
 #!/usr/bin/env sh
 # Convenience Cargo wrapper for local development.
 
-cargo run --manifest-path="$( dirname $( realpath $0 ) )/Cargo.toml" -- "$@"
+cargo run --manifest-path="$( dirname "$( realpath "$0" )" )/Cargo.toml" -- "$@"
