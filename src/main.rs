@@ -22,7 +22,10 @@ use context::Context;
 use data::{CrateNameBuf, CrateNameCow, CrateType, Edition};
 use diagnostic::{bug, error, fmt};
 use source::Spanned;
-use std::{path::Path, process::ExitCode};
+use std::{
+    path::{Path, PathBuf},
+    process::ExitCode,
+};
 
 mod attribute;
 mod command;
@@ -93,22 +96,27 @@ fn try_main() -> error::Result {
 
     match args.command {
         interface::Command::Build { run, mode } => {
-            operate::build(mode, crate_, flags, cx)?;
+            let data = operate::build(mode, crate_, flags, cx)?;
 
             if run {
-                command::execute(Path::new(".").join(crate_name.as_str()), flags.debug).map_err(
-                    |error| {
-                        self::error(fmt!("failed to run the built binary"))
-                            .note(fmt!("{error}"))
-                            .finish()
-                    },
-                )?;
+                let mut path = PathBuf::from(".");
+                // FIXME: This isn't correct in the presence of `//@ compile-flags: --crate-name alias` and `-@`.
+                //        Just set `-o` to the input file path and drop the `#![crate_name]` extraction code.
+                path.push(crate_name.as_str());
+                path.set_extension(std::env::consts::EXE_EXTENSION);
+                command::execute(path, data.verbatim.as_ref(), flags.debug).map_err(|error| {
+                    self::error(fmt!("failed to run the built binary"))
+                        .note(fmt!("{error}"))
+                        .finish()
+                })?;
             }
         }
         interface::Command::Doc { open, mode, flags: doc_flags } => {
             let crate_name = operate::document(mode, crate_, flags, &doc_flags, cx)?;
 
             if open {
+                // FIXME: This isn't correct in the presence of `//@ compile-flags: --crate-name alias` and `-@`.
+                //        Just set `-o` to the input file path and drop the `#![crate_name]` extraction code.
                 command::open(crate_name.as_ref(), &args.debug).map_err(|error| {
                     self::error(fmt!("failed to open the generated docs in a browser"))
                         .note(fmt!("{error}"))

@@ -151,8 +151,14 @@ pub(super) fn document(
     cmd.execute()
 }
 
-pub(crate) fn execute(program: impl AsRef<OsStr>, flags: &interface::DebugFlags) -> io::Result<()> {
-    Command::new(program, flags, Strictness::Strict).execute()
+pub(crate) fn execute(
+    program: impl AsRef<OsStr>,
+    verbatim: VerbatimData<'_>,
+    flags: &interface::DebugFlags,
+) -> io::Result<()> {
+    let mut cmd = Command::new(program, flags, Strictness::Strict);
+    cmd.set_verbatim_data(verbatim);
+    cmd.execute()
 }
 
 pub(crate) fn open(crate_name: CrateNameRef<'_>, flags: &interface::DebugFlags) -> io::Result<()> {
@@ -229,6 +235,7 @@ impl<'a> Command<'a> {
     }
 
     fn set_crate_name(&mut self, crate_name: CrateNameRef<'_>, path: &Path) {
+        // FIXME: Get rid of this (ideally `crate_name` would be an `Option<_>` instead).
         if let Ok(fiducial_crate_name) = CrateName::adjust_and_parse_file_path(path)
             && crate_name == fiducial_crate_name.as_ref()
         {
@@ -429,6 +436,7 @@ pub(crate) enum ExternCrate<'src> {
     Named { name: CrateNameRef<'src>, path: Option<Spanned<Cow<'src, str>>> },
 }
 
+// FIXME: Name "flags" doesn't quite fit.
 // FIXME: Should we / can we move this into `cli` somehow?
 #[derive(Clone, Copy)]
 pub(crate) struct Flags<'a> {
@@ -456,10 +464,9 @@ pub(crate) struct VerbatimDataBuf<'a> {
 }
 
 impl<'a> VerbatimDataBuf<'a> {
-    pub(crate) fn extended(mut self, other: VerbatimData<'a>) -> Self {
+    pub(crate) fn extend(&mut self, other: VerbatimData<'a>) {
         self.arguments.extend_from_slice(other.arguments);
         self.variables.extend_from_slice(other.variables);
-        self
     }
 
     pub(crate) fn as_ref(&self) -> VerbatimData<'_> {

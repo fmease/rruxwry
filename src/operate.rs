@@ -6,7 +6,7 @@
 // FIXME: Create test for `//@ compile-flags: --test`.
 
 use crate::{
-    command::{self, Edition, ExternCrate, Flags, Strictness},
+    command::{self, Edition, ExternCrate, Flags, Strictness, VerbatimDataBuf},
     context::Context,
     data::{self, CrateName, CrateNameCow, CrateNameRef, CrateType, DocBackend},
     directive,
@@ -14,7 +14,7 @@ use crate::{
     source::Spanned,
     utility::default,
 };
-use std::{borrow::Cow, cell::LazyCell, mem, path::Path};
+use std::{borrow::Cow, cell::LazyCell, path::Path};
 
 #[derive(Clone, Copy)]
 pub(crate) struct Crate<'a> {
@@ -24,14 +24,14 @@ pub(crate) struct Crate<'a> {
     pub(crate) edition: data::Edition,
 }
 
-pub(crate) fn build(
+pub(crate) fn build<'cx>(
     mode: BuildMode,
     crate_: Crate<'_>,
-    flags: Flags<'_>,
-    cx: Context<'_>,
-) -> Result {
+    flags: Flags<'cx>,
+    cx: Context<'cx>,
+) -> Result<RuntimeData<'cx>> {
     match mode {
-        BuildMode::Default => build_default(crate_, flags),
+        BuildMode::Default => build_default(crate_, flags).map(|()| default()),
         BuildMode::Compiletest(flavor) => build_compiletest(crate_, flags, flavor, cx),
     }
 }
@@ -49,12 +49,12 @@ fn build_default(crate_: Crate<'_>, flags: Flags<'_>) -> Result {
     .map_err(Into::into)
 }
 
-fn build_compiletest(
+fn build_compiletest<'cx>(
     crate_: Crate<'_>,
-    flags: Flags<'_>,
+    flags: Flags<'cx>,
     flavor: directive::Flavor,
-    cx: Context<'_>,
-) -> Result {
+    cx: Context<'cx>,
+) -> Result<RuntimeData<'cx>> {
     let mut directives = directive::gather(
         Spanned::sham(crate_.path),
         directive::Scope::Base,
@@ -73,9 +73,7 @@ fn build_compiletest(
         .map(|dep| build_compiletest_auxiliary(dep, &aux_base_path, flags, flavor, cx))
         .collect::<Result<_>>()?;
 
-    let verbatim = mem::take(&mut directives.verbatim).extended(flags.verbatim);
-    let flags = Flags { verbatim: verbatim.as_ref(), ..flags };
-
+    directives.build_verbatim.extend(flags.verbatim);
     // FIXME: Should we generally emit a warning when CLI tests anything that *may* lead to clashes down the line?
     //        E.g., on `--crate-name`, `--crate-type` and `--edition`? And what about CLI/env verbatim flags?
 
@@ -91,10 +89,11 @@ fn build_compiletest(
         directives.edition.map(|edition| Edition::Raw(edition.bare)),
         // FIXME: Once we support `//@ proc-macro` we need to add `proc_macro` (to the client) similar to `extern_prelude_for` here.
         &dependencies,
-        flags,
+        Flags { verbatim: directives.build_verbatim.as_ref(), ..flags },
         Strictness::Strict,
-    )
-    .map_err(Into::into)
+    )?;
+
+    Ok(RuntimeData { verbatim: directives.run_verbatim })
 }
 
 // FIXME: Support nested auxiliaries!
@@ -126,9 +125,7 @@ fn build_compiletest_auxiliary<'a>(
         cx,
     )?;
 
-    let verbatim = mem::take(&mut directives.verbatim).extended(flags.verbatim);
-    let flags = Flags { verbatim: verbatim.as_ref(), ..flags };
-
+    directives.build_verbatim.extend(flags.verbatim);
     command::compile(
         &path.bare,
         crate_name.as_ref(),
@@ -137,7 +134,7 @@ fn build_compiletest_auxiliary<'a>(
         CrateType::Lib,
         directives.edition.map(|edition| Edition::Raw(edition.bare)),
         &[],
-        flags,
+        Flags { verbatim: directives.build_verbatim.as_ref(), ..flags },
         Strictness::Strict,
     )?;
     // FIXME: Do we need to respect `compile-flags: --crate-name` and adjust `ExternCrate` accordingly?
@@ -293,9 +290,7 @@ fn document_compiletest<'a>(
         })
         .collect::<Result<_>>()?;
 
-    let verbatim = mem::take(&mut directives.verbatim).extended(flags.verbatim);
-    let flags = Flags { verbatim: verbatim.as_ref(), ..flags };
-
+    directives.build_verbatim.extend(flags.verbatim);
     // FIXME: Should we generally emit a warning when CLI tests anything that *may* lead to clashes down the line?
     //        E.g., on `--crate-name`, `--crate-type` and `--edition`? And what about CLI/env verbatim flags?
 
@@ -311,7 +306,7 @@ fn document_compiletest<'a>(
         directives.edition.map(|edition| Edition::Raw(edition.bare)),
         // FIXME: Once we support `//@ proc-macro` we need to add `proc_macro` (to the client) similar to `extern_prelude_for` here.
         &dependencies,
-        flags,
+        Flags { verbatim: directives.build_verbatim.as_ref(), ..flags },
         doc_flags,
         Strictness::Strict,
     )?;
@@ -359,8 +354,8 @@ fn document_compiletest_auxiliary<'a>(
         cx,
     )?;
 
-    let verbatim = mem::take(&mut directives.verbatim).extended(flags.verbatim);
-    let flags = Flags { verbatim: verbatim.as_ref(), ..flags };
+    directives.build_verbatim.extend(flags.verbatim);
+    let flags = Flags { verbatim: directives.build_verbatim.as_ref(), ..flags };
 
     command::compile(
         &path.bare,
@@ -457,4 +452,9 @@ impl Mode {
             Self::Other => data::Edition::LATEST_STABLE,
         }
     }
+}
+
+#[derive(Default)]
+pub(crate) struct RuntimeData<'cx> {
+    pub(crate) verbatim: VerbatimDataBuf<'cx>,
 }
