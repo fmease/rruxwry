@@ -1,4 +1,7 @@
 #!/usr/bin/env sh
 # Convenience Cargo wrapper for local development.
 
+# FIXME: Unfortunately, this doesn't fixate rustup's toolchain.toml.
+#        `cd`'ing isn't an option either because the $@ should stay
+#        relative to $CWD.
 cargo run --manifest-path="$( dirname "$( realpath "$0" )" )/Cargo.toml" -- build "$@"

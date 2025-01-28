@@ -278,6 +278,7 @@ impl<'a> Command<'a> {
         // What does `compiletest` do?
         if !extern_crates.is_empty() {
             // FIXME: Does this work with proc macro deps? I think so?
+            // FIXME: This is hacky, rework it.
             self.arg("-Lcrate=.");
         }
 

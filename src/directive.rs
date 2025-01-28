@@ -191,12 +191,11 @@ impl InstantiationError<'_, '_> {
             available.into_iter().map(|revision| format!("`{revision}`")).list(Conjunction::And)
         };
 
-        // FIXME: Improve the phrasing of these diagnostics!
+        // FIXME: Instead of saying "on the command line" (…), .highlight() the program args
+        //        instead once SourceMap supports that. Also, avoid violating abstraction layers
+        //        as we do right now (this module shouldn't know about the CLI)!
         match self {
             Self::UndeclaredActiveRevision { revision, available } => {
-                // FIXME: Instead of saying "requested on the command line", .highlight()
-                //        the program args instead. Also, avoid violating abstraction layers
-                //        as we do right now (this module shouldn't know about the CLI)!
                 let it =
                     error(fmt!("undeclared revision `{revision}` (requested on the command line)"));
                 let it = match available.len() {
@@ -208,10 +207,12 @@ impl InstantiationError<'_, '_> {
                 it.finish()
             }
             // Avoid violating abstraction layers (this module shouldn't know about the CLI)!
-            Self::MissingActiveRevision { available } => error(fmt!("no revision specified"))
-                .help(fmt!("specifiy a revision with `--rev <NAME>` on the command line"))
-                .note(fmt!("available revisions are: {}", list(available)))
-                .finish(),
+            Self::MissingActiveRevision { available } => {
+                error(fmt!("no revision specified (on the command line)"))
+                    .help(fmt!("specifiy a revision with `--rev <NAME>` on the command line"))
+                    .note(fmt!("available revisions are: {}", list(available)))
+                    .finish()
+            }
         }
     }
 }

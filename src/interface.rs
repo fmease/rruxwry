@@ -127,6 +127,7 @@ pub(crate) fn arguments() -> Arguments {
             clap::Arg::new(id::LOG)
                 .long("log")
                 .value_name("FILTER")
+                .require_equals(true)
                 .num_args(..=1)
                 .default_missing_value("debug")
                 .help("Enable rust{,do}c logging. FILTER defaults to `debug`"),
