@@ -8,27 +8,23 @@
 #![feature(let_chains)]
 #![feature(os_str_display)]
 #![feature(substr_range)]
+#![feature(trait_alias)]
 #![feature(type_alias_impl_trait)]
+#![feature(type_changing_struct_update)]
 // Lints //
 #![deny(rust_2018_idioms, unused_must_use, unused_crate_dependencies)]
 #![deny(clippy::all, clippy::pedantic)]
 #![allow(clippy::if_not_else)] // I disagree
 #![allow(clippy::items_after_statements)] // I disagree
+#![allow(clippy::match_bool)] // I disagree
 #![allow(clippy::too_many_arguments)] // low priority
 #![allow(clippy::too_many_lines)] // I disagree
 
-use attribute::Attrs;
-use context::Context;
-use data::{CrateNameBuf, CrateNameCow, CrateType, Edition};
-use diagnostic::{bug, error, fmt};
-use source::Spanned;
-use std::{
-    path::{Path, PathBuf},
-    process::ExitCode,
-};
+use data::{CrateNameBuf, CrateNameCow};
+use diagnostic::{bug, fmt};
+use std::process::ExitCode;
 
-mod attribute;
-mod command;
+mod build;
 mod context;
 mod data;
 mod diagnostic;
@@ -67,24 +63,25 @@ fn try_main() -> error::Result {
     // FIXME: eagerly lower `-f`s to `--cfg`s here (or rather in `cli`?),
     // so we properly support them in `compiletest`+command
 
-    let edition = args.edition.unwrap_or_else(|| args.command.mode().edition());
+    // FIXME: Keep the Option so we can do more stuff in operate
+    let edition = args.edition.unwrap_or_else(|| args.operation.mode().edition());
 
-    let (crate_name, crate_type) = locate_crate_name_and_type(
-        args.crate_name,
-        args.crate_type,
-        &args.path,
-        edition,
-        &args.debug,
-        cx,
-    )?;
+    // FIXME: maybe delay this???
+    // FIXME: This `unwrap` is obviously reachable (e.g., on `rrc '%$?'`)
+    let crate_name: CrateNameCow<'_> = args.crate_name.map_or_else(
+        || CrateNameBuf::adjust_and_parse_file_path(&args.path).unwrap().into(),
+        Into::into,
+    );
+    // FIXME: Keep the option?
+    let crate_type = args.crate_type.unwrap_or_default();
 
     // FIXME: this is awkward ... can we do this inside cli smh (not the ref op ofc)
-    let verbatim = command::VerbatimDataBuf {
+    let verbatim = build::VerbatimDataBuf {
         arguments: args.verbatim.iter().map(String::as_str).collect(),
         variables: Vec::new(),
     };
     // FIXME: this is awkward ... can we do this inside cli smh (not the ref op ofc)
-    let flags = command::Flags {
+    let flags = build::Flags {
         toolchain: args.toolchain.as_deref(),
         build: &args.build,
         verbatim: verbatim.as_ref(),
@@ -92,68 +89,9 @@ fn try_main() -> error::Result {
     };
 
     let crate_ =
-        operate::Crate { path: &args.path, name: crate_name.as_ref(), type_: crate_type, edition };
+        data::Crate { path: &args.path, name: crate_name.as_ref(), type_: crate_type, edition };
 
-    match args.command {
-        interface::Command::Build { run, mode } => {
-            let data = operate::build(mode, crate_, flags, cx)?;
-
-            if run {
-                let mut path = PathBuf::from(".");
-                // FIXME: This isn't correct in the presence of `//@ compile-flags: --crate-name alias` and `-@`.
-                //        Just set `-o` to the input file path and drop the `#![crate_name]` extraction code.
-                path.push(crate_name.as_str());
-                path.set_extension(std::env::consts::EXE_EXTENSION);
-                command::execute(path, data.verbatim.as_ref(), flags.debug).map_err(|error| {
-                    self::error(fmt!("failed to run the built binary"))
-                        .note(fmt!("{error}"))
-                        .finish()
-                })?;
-            }
-        }
-        interface::Command::Doc { open, mode, flags: doc_flags } => {
-            let crate_name = operate::document(mode, crate_, flags, &doc_flags, cx)?;
-
-            if open {
-                // FIXME: This isn't correct in the presence of `//@ compile-flags: --crate-name alias` and `-@`.
-                //        Just set `-o` to the input file path and drop the `#![crate_name]` extraction code.
-                command::open(crate_name.as_ref(), &args.debug).map_err(|error| {
-                    self::error(fmt!("failed to open the generated docs in a browser"))
-                        .note(fmt!("{error}"))
-                        .finish()
-                })?;
-            }
-        }
-    }
-
-    Ok(())
-}
-
-// FIXME: this is awkward
-fn locate_crate_name_and_type<'cx>(
-    crate_name: Option<CrateNameBuf>,
-    crate_type: Option<CrateType>,
-    path: &Path,
-    edition: Edition,
-    debug_flags: &interface::DebugFlags,
-    cx: Context<'cx>,
-) -> crate::error::Result<(CrateNameCow<'cx>, CrateType)> {
-    Ok(match (crate_name, crate_type) {
-        (Some(crate_name), Some(crate_type)) => (crate_name.into(), crate_type),
-        (crate_name, crate_type) => {
-            let source = cx.map().add(Spanned::sham(path), cx)?.contents;
-            let attrs = Attrs::parse(source, edition, debug_flags.verbose);
-
-            // FIXME: unwrap
-            let crate_name = crate_name
-                .map(Into::into)
-                .or_else(|| attrs.crate_name.map(Into::into))
-                .unwrap_or_else(|| CrateNameBuf::adjust_and_parse_file_path(path).unwrap().into());
-            let crate_type = crate_type.or(attrs.crate_type).unwrap_or_default();
-
-            (crate_name, crate_type)
-        }
-    })
+    operate::perform(args.operation, crate_, flags, cx)
 }
 
 fn set_panic_hook() {

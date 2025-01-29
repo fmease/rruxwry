@@ -176,3 +176,11 @@ pub(crate) enum Identity {
     Stable,
     Nightly,
 }
+
+#[derive(Clone, Copy)]
+pub(crate) struct Crate<'a, E = Edition> {
+    pub(crate) path: &'a Path,
+    pub(crate) name: CrateNameRef<'a>,
+    pub(crate) type_: CrateType,
+    pub(crate) edition: E,
+}

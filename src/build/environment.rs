@@ -1,5 +1,8 @@
 //! Dealing with environment variables.
 
+// We cache everything in statics because `command` may call these functions over and over if there are
+// multiple source files. Probably not worth it or possibly worse than not caching at all.
+
 use crate::diagnostic::{fmt, warn};
 use std::{
     collections::HashMap,

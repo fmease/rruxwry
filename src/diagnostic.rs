@@ -11,19 +11,21 @@ use unicode_width::UnicodeWidthStr as _;
 
 pub(crate) type Painter = utility::paint::Painter<io::BufWriter<io::StderrLock<'static>>>;
 
-pub(crate) fn bug(message: impl FnOnce(&mut Painter) -> io::Result<()>) -> Diagnostic {
+pub(crate) trait Paint = FnOnce(&mut Painter) -> io::Result<()>;
+
+pub(crate) fn bug(message: impl Paint) -> Diagnostic {
     Diagnostic::new(Severity::Bug, message)
 }
 
-pub(crate) fn error(message: impl FnOnce(&mut Painter) -> io::Result<()>) -> Diagnostic {
+pub(crate) fn error(message: impl Paint) -> Diagnostic {
     Diagnostic::new(Severity::Error, message)
 }
 
-pub(crate) fn warn(message: impl FnOnce(&mut Painter) -> io::Result<()>) -> Diagnostic {
+pub(crate) fn warn(message: impl Paint) -> Diagnostic {
     Diagnostic::new(Severity::Warning, message)
 }
 
-pub(crate) fn debug(message: impl FnOnce(&mut Painter) -> io::Result<()>) -> Diagnostic {
+pub(crate) fn debug(message: impl Paint) -> Diagnostic {
     Diagnostic::new(Severity::Debug, message)
 }
 
@@ -45,7 +47,7 @@ impl Diagnostic {
     // Update: Obtain the painter from `cx: Content<'_>` once that contains one.
     //  NOTE: if we do that change, don't keep the lock the entire time!
     //        we want rustc to print to stderr too!
-    fn new(severity: Severity, message: impl FnOnce(&mut Painter) -> io::Result<()>) -> Self {
+    fn new(severity: Severity, message: impl Paint) -> Self {
         let stderr = io::stderr().lock();
         let colorize = anstream::AutoStream::choice(&stderr) != ColorChoice::Never;
         let mut p = Painter::new(io::BufWriter::new(stderr), colorize);
@@ -105,20 +107,16 @@ impl Diagnostic {
         self
     }
 
-    pub(crate) fn note(self, message: impl FnOnce(&mut Painter) -> io::Result<()>) -> Self {
+    pub(crate) fn note(self, message: impl Paint) -> Self {
         self.aux(AuxSeverity::Note, message)
     }
 
-    pub(crate) fn help(self, message: impl FnOnce(&mut Painter) -> io::Result<()>) -> Self {
+    pub(crate) fn help(self, message: impl Paint) -> Self {
         self.aux(AuxSeverity::Help, message)
     }
 
     // FIXME: Split message by line and properly offset each resulting line.
-    fn aux(
-        mut self,
-        severity: AuxSeverity,
-        message: impl FnOnce(&mut Painter) -> io::Result<()>,
-    ) -> Self {
+    fn aux(mut self, severity: AuxSeverity, message: impl Paint) -> Self {
         const DEFAULT_OFFSET: usize = 1;
         let p = &mut self.p;
         (|| {

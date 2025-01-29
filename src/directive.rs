@@ -14,7 +14,7 @@
 //        want to provide a mechanism to circumvent that. E.g., `--force` or `-S <allow|warn>=...`.
 
 use crate::{
-    command::{ExternCrate, VerbatimDataBuf},
+    build::{ExternCrate, VerbatimDataBuf},
     context::Context,
     data::CrateNameRef,
     diagnostic::{EmittedError, error, fmt, warn},

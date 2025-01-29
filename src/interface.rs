@@ -1,9 +1,10 @@
 //! The command-line interface.
 
 use crate::{
+    build::{BuildFlags, DebugFlags, DocFlags},
     data::{CrateNameBuf, CrateType, DocBackend, Edition, Identity},
     directive::Flavor,
-    operate::{BuildMode, DocMode, Mode},
+    operate::{CompileMode, DocMode, Open, Operation, Run},
     utility::{Conjunction, ListingExt as _, parse},
 };
 use clap::ColorChoice;
@@ -258,7 +259,7 @@ pub(crate) fn arguments() -> Arguments {
         .get_matches_from(args);
 
     // unwrap: handled by `clap`.
-    let (subcommand, mut matches) = matches.remove_subcommand().unwrap();
+    let (operation, mut matches) = matches.remove_subcommand().unwrap();
 
     let compiletest = match matches.remove_one::<u8>(id::COMPILETEST).unwrap_or_default() {
         0 => None,
@@ -267,16 +268,22 @@ pub(crate) fn arguments() -> Arguments {
         _ => Some(Flavor::Rruxwry),
     };
 
-    let command = match subcommand.as_str() {
-        id::BUILD => Command::Build {
-            run: matches.remove_one(id::RUN).unwrap_or_default(),
+    let operation = match operation.as_str() {
+        id::BUILD => Operation::Compile {
+            run: match matches.remove_one::<bool>(id::RUN).unwrap_or_default() {
+                true => Run::Yes,
+                false => Run::No,
+            },
             mode: match compiletest {
-                Some(flavor) => BuildMode::Compiletest(flavor),
-                None => BuildMode::Default,
+                Some(flavor) => CompileMode::Compiletest(flavor),
+                None => CompileMode::Default,
             },
         },
-        id::DOC => Command::Doc {
-            open: matches.remove_one(id::OPEN).unwrap_or_default(),
+        id::DOC => Operation::Document {
+            open: match matches.remove_one::<bool>(id::OPEN).unwrap_or_default() {
+                true => Open::Yes,
+                false => Open::No,
+            },
             mode: match (matches.remove_one(id::CROSS_CRATE).unwrap_or_default(), compiletest) {
                 (true, None) => DocMode::CrossCrate,
                 (false, Some(flavor)) => DocMode::Compiletest(flavor),
@@ -305,7 +312,7 @@ pub(crate) fn arguments() -> Arguments {
         toolchain,
         path: matches.remove_one(id::PATH).unwrap(),
         verbatim: matches.remove_many(id::VERBATIM).map(Iterator::collect).unwrap_or_default(),
-        command,
+        operation,
         crate_name: matches.remove_one(id::CRATE_NAME),
         crate_type: matches.remove_one(id::CRATE_TYPE),
         edition: matches.remove_one(id::EDITION),
@@ -342,60 +349,13 @@ pub(crate) struct Arguments {
     pub(crate) toolchain: Option<OsString>,
     pub(crate) path: PathBuf,
     pub(crate) verbatim: Vec<String>,
-    pub(crate) command: Command,
+    pub(crate) operation: Operation,
     pub(crate) crate_name: Option<CrateNameBuf>,
     pub(crate) crate_type: Option<CrateType>,
     pub(crate) edition: Option<Edition>,
     pub(crate) build: BuildFlags,
     pub(crate) debug: DebugFlags,
     pub(crate) color: ColorChoice,
-}
-
-pub(crate) enum Command {
-    Build { run: bool, mode: BuildMode },
-    Doc { open: bool, mode: DocMode, flags: DocFlags },
-}
-
-impl Command {
-    pub(crate) fn mode(&self) -> Mode {
-        match *self {
-            Self::Build { mode, .. } => mode.into(),
-            Self::Doc { mode, .. } => mode.into(),
-        }
-    }
-}
-
-#[allow(clippy::struct_excessive_bools)] // not worth to address
-pub(crate) struct DocFlags {
-    pub(crate) backend: DocBackend,
-    pub(crate) crate_version: Option<String>,
-    pub(crate) private: bool,
-    pub(crate) hidden: bool,
-    pub(crate) layout: bool,
-    pub(crate) link_to_definition: bool,
-    pub(crate) normalize: bool,
-    pub(crate) theme: String,
-}
-
-/// Flags that get passed to `rustc` and `rustdoc` in a lowered form.
-#[allow(clippy::struct_excessive_bools)] // not worth to address
-pub(crate) struct BuildFlags {
-    pub(crate) cfgs: Vec<String>,
-    pub(crate) revision: Option<String>,
-    // FIXME: This shouldn't be here:
-    pub(crate) cargo_features: Vec<String>,
-    pub(crate) rustc_features: Vec<String>,
-    pub(crate) cap_lints: bool,
-    pub(crate) rustc_verbose_internals: bool,
-    pub(crate) next_solver: bool,
-    pub(crate) identity: Option<Identity>,
-    pub(crate) log: Option<String>,
-    pub(crate) no_backtrace: bool,
-}
-
-pub(crate) struct DebugFlags {
-    pub(crate) verbose: bool,
-    pub(crate) dry_run: bool,
 }
 
 impl Edition {
