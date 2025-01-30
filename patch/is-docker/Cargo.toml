@@ -1,0 +1,11 @@
+[package]
+name = "is-docker"
+version = "0.2.0"
+edition = "2024"
+description = "Checks if the process is running inside a Docker container."
+license = "MIT"
+publish = false
+
+authors = ["Sean Larkin <TheLarkInn@users.noreply.github.com>"]
+repository = "https://github.com/TheLarkInn/is-docker"
+categories = ["command-line-utilities"]

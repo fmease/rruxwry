@@ -23,6 +23,12 @@ smallvec = { version = "1.13.1", features = ["const_generics"] }
 unicode-width = "0.2.0"
 unicode-segmentation = "1.12.0"
 
+[patch.crates-io]
+# To eliminate the crate dependency `once_cell`.
+is-docker = { path = "patch/is-docker" }
+# To eliminate the crate dependency `once_cell`.
+is-wsl = { path = "patch/is-wsl" }
+
 [profile.dev.package."*"]
 opt-level = 3
 
