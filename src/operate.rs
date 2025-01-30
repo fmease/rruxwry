@@ -8,7 +8,10 @@
 // FIXME: Create test for `//@ compile-flags: --test`.
 
 use crate::{
-    build::{self, DocFlags, Edition, ExternCrate, Flags, ImplyUnstableOptions, VerbatimData},
+    build::{
+        self, CompileOptions, DocOptions, Edition, ExternCrate, ImplyUnstableOptions, Options,
+        VerbatimOptions,
+    },
     context::Context,
     data::{self, Crate, CrateName, CrateType, DocBackend},
     diagnostic::error,
@@ -24,15 +27,17 @@ use std::{
 };
 
 pub(crate) fn perform(
-    operation: Operation,
-    crate_: Crate<'_>,
-    flags: Flags<'_>,
+    op: Operation,
+    krate: Crate<'_>,
+    opts: Options<'_>,
     cx: Context<'_>,
 ) -> Result<()> {
-    match operation {
-        Operation::Compile { mode, run } => compile(mode, run, crate_, flags, cx),
-        Operation::Document { mode, open, flags: doc_flags } => {
-            document(mode, open, crate_, flags, &doc_flags, cx)
+    match op {
+        Operation::Compile { mode, run, options: c_opts } => {
+            compile(mode, run, krate, opts, &c_opts, cx)
+        }
+        Operation::Document { mode, open, options: d_opts } => {
+            document(mode, open, krate, opts, &d_opts, cx)
         }
     }
 }
@@ -40,27 +45,30 @@ pub(crate) fn perform(
 fn compile(
     mode: CompileMode,
     run: Run,
-    crate_: Crate<'_>,
-    flags: Flags<'_>,
+    krate: Crate<'_>,
+    opts: Options<'_>,
+    c_opts: &CompileOptions,
     cx: Context<'_>,
 ) -> Result {
     match mode {
-        CompileMode::Default => compile_default(crate_, flags, run),
-        CompileMode::Compiletest(flavor) => compile_compiletest(crate_, flags, flavor, run, cx),
+        CompileMode::Default => compile_default(krate, opts, c_opts, run),
+        CompileMode::Compiletest(flavor) => {
+            compile_compiletest(krate, opts, c_opts, flavor, run, cx)
+        }
     }
 }
 
 fn run(
-    crate_: Crate<'_, Option<build::Edition<'_>>>,
-    flags: Flags<'_>,
-    run_verbatim: VerbatimData<'_>,
+    krate: Crate<'_, Option<build::Edition<'_>>>,
+    opts: Options<'_>,
+    run_v_opts: VerbatimOptions<'_>,
 ) -> Result {
     // FIXME: Explainer
-    let crate_name = build::query_crate_name(crate_, flags)?;
+    let crate_name = build::query_crate_name(krate, opts)?;
     let mut path: PathBuf = [".", &crate_name].into_iter().collect();
     path.set_extension(std::env::consts::EXE_EXTENSION);
 
-    build::run(&path, run_verbatim, flags.debug).map_err(|error| {
+    build::run(&path, run_v_opts, opts.debug).map_err(|error| {
         self::error(fmt!("failed to run the built binary `{}`", path.display()))
             .note(fmt!("{error}"))
             .finish()
@@ -68,73 +76,79 @@ fn run(
     Ok(())
 }
 
-fn compile_default(crate_: Crate<'_>, flags: Flags<'_>, run: Run) -> Result {
-    let crate_ = Crate { edition: Some(Edition::Parsed(crate_.edition)), ..crate_ };
+fn compile_default(
+    krate: Crate<'_>,
+    opts: Options<'_>,
+    c_opts: &CompileOptions,
+    run: Run,
+) -> Result {
+    let krate = Crate { edition: Some(Edition::Parsed(krate.edition)), ..krate };
 
     build::perform(
-        build::Engine::Rustc,
-        crate_,
-        extern_prelude_for(crate_.type_),
-        flags,
+        build::Engine::Rustc(c_opts),
+        krate,
+        extern_prelude_for(krate.typ),
+        opts,
         ImplyUnstableOptions::Yes,
     )?;
 
     match run {
-        Run::Yes => self::run(crate_, flags, default()),
+        Run::Yes => self::run(krate, opts, default()),
         Run::No => Ok(()),
     }
 }
 
 fn compile_compiletest(
-    crate_: Crate<'_>,
-    flags: Flags<'_>,
+    krate: Crate<'_>,
+    opts: Options<'_>,
+    c_opts: &CompileOptions,
     flavor: directive::Flavor,
     run: Run,
     cx: Context<'_>,
 ) -> Result {
     let mut directives = directive::gather(
-        Spanned::sham(crate_.path),
+        Spanned::sham(krate.path),
         directive::Scope::Base,
         directive::Role::Principal,
         flavor,
-        flags.build.revision.as_deref(),
+        opts.build.revision.as_deref(),
         cx,
     )?;
 
     // FIXME: unwrap
-    let aux_base_path = LazyCell::new(|| crate_.path.parent().unwrap().join("auxiliary"));
+    let aux_base_path = LazyCell::new(|| krate.path.parent().unwrap().join("auxiliary"));
 
-    let dependencies: Vec<_> = directives
+    let deps: Vec<_> = directives
         .dependencies
         .iter()
-        .map(|dep| compile_compiletest_auxiliary(dep, &aux_base_path, flags, flavor, cx))
+        .map(|dep| compile_compiletest_auxiliary(dep, &aux_base_path, opts, c_opts, flavor, cx))
         .collect::<Result<_>>()?;
 
-    directives.build_verbatim.extend(flags.verbatim);
+    directives.build_verbatim.extend(opts.verbatim);
     // FIXME: Should we generally emit a warning when CLI tests anything that *may* lead to clashes down the line?
-    //        E.g., on `--crate-name`, `--crate-type` and `--edition`? And what about CLI/env verbatim flags?
+    //        E.g., on `--crate-name`, `--crate-type` and `--edition`? And what about CLI/env verbatim opts?
 
     // FIXME: Once this one is an `Option<Edition>` instead, so we can tell if it was explicitly set by the user,
     //        use it to overwrite `directives.edition`.
-    let _ = crate_.edition;
+    let _ = krate.edition;
 
     // FIXME: Once we support `//@ proc-macro` we need to reflect that in the crate type.
-    let crate_ =
-        Crate { edition: directives.edition.map(|edition| Edition::Raw(edition.bare)), ..crate_ };
+    let krate =
+        Crate { edition: directives.edition.map(|edition| Edition::Raw(edition.bare)), ..krate };
 
-    let flags = Flags { verbatim: directives.build_verbatim.as_ref(), ..flags };
+    let opts = Options { verbatim: directives.build_verbatim.as_ref(), ..opts };
 
     build::perform(
-        build::Engine::Rustc,
-        crate_,
+        build::Engine::Rustc(c_opts),
+        krate,
         // FIXME: Once we support `//@ proc-macro` we need to add `proc_macro` (to the client) similar to `extern_prelude_for` here.
-        &dependencies,
-        flags,
+        &deps,
+        opts,
         ImplyUnstableOptions::No,
     )?;
 
     match run {
-        Run::Yes => self::run(crate_, flags, directives.run_verbatim.as_ref()),
+        Run::Yes => self::run(krate, opts, directives.run_verbatim.as_ref()),
         Run::No => Ok(()),
     }
 }
@@ -144,7 +158,8 @@ fn compile_compiletest(
 fn compile_compiletest_auxiliary<'a>(
     extern_crate: &ExternCrate<'a>,
     base_path: &Path,
-    flags: Flags<'_>,
+    opts: Options<'_>,
+    c_opts: &CompileOptions,
     flavor: directive::Flavor,
     cx: Context<'_>,
 ) -> Result<ExternCrate<'a>> {
@@ -164,23 +179,23 @@ fn compile_compiletest_auxiliary<'a>(
         directive::Scope::Base,
         directive::Role::Auxiliary,
         flavor,
-        flags.build.revision.as_deref(),
+        opts.build.revision.as_deref(),
         cx,
     )?;
 
-    directives.build_verbatim.extend(flags.verbatim);
+    directives.build_verbatim.extend(opts.verbatim);
     build::perform(
-        build::Engine::Rustc,
+        build::Engine::Rustc(c_opts),
         Crate {
             path: &path.bare,
             name: crate_name.as_ref(),
             // FIXME: Verify this works with `@compile-flags:--crate-type=proc-macro`
             // FIXME: I don't think it works rn
-            type_: CrateType::Lib,
+            typ: CrateType::Lib,
             edition: directives.edition.map(|edition| Edition::Raw(edition.bare)),
         },
         &[],
-        Flags { verbatim: directives.build_verbatim.as_ref(), ..flags },
+        Options { verbatim: directives.build_verbatim.as_ref(), ..opts },
         ImplyUnstableOptions::No,
     )?;
 
@@ -208,25 +223,23 @@ fn compile_compiletest_auxiliary<'a>(
 fn document(
     mode: DocMode,
     open: Open,
-    crate_: Crate<'_>,
-    flags: Flags<'_>,
-    doc_flags: &build::DocFlags,
+    krate: Crate<'_>,
+    opts: Options<'_>,
+    d_opts: &DocOptions,
     cx: Context<'_>,
 ) -> Result<()> {
     match mode {
-        DocMode::Default => document_default(crate_, flags, doc_flags, open),
-        DocMode::CrossCrate => document_cross_crate(crate_, flags, doc_flags, open),
-        DocMode::Compiletest(flavor) => {
-            document_compiletest(crate_, flags, doc_flags, flavor, open, cx)
-        }
+        DocMode::Default => document_default(krate, opts, d_opts, open),
+        DocMode::CrossCrate => document_cross_crate(krate, opts, d_opts, open),
+        DocMode::Compiletest(flavor) => document_compiletest(krate, opts, d_opts, flavor, open, cx),
     }
 }
 
-fn open(crate_: Crate<'_, Option<build::Edition<'_>>>, flags: Flags<'_>) -> Result<()> {
-    let crate_name = build::query_crate_name(crate_, flags)?;
+fn open(krate: Crate<'_, Option<build::Edition<'_>>>, opts: Options<'_>) -> Result<()> {
+    let crate_name = build::query_crate_name(krate, opts)?;
     let path = format!("./doc/{crate_name}/index.html");
 
-    build::open(Path::new(&path), flags.debug).map_err(|error| {
+    build::open(Path::new(&path), opts.debug).map_err(|error| {
         self::error(fmt!("failed to open the generated docs in a browser"))
             .note(fmt!("{error}"))
             .finish()
@@ -235,79 +248,72 @@ fn open(crate_: Crate<'_, Option<build::Edition<'_>>>, flags: Flags<'_>) -> Resu
 }
 
 fn document_default(
-    crate_: Crate<'_>,
-    flags: Flags<'_>,
-    doc_flags: &build::DocFlags,
+    krate: Crate<'_>,
+    opts: Options<'_>,
+    d_opts: &DocOptions,
     open: Open,
 ) -> Result<()> {
-    let crate_ = Crate { edition: Some(Edition::Parsed(crate_.edition)), ..crate_ };
+    let krate = Crate { edition: Some(Edition::Parsed(krate.edition)), ..krate };
 
     build::perform(
-        build::Engine::Rustdoc(doc_flags),
-        crate_,
-        extern_prelude_for(crate_.type_),
-        flags,
+        build::Engine::Rustdoc(d_opts),
+        krate,
+        extern_prelude_for(krate.typ),
+        opts,
         ImplyUnstableOptions::Yes,
     )?;
 
     match open {
-        Open::Yes => self::open(crate_, flags),
+        Open::Yes => self::open(krate, opts),
         Open::No => Ok(()),
     }
 }
 
 fn document_cross_crate(
-    crate_: Crate<'_>,
-    flags: Flags<'_>,
-    doc_flags: &build::DocFlags,
+    krate: Crate<'_>,
+    opts: Options<'_>,
+    d_opts: &DocOptions,
     open: Open,
 ) -> Result<()> {
     build::perform(
-        build::Engine::Rustc,
+        build::Engine::Rustc(&CompileOptions { check: false }),
         Crate {
-            type_: crate_.type_.to_non_executable(),
-            edition: Some(Edition::Parsed(crate_.edition)),
-            ..crate_
+            typ: krate.typ.to_non_executable(),
+            edition: Some(Edition::Parsed(krate.edition)),
+            ..krate
         },
-        extern_prelude_for(crate_.type_),
-        flags,
+        extern_prelude_for(krate.typ),
+        opts,
         ImplyUnstableOptions::Yes,
     )?;
 
-    let dependent_crate_name = CrateName::new_unchecked(format!("u_{}", crate_.name));
-    let dependent_crate_path =
-        crate_.path.with_file_name(dependent_crate_name.as_str()).with_extension("rs");
+    let root_crate_name = CrateName::new_unchecked(format!("u_{}", krate.name));
+    let root_crate_path = krate.path.with_file_name(root_crate_name.as_str()).with_extension("rs");
 
-    if !flags.debug.dry_run && !dependent_crate_path.exists() {
+    if !opts.debug.dry_run && !root_crate_path.exists() {
         // While we could omit the `extern crate` declaration in `edition >= Edition::Edition2018`,
         // we would need to recreate the file on each rerun if the edition was 2015 instead of
         // skipping that step since we wouldn't know whether the existing file if applicable was
         // created for a newer edition or not.
         std::fs::write(
-            &dependent_crate_path,
-            format!("extern crate {0}; pub use {0}::*;\n", crate_.name),
+            &root_crate_path,
+            format!("extern crate {0}; pub use {0}::*;\n", krate.name),
         )?;
     };
 
-    let dependencies = &[ExternCrate::Named { name: crate_.name.as_ref(), path: None }];
+    let deps = &[ExternCrate::Named { name: krate.name.as_ref(), path: None }];
 
-    let crate_ = Crate {
-        path: &dependent_crate_path,
-        name: dependent_crate_name.as_ref(),
-        type_: default(),
-        edition: Some(Edition::Parsed(crate_.edition)),
+    let krate = Crate {
+        path: &root_crate_path,
+        name: root_crate_name.as_ref(),
+        typ: default(),
+        edition: Some(Edition::Parsed(krate.edition)),
     };
 
-    build::perform(
-        build::Engine::Rustdoc(doc_flags),
-        crate_,
-        dependencies,
-        flags,
-        ImplyUnstableOptions::Yes,
-    )?;
+    build::perform(build::Engine::Rustdoc(d_opts), krate, deps, opts, ImplyUnstableOptions::Yes)?;
 
     match open {
-        Open::Yes => self::open(crate_, flags),
+        Open::Yes => self::open(krate, opts),
         Open::No => Ok(()),
     }
 }
@@ -324,31 +330,31 @@ fn extern_prelude_for(crate_type: CrateType) -> &'static [ExternCrate<'static>] 
 }
 
 fn document_compiletest(
-    crate_: Crate<'_>,
-    flags: Flags<'_>,
+    krate: Crate<'_>,
+    opts: Options<'_>,
     // FIXME: tempory
-    doc_flags: &build::DocFlags,
+    d_opts: &DocOptions,
     flavor: directive::Flavor,
     open: Open,
     cx: Context<'_>,
 ) -> Result<()> {
     // FIXME: Do we actually want to treat !`-j` as `rustdoc/` (Scope::HtmlDocCk)
     //        instead of `rustdoc-ui/` ("Scope::Rustdoc")
-    let scope = match doc_flags.backend {
+    let scope = match d_opts.backend {
         DocBackend::Html => directive::Scope::HtmlDocCk,
         DocBackend::Json => directive::Scope::JsonDocCk,
     };
     let mut directives = directive::gather(
-        Spanned::sham(crate_.path),
+        Spanned::sham(krate.path),
         scope,
         directive::Role::Principal,
         flavor,
-        flags.build.revision.as_deref(),
+        opts.build.revision.as_deref(),
         cx,
     )?;
 
     // FIXME: unwrap
-    let aux_base_path = LazyCell::new(|| crate_.path.parent().unwrap().join("auxiliary"));
+    let aux_base_path = LazyCell::new(|| krate.path.parent().unwrap().join("auxiliary"));
 
     let dependencies: Vec<_> = directives
         .dependencies
@@ -358,37 +364,37 @@ fn document_compiletest(
                 dep,
                 &aux_base_path,
                 directives.build_aux_docs,
-                flags,
-                doc_flags,
+                opts,
+                d_opts,
                 flavor,
                 cx,
             )
         })
         .collect::<Result<_>>()?;
 
-    directives.build_verbatim.extend(flags.verbatim);
+    directives.build_verbatim.extend(opts.verbatim);
     // FIXME: Should we generally emit a warning when CLI tests anything that *may* lead to clashes down the line?
-    //        E.g., on `--crate-name`, `--crate-type` and `--edition`? And what about CLI/env verbatim flags?
+    //        E.g., on `--crate-name`, `--crate-type` and `--edition`? And what about CLI/env verbatim opts?
 
     // FIXME: Once this one is an `Option<Edition>` instead, so we can tell if it was explicitly set by the user,
     //        use it to overwrite `directives.edition`.
-    let _ = crate_.edition;
+    let _ = krate.edition;
 
     // FIXME: Once we support `//@ proc-macro` we need to reflect that in the crate type.
-    let crate_ =
-        Crate { edition: directives.edition.map(|edition| Edition::Raw(edition.bare)), ..crate_ };
+    let krate =
+        Crate { edition: directives.edition.map(|edition| Edition::Raw(edition.bare)), ..krate };
 
     build::perform(
-        build::Engine::Rustdoc(doc_flags),
-        crate_,
+        build::Engine::Rustdoc(d_opts),
+        krate,
         // FIXME: Once we support `//@ proc-macro` we need to add `proc_macro` (to the client) similar to `extern_prelude_for` here.
         &dependencies,
-        Flags { verbatim: directives.build_verbatim.as_ref(), ..flags },
+        Options { verbatim: directives.build_verbatim.as_ref(), ..opts },
         ImplyUnstableOptions::No,
     )?;
 
     match open {
-        Open::Yes => self::open(crate_, flags),
+        Open::Yes => self::open(krate, opts),
         Open::No => Ok(()),
     }
 }
@@ -399,9 +405,8 @@ fn document_compiletest_auxiliary<'a>(
     extern_crate: &ExternCrate<'a>,
     base_path: &Path,
     document: bool,
-    flags: Flags<'_>,
-    // FIXME: temporary
-    doc_flags: &build::DocFlags,
+    opts: Options<'_>,
+    d_opts: &DocOptions,
     flavor: directive::Flavor,
     cx: Context<'_>,
 ) -> Result<ExternCrate<'a>> {
@@ -419,7 +424,7 @@ fn document_compiletest_auxiliary<'a>(
     // FIXME: DRY
     // FIXME: Do we actually want to treat !`-j` as `rustdoc/` (Scope::HtmlDocCk)
     //        instead of `rustdoc-ui/` ("Scope::Rustdoc")
-    let scope = match doc_flags.backend {
+    let scope = match d_opts.backend {
         DocBackend::Html => directive::Scope::HtmlDocCk,
         DocBackend::Json => directive::Scope::JsonDocCk,
     };
@@ -429,42 +434,42 @@ fn document_compiletest_auxiliary<'a>(
         scope,
         directive::Role::Auxiliary,
         flavor,
-        flags.build.revision.as_deref(),
+        opts.build.revision.as_deref(),
         cx,
     )?;
 
-    directives.build_verbatim.extend(flags.verbatim);
-    let flags = Flags { verbatim: directives.build_verbatim.as_ref(), ..flags };
+    directives.build_verbatim.extend(opts.verbatim);
+    let opts = Options { verbatim: directives.build_verbatim.as_ref(), ..opts };
 
     build::perform(
-        build::Engine::Rustc,
+        build::Engine::Rustc(&CompileOptions { check: false }),
         Crate {
             path: &path.bare,
             name: crate_name.as_ref(),
             // FIXME: Verify this works with `@compile-flags:--crate-type=proc-macro`
             // FIXME: I don't think it works rn
-            type_: CrateType::Lib,
+            typ: CrateType::Lib,
             edition: directives.edition.map(|edition| Edition::Raw(edition.bare)),
         },
         &[],
-        flags,
+        opts,
         ImplyUnstableOptions::No,
     )?;
 
     // FIXME: Is this how `//@ build-aux-docs` is supposed to work?
     if document {
         build::perform(
-            build::Engine::Rustdoc(doc_flags),
+            build::Engine::Rustdoc(d_opts),
             Crate {
                 path: &path.bare,
                 name: crate_name.as_ref(),
                 // FIXME: Verify this works with `@compile-flags:--crate-type=proc_macro`
                 // FIXME: I don't think it works rn
-                type_: default(),
+                typ: default(),
                 edition: directives.edition.map(|edition| Edition::Raw(edition.bare)),
             },
             &[],
-            flags,
+            opts,
             ImplyUnstableOptions::No,
         )?;
     }
@@ -491,8 +496,8 @@ fn document_compiletest_auxiliary<'a>(
 }
 
 pub(crate) enum Operation {
-    Compile { mode: CompileMode, run: Run },
-    Document { mode: DocMode, open: Open, flags: DocFlags },
+    Compile { mode: CompileMode, run: Run, options: CompileOptions },
+    Document { mode: DocMode, open: Open, options: DocOptions },
 }
 
 impl Operation {

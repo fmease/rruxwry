@@ -139,7 +139,8 @@ Arguments:
   [VERBATIM]...  Flags passed to `rustc` verbatim
 
 Options:
-  -R, --run                   Run the built binary
+  -r, --run                   Run the built binary
+  -c, --check                 Don't fully compile, only check the crate
   -@, --compiletest...        Enable compiletest directives
   -n, --crate-name <NAME>     Set the name of the (base) crate
   -t, --crate-type <TYPE>     Set the type of the (base) crate
@@ -148,11 +149,11 @@ Options:
       --rev <NAME>            Enable a compiletest revision
   -f, --cargo-feature <NAME>  Enable a Cargo-like feature
   -F, --rustc-feature <NAME>  Enable an experimental rustc library or language feature
-  -/, --cap-lints             Cap lints at warning level
+  -/, --suppress-lints        Cap lints at allow level
   -#, --internals             Enable rust{,do}c's `-Zverbose-internals`
   -N, --next-solver           Enable the next-gen trait solver
-  -=, --identity <IDENTITY>   Force rust{,do}c's identity
-      --log [<FILTER>]        Enable rust{,do}c logging. FILTER defaults to `debug`
+  -I, --identity <IDENTITY>   Force rust{,do}c's identity
+      --log[=<FILTER>]        Enable rust{,do}c logging. FILTER defaults to `debug`
   -B, --no-backtrace          Override `RUST_BACKTRACE` to be `0`
   -V, --verbose               Use verbose output
   -0, --dry-run               Run through without making any changes
@@ -188,14 +189,14 @@ Options:
   -P, --private                  Document private items
   -H, --hidden                   Document hidden items
       --layout                   Document the memory layout of types
-      --link-to-definition       Generate links to definitions
+      --link-to-def              Generate links to definitions
       --normalize                Normalize types
       --theme <THEME>            Set the theme [default: ayu]
-  -/, --cap-lints                Cap lints at warning level
+  -/, --suppress-lints           Cap lints at allow level
   -#, --internals                Enable rust{,do}c's `-Zverbose-internals`
   -N, --next-solver              Enable the next-gen trait solver
-  -=, --identity <IDENTITY>      Force rust{,do}c's identity
-      --log [<FILTER>]           Enable rust{,do}c logging. FILTER defaults to `debug`
+  -I, --identity <IDENTITY>      Force rust{,do}c's identity
+      --log[=<FILTER>]           Enable rust{,do}c logging. FILTER defaults to `debug`
   -B, --no-backtrace             Override `RUST_BACKTRACE` to be `0`
   -V, --verbose                  Use verbose output
   -0, --dry-run                  Run through without making any changes

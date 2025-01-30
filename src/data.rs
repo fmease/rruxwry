@@ -181,6 +181,6 @@ pub(crate) enum Identity {
 pub(crate) struct Crate<'a, E = Edition> {
     pub(crate) path: &'a Path,
     pub(crate) name: CrateNameRef<'a>,
-    pub(crate) type_: CrateType,
+    pub(crate) typ: CrateType,
     pub(crate) edition: E,
 }

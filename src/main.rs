@@ -17,7 +17,6 @@
 #![allow(clippy::if_not_else)] // I disagree
 #![allow(clippy::items_after_statements)] // I disagree
 #![allow(clippy::match_bool)] // I disagree
-#![allow(clippy::too_many_arguments)] // low priority
 #![allow(clippy::too_many_lines)] // I disagree
 
 use data::{CrateNameBuf, CrateNameCow};
@@ -76,29 +75,29 @@ fn try_main() -> error::Result {
     let crate_type = args.crate_type.unwrap_or_default();
 
     // FIXME: this is awkward ... can we do this inside cli smh (not the ref op ofc)
-    let verbatim = build::VerbatimDataBuf {
+    let v_opts = build::VerbatimOptionsBuf {
         arguments: args.verbatim.iter().map(String::as_str).collect(),
         variables: Vec::new(),
     };
     // FIXME: this is awkward ... can we do this inside cli smh (not the ref op ofc)
-    let flags = build::Flags {
+    let opts = build::Options {
         toolchain: args.toolchain.as_deref(),
         build: &args.build,
-        verbatim: verbatim.as_ref(),
+        verbatim: v_opts.as_ref(),
         debug: &args.debug,
     };
 
-    let crate_ =
-        data::Crate { path: &args.path, name: crate_name.as_ref(), type_: crate_type, edition };
+    let krate =
+        data::Crate { path: &args.path, name: crate_name.as_ref(), typ: crate_type, edition };
 
-    operate::perform(args.operation, crate_, flags, cx)
+    operate::perform(args.operation, krate, opts, cx)
 }
 
 fn set_panic_hook() {
     const ENV_VAR: &str = "RRUXWRY_BACKTRACE";
 
-    std::panic::set_hook(Box::new(|information| {
-        let payload = information.payload();
+    std::panic::set_hook(Box::new(|info| {
+        let payload = info.payload();
 
         let message = payload
             .downcast_ref::<&str>()
@@ -110,23 +109,23 @@ fn set_panic_hook() {
             .is_ok_and(|variable| variable != "0")
             .then(std::backtrace::Backtrace::force_capture);
 
-        let it = bug(fmt!("{message}"));
-        let it = match information.location() {
-            Some(location) => it.note(fmt!("at `{location}`")),
-            None => it,
+        let diag = bug(fmt!("{message}"));
+        let diag = match info.location() {
+            Some(location) => diag.note(fmt!("at `{location}`")),
+            None => diag,
         };
-        let it = match std::thread::current().name() {
-            Some(name) => it.note(fmt!("in thread `{name}`")),
-            None => it.note(fmt!("in an unknown thread")),
+        let diag = match std::thread::current().name() {
+            Some(name) => diag.note(fmt!("in thread `{name}`")),
+            None => diag.note(fmt!("in an unknown thread")),
         };
-        let it = it.note(fmt!(
+        let diag = diag.note(fmt!(
             "rruxwry unexpectedly panicked. this is a bug. we would appreciate a bug report"
         ));
-        let it = match backtrace {
-            Some(backtrace) => it.note(fmt!("with the following backtrace:\n{backtrace}")),
-            None => it
+        let diag = match backtrace {
+            Some(backtrace) => diag.note(fmt!("with the following backtrace:\n{backtrace}")),
+            None => diag
                 .note(fmt!("rerun with environment variable `{ENV_VAR}=1` to display a backtrace")),
         };
-        it.finish();
+        diag.finish();
     }));
 }

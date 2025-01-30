@@ -1,7 +1,7 @@
 //! The command-line interface.
 
 use crate::{
-    build::{BuildFlags, DebugFlags, DocFlags},
+    build::{BuildOptions, CompileOptions, DebugOptions, DocOptions},
     data::{CrateNameBuf, CrateType, DocBackend, Edition, Identity},
     directive::Flavor,
     operate::{CompileMode, DocMode, Open, Operation, Run},
@@ -104,12 +104,12 @@ pub(crate) fn arguments() -> Arguments {
     }
     fn extra() -> impl Iterator<Item = clap::Arg> {
         [
-            clap::Arg::new(id::CAP_LINTS)
+            clap::Arg::new(id::SUPPRESS_LINTS)
                 .short('/')
-                .long("cap-lints")
+                .long("suppress-lints")
                 .action(clap::ArgAction::SetTrue)
-                .help("Cap lints at warning level"),
-            clap::Arg::new(id::RUSTC_VERBOSE_INTERNALS)
+                .help("Cap lints at allow level"),
+            clap::Arg::new(id::INTERNALS)
                 .short('#')
                 .long("internals")
                 .action(clap::ArgAction::SetTrue)
@@ -120,7 +120,7 @@ pub(crate) fn arguments() -> Arguments {
                 .action(clap::ArgAction::SetTrue)
                 .help("Enable the next-gen trait solver"),
             clap::Arg::new(id::IDENTITY)
-                .short('=')
+                .short('I')
                 .long("identity")
                 .value_name("IDENTITY")
                 .value_parser(Identity::parse_cli_style)
@@ -172,10 +172,18 @@ pub(crate) fn arguments() -> Arguments {
                         .arg(verbatim().help("Flags passed to `rustc` verbatim"))
                         .arg(
                             clap::Arg::new(id::RUN)
-                                .short('R')
+                                .short('r')
                                 .long("run")
                                 .action(clap::ArgAction::SetTrue)
                                 .help("Run the built binary"),
+                        )
+                        .arg(
+                            clap::Arg::new(id::CHECK)
+                                .short('c')
+                                .long("check")
+                                .action(clap::ArgAction::SetTrue)
+                                .conflicts_with(id::RUN)
+                                .help("Don't fully compile, only check the crate"),
                         )
                         .arg(compiletest())
                         .args(crate_name_and_type())
@@ -239,8 +247,8 @@ pub(crate) fn arguments() -> Arguments {
                                 .long("layout")
                                 .action(clap::ArgAction::SetTrue)
                                 .help("Document the memory layout of types"),
-                            clap::Arg::new(id::LINK_TO_DEFINITION)
-                                .long("link-to-definition")
+                            clap::Arg::new(id::LINK_TO_DEF)
+                                .long("link-to-def")
                                 .alias("ltd")
                                 .action(clap::ArgAction::SetTrue)
                                 .help("Generate links to definitions"),
@@ -278,6 +286,7 @@ pub(crate) fn arguments() -> Arguments {
                 Some(flavor) => CompileMode::Compiletest(flavor),
                 None => CompileMode::Default,
             },
+            options: CompileOptions { check: matches.remove_one(id::CHECK).unwrap_or_default() },
         },
         id::DOC => Operation::Document {
             open: match matches.remove_one::<bool>(id::OPEN).unwrap_or_default() {
@@ -290,7 +299,7 @@ pub(crate) fn arguments() -> Arguments {
                 (false, None) => DocMode::Default,
                 (true, Some(_)) => unreachable!(), // Already caught by `clap`.
             },
-            flags: DocFlags {
+            options: DocOptions {
                 backend: if matches.remove_one(id::JSON).unwrap_or_default() {
                     DocBackend::Json
                 } else {
@@ -300,7 +309,7 @@ pub(crate) fn arguments() -> Arguments {
                 private: matches.remove_one(id::PRIVATE).unwrap_or_default(),
                 hidden: matches.remove_one(id::HIDDEN).unwrap_or_default(),
                 layout: matches.remove_one(id::LAYOUT).unwrap_or_default(),
-                link_to_definition: matches.remove_one(id::LINK_TO_DEFINITION).unwrap_or_default(),
+                link_to_def: matches.remove_one(id::LINK_TO_DEF).unwrap_or_default(),
                 normalize: matches.remove_one(id::NORMALIZE).unwrap_or_default(),
                 theme: matches.remove_one(id::THEME).unwrap(),
             },
@@ -316,7 +325,7 @@ pub(crate) fn arguments() -> Arguments {
         crate_name: matches.remove_one(id::CRATE_NAME),
         crate_type: matches.remove_one(id::CRATE_TYPE),
         edition: matches.remove_one(id::EDITION),
-        build: BuildFlags {
+        build: BuildOptions {
             cfgs: matches.remove_many(id::CFGS).map(Iterator::collect).unwrap_or_default(),
             revision: matches.remove_one(id::REVISION),
             cargo_features: matches
@@ -327,16 +336,14 @@ pub(crate) fn arguments() -> Arguments {
                 .remove_many(id::RUSTC_FEATURES)
                 .map(Iterator::collect)
                 .unwrap_or_default(),
-            cap_lints: matches.remove_one(id::CAP_LINTS).unwrap_or_default(),
-            rustc_verbose_internals: matches
-                .remove_one(id::RUSTC_VERBOSE_INTERNALS)
-                .unwrap_or_default(),
+            suppress_lints: matches.remove_one(id::SUPPRESS_LINTS).unwrap_or_default(),
+            internals: matches.remove_one(id::INTERNALS).unwrap_or_default(),
             next_solver: matches.remove_one(id::NEXT_SOLVER).unwrap_or_default(),
             identity: matches.remove_one(id::IDENTITY),
             log: matches.remove_one(id::LOG),
             no_backtrace: matches.remove_one(id::NO_BACKTRACE).unwrap_or_default(),
         },
-        debug: DebugFlags {
+        debug: DebugOptions {
             verbose: matches.remove_one(id::VERBOSE).unwrap(),
             dry_run: matches.remove_one(id::DRY_RUN).unwrap(),
         },
@@ -353,8 +360,8 @@ pub(crate) struct Arguments {
     pub(crate) crate_name: Option<CrateNameBuf>,
     pub(crate) crate_type: Option<CrateType>,
     pub(crate) edition: Option<Edition>,
-    pub(crate) build: BuildFlags,
-    pub(crate) debug: DebugFlags,
+    pub(crate) build: BuildOptions,
+    pub(crate) debug: DebugOptions,
     pub(crate) color: ColorChoice,
 }
 
@@ -405,9 +412,9 @@ fn possible_values(values: impl Iterator<Item: std::fmt::Display> + Clone) -> St
 
 mod id {
     pub(super) const BUILD: &str = "build";
-    pub(super) const CAP_LINTS: &str = "CAP_LINTS";
     pub(super) const CARGO_FEATURES: &str = "CARGO_FEATURES";
     pub(super) const CFGS: &str = "CFGS";
+    pub(super) const CHECK: &str = "CHECK";
     pub(super) const COLOR: &str = "COLOR";
     pub(super) const COMPILETEST: &str = "COMPILETEST";
     pub(super) const CRATE_NAME: &str = "CRATE_NAME";
@@ -419,9 +426,10 @@ mod id {
     pub(super) const EDITION: &str = "EDITION";
     pub(super) const HIDDEN: &str = "HIDDEN";
     pub(super) const IDENTITY: &str = "IDENTITY";
+    pub(super) const INTERNALS: &str = "INTERNALS";
     pub(super) const JSON: &str = "JSON";
     pub(super) const LAYOUT: &str = "LAYOUT";
-    pub(super) const LINK_TO_DEFINITION: &str = "LINK_TO_DEFINITION";
+    pub(super) const LINK_TO_DEF: &str = "LINK_TO_DEF";
     pub(super) const LOG: &str = "LOG";
     pub(super) const NEXT_SOLVER: &str = "NEXT_SOLVER";
     pub(super) const NO_BACKTRACE: &str = "NO_BACKTRACE";
@@ -432,7 +440,7 @@ mod id {
     pub(super) const REVISION: &str = "REVISION";
     pub(super) const RUN: &str = "RUN";
     pub(super) const RUSTC_FEATURES: &str = "RUSTC_FEATURES";
-    pub(super) const RUSTC_VERBOSE_INTERNALS: &str = "RUSTC_VERBOSE_INTERNALS";
+    pub(super) const SUPPRESS_LINTS: &str = "SUPPRESS_LINTS";
     pub(super) const THEME: &str = "THEME";
     pub(super) const VERBATIM: &str = "VERBATIM";
     pub(super) const VERBOSE: &str = "VERBOSE";

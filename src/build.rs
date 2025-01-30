@@ -32,30 +32,32 @@ type Crate<'a> = data::Crate<'a, Option<Edition<'a>>>;
 
 pub(crate) fn perform(
     engine: Engine<'_>,
-    crate_: Crate<'_>,
+    krate: Crate<'_>,
     extern_crates: &[ExternCrate<'_>],
-    flags: Flags<'_>,
-    imply_unstable: ImplyUnstableOptions,
+    opts: Options<'_>,
+    imply_u_opts: ImplyUnstableOptions,
 ) -> io::Result<()> {
     let mut cmd = Command::new(engine.name());
-    let uses_unstable_options = configure_basic(&mut cmd, engine, crate_, flags);
-    configure_extra(&mut cmd, engine, extern_crates, flags);
-    if let ImplyUnstableOptions::Yes = imply_unstable
-        && let UsesUnstableOptions::Yes = uses_unstable_options
+    let u_opts = configure_basic(&mut cmd, engine, krate, opts);
+    configure_extra(&mut cmd, engine, extern_crates, opts);
+    if let ImplyUnstableOptions::Yes = imply_u_opts
+        && let UsesUnstableOptions::Yes = u_opts
     {
         cmd.arg("-Zunstable-options");
     }
-    execute(cmd, flags.debug)
+    execute(cmd, opts.debug)
 }
 
-pub(crate) fn query_crate_name(crate_: Crate<'_>, flags: Flags<'_>) -> io::Result<String> {
-    let mut cmd = Command::new(Engine::Rustc.name());
+pub(crate) fn query_crate_name(krate: Crate<'_>, opts: Options<'_>) -> io::Result<String> {
+    let engine = Engine::Rustc(&CompileOptions { check: false });
 
-    configure_basic(&mut cmd, Engine::Rustc, crate_, flags);
+    let mut cmd = Command::new(engine.name());
+
+    configure_basic(&mut cmd, engine, krate, opts);
 
     cmd.arg("--print=crate-name");
 
-    match gate(|p| render(&cmd, p), flags.debug) {
+    match gate(|p| render(&cmd, p), opts.debug) {
         ControlFlow::Continue(()) => {}
         ControlFlow::Break(()) => return Ok("UNKNOWN_DUE_TO_DRY_RUN".into()),
     }
@@ -75,42 +77,42 @@ pub(crate) fn query_crate_name(crate_: Crate<'_>, flags: Flags<'_>) -> io::Resul
 fn configure_basic(
     cmd: &mut Command,
     engine: Engine<'_>,
-    crate_: Crate<'_>,
-    flags: Flags<'_>,
+    krate: Crate<'_>,
+    opts: Options<'_>,
 ) -> UsesUnstableOptions {
-    let mut uses_unstable_options = UsesUnstableOptions::No;
+    let mut u_opts = UsesUnstableOptions::No;
 
     // Must come first!
     // FIXME: Consider only setting the (rustup) toolchain if the env var `RUSTUP_HOME` exists.
     //        And emitting a warning further up the stack of course.
-    if let Some(toolchain) = flags.toolchain {
+    if let Some(toolchain) = opts.toolchain {
         cmd.arg(toolchain);
     }
 
-    cmd.arg(crate_.path);
+    cmd.arg(krate.path);
     // FIXME: Get rid of the "fiducial check" (ideally `crate_name` would be an `Option<_>` instead).
-    if !CrateName::adjust_and_parse_file_path(crate_.path)
-        .is_ok_and(|fiducial_crate_name| crate_.name == fiducial_crate_name.as_ref())
+    if !CrateName::adjust_and_parse_file_path(krate.path)
+        .is_ok_and(|fiducial_crate_name| krate.name == fiducial_crate_name.as_ref())
     {
         cmd.arg("--crate-name");
-        cmd.arg(crate_.name.as_str());
+        cmd.arg(krate.name.as_str());
     }
 
     // FIXME: get rid of check against default?
-    if crate_.type_ != default() {
+    if krate.typ != default() {
         cmd.arg("--crate-type");
-        cmd.arg(crate_.type_.to_str());
+        cmd.arg(krate.typ.to_str());
     }
 
     // Regarding crate name querying, the edition is vital. After all,
     // rustc needs to parse the crate root to find `#![crate_name]`.
-    if let Some(edition) = crate_.edition {
+    if let Some(edition) = krate.edition {
         cmd.arg("--edition");
 
         let edition = match edition {
             Edition::Parsed(edition) => {
                 if !edition.is_stable() {
-                    uses_unstable_options.set();
+                    u_opts.set();
                 }
                 edition.to_str()
             }
@@ -120,9 +122,9 @@ fn configure_basic(
         cmd.arg(edition);
     }
 
-    // Regarding crate name querying, let's better honor this flag
+    // Regarding crate name querying, let's better honor this option
     // since it may significantly affect rustc's behavior.
-    if let Some(identity) = flags.build.identity {
+    if let Some(identity) = opts.build.identity {
         cmd.env("RUSTC_BOOTSTRAP", match identity {
             Identity::True => "0",
             Identity::Stable => "-1",
@@ -130,15 +132,14 @@ fn configure_basic(
         });
     }
 
-    configure_verbatim_data(cmd, flags.verbatim);
+    configure_verbatim(cmd, opts.verbatim);
+    configure_engine_specific(cmd, engine, &mut u_opts);
 
-    engine.configure(cmd, &mut uses_unstable_options);
-
-    if let Some(flags) = engine.env_flags() {
-        cmd.args(flags);
+    if let Some(opts) = engine.env_opts() {
+        cmd.args(opts);
     }
 
-    uses_unstable_options
+    u_opts
 }
 
 // FIXME: Explainer: This is stuff that isn't necessary for query_crate_name
@@ -146,7 +147,7 @@ fn configure_extra(
     cmd: &mut Command,
     engine: Engine<'_>,
     extern_crates: &[ExternCrate<'_>],
-    flags: Flags<'_>,
+    opts: Options<'_>,
 ) {
     // The crate name can't depend on any dependency crates, it's fine to skip this.
     // The opposite used to be the case actually prior to rust-lang/rust#117584.
@@ -180,51 +181,51 @@ fn configure_extra(
     // `#[cfg_attr(…, crate_name = "…")]` is a hard error (if the spec holds).
     // See also rust-lang/rust#91632.
     {
-        for cfg in &flags.build.cfgs {
+        for cfg in &opts.build.cfgs {
             cmd.arg("--cfg");
             cmd.arg(cfg);
         }
         // FIXME: This shouldn't be done here.
-        for feature in &flags.build.cargo_features {
+        for feature in &opts.build.cargo_features {
             // FIXME: Warn on conflicts with `cfgs` from `cmd.arguments.cfgs`.
             // FIXME: collapse
             cmd.arg("--cfg");
             cmd.arg(format!("feature=\"{feature}\""));
         }
         // FIXME: This shouldn't be done here.
-        if let Some(revision) = &flags.build.revision {
+        if let Some(revision) = &opts.build.revision {
             cmd.arg("--cfg");
             cmd.arg(revision);
         }
     }
 
-    for feature in &flags.build.rustc_features {
+    for feature in &opts.build.rustc_features {
         cmd.arg(format!("-Zcrate-attr=feature({feature})"));
     }
 
-    if flags.build.cap_lints {
-        cmd.arg("--cap-lints=warn");
+    if opts.build.suppress_lints {
+        cmd.arg("--cap-lints=allow");
     }
 
-    if flags.build.next_solver {
+    if opts.build.next_solver {
         cmd.arg("-Znext-solver");
     }
 
-    if flags.build.rustc_verbose_internals {
+    if opts.build.internals {
         cmd.arg("-Zverbose-internals");
     }
 
-    if flags.build.no_backtrace {
+    if opts.build.no_backtrace {
         cmd.env("RUST_BACKTRACE", "0");
     }
 
     // The logging output would just get thrown away.
-    if let Some(filter) = &flags.build.log {
+    if let Some(filter) = &opts.build.log {
         cmd.env(engine.logging_env_var(), filter);
     }
 }
 
-fn configure_verbatim_data(cmd: &mut process::Command, verbatim: VerbatimData<'_>) {
+fn configure_verbatim(cmd: &mut process::Command, verbatim: VerbatimOptions<'_>) {
     for (key, value) in verbatim.variables {
         match value {
             Some(value) => cmd.env(key, value),
@@ -234,36 +235,88 @@ fn configure_verbatim_data(cmd: &mut process::Command, verbatim: VerbatimData<'_
     // FIXME: This comment is out of context now
     // Regardin crate name querying,...
     // It's vital that we pass through verbatim arguments when querying the crate name as they might
-    // contain impactful flags like `--crate-name …`, `-Zcrate-attr=crate_name(…)`, or `--edition …`.
+    // contain impactful options like `--crate-name …`, `-Zcrate-attr=crate_name(…)`, or `--edition …`.
     cmd.args(verbatim.arguments);
+}
+
+fn configure_engine_specific(
+    cmd: &mut Command,
+    engine: Engine<'_>,
+    u_opts: &mut UsesUnstableOptions,
+) {
+    match engine {
+        Engine::Rustc(c_opts) => {
+            if c_opts.check {
+                // FIXME: Should we `-o $null`?
+                cmd.arg("--emit=metadata");
+            }
+        }
+        Engine::Rustdoc(d_opts) => {
+            if let DocBackend::Json = d_opts.backend {
+                cmd.arg("--output-format=json");
+                u_opts.set();
+            }
+
+            if let Some(crate_version) = &d_opts.crate_version {
+                cmd.arg("--crate-version");
+                cmd.arg(crate_version);
+            }
+
+            if d_opts.private {
+                cmd.arg("--document-private-items");
+            }
+
+            if d_opts.hidden {
+                cmd.arg("--document-hidden-items");
+                u_opts.set();
+            }
+
+            if d_opts.layout {
+                cmd.arg("--show-type-layout");
+                u_opts.set();
+            }
+
+            if d_opts.link_to_def {
+                cmd.arg("--generate-link-to-definition");
+                u_opts.set();
+            }
+
+            if d_opts.normalize {
+                cmd.arg("-Znormalize-docs");
+            }
+
+            cmd.arg("--default-theme");
+            cmd.arg(&d_opts.theme);
+        }
+    }
 }
 
 pub(crate) fn run(
     program: impl AsRef<OsStr>,
-    verbatim: VerbatimData<'_>,
-    flags: &DebugFlags,
+    v_opts: VerbatimOptions<'_>,
+    dbg_opts: &DebugOptions,
 ) -> io::Result<()> {
     let mut cmd = Command::new(program);
-    configure_verbatim_data(&mut cmd, verbatim);
-    execute(cmd, flags)
+    configure_verbatim(&mut cmd, v_opts);
+    execute(cmd, dbg_opts)
 }
 
-pub(crate) fn open(path: &Path, flags: &DebugFlags) -> io::Result<()> {
+pub(crate) fn open(path: &Path, dbg_opts: &DebugOptions) -> io::Result<()> {
     let message = |p: &mut Painter| {
         p.with(palette::COMMAND.on_default().bold(), |p| write!(p, "⟨open⟩ "))?;
         p.with(AnsiColor::Green, |p| write!(p, "{}", path.display()))
     };
 
-    match gate(message, flags) {
+    match gate(message, dbg_opts) {
         ControlFlow::Continue(()) => open::that(path),
         ControlFlow::Break(()) => Ok(()),
     }
 }
 
 #[must_use]
-fn gate(message: impl Paint, flags: &DebugFlags) -> ControlFlow<()> {
-    if flags.verbose {
-        let verb = if !flags.dry_run { "running" } else { "skipping" };
+fn gate(message: impl Paint, dbg_opts: &DebugOptions) -> ControlFlow<()> {
+    if dbg_opts.verbose {
+        let verb = if !dbg_opts.dry_run { "running" } else { "skipping" };
         debug(|p| {
             write!(p, "{verb} ")?;
             message(p)
@@ -271,7 +324,7 @@ fn gate(message: impl Paint, flags: &DebugFlags) -> ControlFlow<()> {
         .finish();
     }
 
-    match flags.dry_run {
+    match dbg_opts.dry_run {
         true => ControlFlow::Break(()),
         false => ControlFlow::Continue(()),
     }
@@ -279,78 +332,35 @@ fn gate(message: impl Paint, flags: &DebugFlags) -> ControlFlow<()> {
 
 #[derive(Clone, Copy)]
 pub(crate) enum Engine<'a> {
-    Rustc,
-    Rustdoc(&'a DocFlags),
+    Rustc(&'a CompileOptions),
+    Rustdoc(&'a DocOptions),
 }
 
 impl Engine<'_> {
     const fn name<'a>(self) -> &'a str {
         match self {
-            Self::Rustc => "rustc",
+            Self::Rustc(_) => "rustc",
             Self::Rustdoc(_) => "rustdoc",
         }
     }
 
     const fn logging_env_var<'a>(self) -> &'a str {
         match self {
-            Self::Rustc => "RUSTC_LOG",
+            Self::Rustc(_) => "RUSTC_LOG",
             Self::Rustdoc(_) => "RUSTDOC_LOG",
         }
     }
 
-    fn env_flags<'a>(self) -> Option<&'a [String]> {
+    fn env_opts<'a>(self) -> Option<&'a [String]> {
         match self {
-            Self::Rustc => environment::rustc_flags(),
-            Self::Rustdoc(_) => environment::rustdoc_flags(),
-        }
-    }
-
-    fn configure(self, cmd: &mut Command, uses_unstable_options: &mut UsesUnstableOptions) {
-        match self {
-            Self::Rustc => {}
-            Self::Rustdoc(doc_flags) => {
-                if let DocBackend::Json = doc_flags.backend {
-                    cmd.arg("--output-format=json");
-                    uses_unstable_options.set();
-                }
-
-                if let Some(crate_version) = &doc_flags.crate_version {
-                    cmd.arg("--crate-version");
-                    cmd.arg(crate_version);
-                }
-
-                if doc_flags.private {
-                    cmd.arg("--document-private-items");
-                }
-
-                if doc_flags.hidden {
-                    cmd.arg("--document-hidden-items");
-                    uses_unstable_options.set();
-                }
-
-                if doc_flags.layout {
-                    cmd.arg("--show-type-layout");
-                    uses_unstable_options.set();
-                }
-
-                if doc_flags.link_to_definition {
-                    cmd.arg("--generate-link-to-definition");
-                    uses_unstable_options.set();
-                }
-
-                if doc_flags.normalize {
-                    cmd.arg("-Znormalize-docs");
-                }
-
-                cmd.arg("--default-theme");
-                cmd.arg(&doc_flags.theme);
-            }
+            Self::Rustc(_) => environment::rustc_options(),
+            Self::Rustdoc(_) => environment::rustdoc_options(),
         }
     }
 }
 
-fn execute(mut cmd: process::Command, flags: &DebugFlags) -> io::Result<()> {
-    match gate(|p| render(&cmd, p), flags) {
+fn execute(mut cmd: process::Command, dbg_opts: &DebugOptions) -> io::Result<()> {
+    match gate(|p| render(&cmd, p), dbg_opts) {
         ControlFlow::Continue(()) => cmd.status()?.exit_ok().map_err(io::Error::other),
         ControlFlow::Break(()) => Ok(()),
     }
@@ -392,35 +402,38 @@ mod palette {
     pub(super) const ARGUMENT: AnsiColor = AnsiColor::Green;
 }
 
+pub(crate) struct CompileOptions {
+    pub(crate) check: bool,
+}
+
 #[allow(clippy::struct_excessive_bools)] // not worth to address
-pub(crate) struct DocFlags {
+pub(crate) struct DocOptions {
     pub(crate) backend: DocBackend,
     pub(crate) crate_version: Option<String>,
     pub(crate) private: bool,
     pub(crate) hidden: bool,
     pub(crate) layout: bool,
-    pub(crate) link_to_definition: bool,
+    pub(crate) link_to_def: bool,
     pub(crate) normalize: bool,
     pub(crate) theme: String,
 }
 
-/// Flags that get passed to `rustc` and `rustdoc` in a lowered form.
 #[allow(clippy::struct_excessive_bools)] // not worth to address
-pub(crate) struct BuildFlags {
+pub(crate) struct BuildOptions {
     pub(crate) cfgs: Vec<String>,
     pub(crate) revision: Option<String>,
     // FIXME: This shouldn't be here:
     pub(crate) cargo_features: Vec<String>,
     pub(crate) rustc_features: Vec<String>,
-    pub(crate) cap_lints: bool,
-    pub(crate) rustc_verbose_internals: bool,
+    pub(crate) suppress_lints: bool,
+    pub(crate) internals: bool,
     pub(crate) next_solver: bool,
     pub(crate) identity: Option<Identity>,
     pub(crate) log: Option<String>,
     pub(crate) no_backtrace: bool,
 }
 
-pub(crate) struct DebugFlags {
+pub(crate) struct DebugOptions {
     pub(crate) verbose: bool,
     pub(crate) dry_run: bool,
 }
@@ -433,18 +446,16 @@ pub(crate) enum ExternCrate<'src> {
     Named { name: CrateNameRef<'src>, path: Option<Spanned<Cow<'src, str>>> },
 }
 
-// FIXME: Name "flags" doesn't quite fit.
-// FIXME: Should we / can we move this into `cli` somehow?
 #[derive(Clone, Copy)]
-pub(crate) struct Flags<'a> {
+pub(crate) struct Options<'a> {
     pub(crate) toolchain: Option<&'a OsStr>,
-    pub(crate) build: &'a BuildFlags,
-    pub(crate) verbatim: VerbatimData<'a>,
-    pub(crate) debug: &'a DebugFlags,
+    pub(crate) build: &'a BuildOptions,
+    pub(crate) verbatim: VerbatimOptions<'a>,
+    pub(crate) debug: &'a DebugOptions,
 }
 
 #[derive(Clone, Copy, Default)]
-pub(crate) struct VerbatimData<'a> {
+pub(crate) struct VerbatimOptions<'a> {
     /// Program arguments to be passed verbatim.
     pub(crate) arguments: &'a [&'a str],
     /// Environment variables to be passed verbatim.
@@ -454,21 +465,21 @@ pub(crate) struct VerbatimData<'a> {
 /// Program arguments and environment variables to be passed verbatim.
 #[derive(Clone, Default)]
 #[cfg_attr(test, derive(PartialEq, Eq, Debug))]
-pub(crate) struct VerbatimDataBuf<'a> {
+pub(crate) struct VerbatimOptionsBuf<'a> {
     /// Program arguments to be passed verbatim.
     pub(crate) arguments: Vec<&'a str>,
     /// Environment variables to be passed verbatim.
     pub(crate) variables: Vec<(&'a str, Option<&'a str>)>,
 }
 
-impl<'a> VerbatimDataBuf<'a> {
-    pub(crate) fn extend(&mut self, other: VerbatimData<'a>) {
+impl<'a> VerbatimOptionsBuf<'a> {
+    pub(crate) fn extend(&mut self, other: VerbatimOptions<'a>) {
         self.arguments.extend_from_slice(other.arguments);
         self.variables.extend_from_slice(other.variables);
     }
 
-    pub(crate) fn as_ref(&self) -> VerbatimData<'_> {
-        VerbatimData { arguments: &self.arguments, variables: &self.variables }
+    pub(crate) fn as_ref(&self) -> VerbatimOptions<'_> {
+        VerbatimOptions { arguments: &self.arguments, variables: &self.variables }
     }
 }
 

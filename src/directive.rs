@@ -14,7 +14,7 @@
 //        want to provide a mechanism to circumvent that. E.g., `--force` or `-S <allow|warn>=...`.
 
 use crate::{
-    build::{ExternCrate, VerbatimDataBuf},
+    build::{ExternCrate, VerbatimOptionsBuf},
     context::Context,
     data::CrateNameRef,
     diagnostic::{EmittedError, error, fmt, warn},
@@ -223,8 +223,8 @@ pub(crate) struct InstantiatedDirectives<'src> {
     pub(crate) build_aux_docs: bool,
     pub(crate) dependencies: Vec<ExternCrate<'src>>,
     pub(crate) edition: Option<Spanned<&'src str>>,
-    pub(crate) build_verbatim: VerbatimDataBuf<'src>,
-    pub(crate) run_verbatim: VerbatimDataBuf<'src>,
+    pub(crate) build_verbatim: VerbatimOptionsBuf<'src>,
+    pub(crate) run_verbatim: VerbatimOptionsBuf<'src>,
 }
 
 impl<'src> InstantiatedDirectives<'src> {

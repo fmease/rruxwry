@@ -12,29 +12,29 @@ use std::{
 
 type Environment = HashMap<OsString, OsString>;
 
-pub(super) fn rustc_flags<'a>() -> Option<&'a [String]> {
-    static RUSTFLAGS: LazyLock<Option<Vec<String>>> = LazyLock::new(|| {
-        parse_flags(
+pub(super) fn rustc_options<'a>() -> Option<&'a [String]> {
+    static OPTS: LazyLock<Option<Vec<String>>> = LazyLock::new(|| {
+        parse_options(
             OsStr::new("RUSTFLAGS"),
             &[OsStr::new("RUST_FLAGS"), OsStr::new("RUSTCFLAGS"), OsStr::new("RUSTC_FLAGS")],
             &ENVIRONMENT,
         )
     });
 
-    RUSTFLAGS.as_deref()
+    OPTS.as_deref()
 }
 
-pub(super) fn rustdoc_flags<'a>() -> Option<&'a [String]> {
-    static RUSTDOCFLAGS: LazyLock<Option<Vec<String>>> = LazyLock::new(|| {
-        parse_flags(OsStr::new("RUSTDOCFLAGS"), &[OsStr::new("RUSTDOC_FLAGS")], &ENVIRONMENT)
+pub(super) fn rustdoc_options<'a>() -> Option<&'a [String]> {
+    static OPTS: LazyLock<Option<Vec<String>>> = LazyLock::new(|| {
+        parse_options(OsStr::new("RUSTDOCFLAGS"), &[OsStr::new("RUSTDOC_FLAGS")], &ENVIRONMENT)
     });
 
-    RUSTDOCFLAGS.as_deref()
+    OPTS.as_deref()
 }
 
 static ENVIRONMENT: LazyLock<Environment> = LazyLock::new(|| std::env::vars_os().collect());
 
-fn parse_flags(
+fn parse_options(
     key: &OsStr,
     confusables: &[&OsStr],
     environment: &Environment,
@@ -45,21 +45,21 @@ fn parse_flags(
         }
     }
 
-    let flags = environment.get(key)?;
+    let opts = environment.get(key)?;
 
-    let Some(flags) = flags.to_str() else {
+    let Some(opts) = opts.to_str() else {
         warn_malformed_env_var(key, "its content is not valid UTF-8");
 
         return None;
     };
 
-    let flags = shlex::split(flags);
+    let opts = shlex::split(opts);
 
-    if flags.is_none() {
+    if opts.is_none() {
         warn_malformed_env_var(key, "its content is not properly escaped");
     }
 
-    flags
+    opts
 }
 
 fn warn_env_contains_confusable_var(confusable: &OsStr, suggestion: &OsStr) {
