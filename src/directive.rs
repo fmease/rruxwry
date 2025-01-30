@@ -16,7 +16,7 @@
 use crate::{
     build::{ExternCrate, VerbatimOptionsBuf},
     context::Context,
-    data::CrateNameRef,
+    data::CrateName,
     diagnostic::{EmittedError, error, fmt, warn},
     source::{LocalSpan, SourceFileRef, Span, Spanned},
     utility::{Conjunction, ListingExt, default},
@@ -285,7 +285,7 @@ enum SimpleDirective<'src> {
     },
     // FIXME: compiletest doesn't consider the path to be optional (gate this behind Flavor::Rruxwry).
     AuxCrate {
-        name: CrateNameRef<'src>,
+        name: CrateName<&'src str>,
         path: Option<Spanned<&'src str>>,
     },
     BuildAuxDocs,
@@ -448,7 +448,7 @@ impl<'src> Parser<'src> {
                 // to be able to provide a better error message.
                 let name = self.expect_many(|char| char != '=' && !char.is_whitespace())?.bare;
                 // FIXME: Does compiletest also validate the crate name? I doubt it.
-                let Ok(name) = CrateNameRef::parse(name) else {
+                let Ok(name) = CrateName::parse(name) else {
                     return Err(Error::InvalidValue(name));
                 };
 

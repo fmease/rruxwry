@@ -11,7 +11,7 @@
 //        as well as those passed via the `RUST{,DOC}FLAGS` env vars.
 
 use crate::{
-    data::{self, CrateName, CrateNameRef, CrateType, DocBackend, Identity},
+    data::{Crate, CrateName, CrateType, DocBackend, Identity},
     diagnostic::{Paint, Painter, debug},
     source::Spanned,
 };
@@ -26,8 +26,6 @@ use std::{
 };
 
 mod environment;
-
-type Crate<'a> = data::Crate<'a, Option<Edition<'a>>>;
 
 pub(crate) fn perform(
     engine: Engine<'_>,
@@ -89,12 +87,10 @@ fn configure_basic(
     }
 
     cmd.arg(krate.path);
-    // FIXME: Get rid of the "fiducial check" (ideally `crate_name` would be an `Option<_>` instead).
-    if !CrateName::adjust_and_parse_file_path(krate.path)
-        .is_ok_and(|fiducial_crate_name| krate.name == fiducial_crate_name.as_ref())
-    {
+
+    if let Some(name) = krate.name {
         cmd.arg("--crate-name");
-        cmd.arg(krate.name.as_str());
+        cmd.arg(name.as_str());
     }
 
     if let Some(CrateType(typ)) = krate.typ {
@@ -105,19 +101,12 @@ fn configure_basic(
     // Regarding crate name querying, the edition is vital. After all,
     // rustc needs to parse the crate root to find `#![crate_name]`.
     if let Some(edition) = krate.edition {
+        if !edition.is_stable() {
+            u_opts.set();
+        }
+
         cmd.arg("--edition");
-
-        let edition = match edition {
-            Edition::Parsed(edition) => {
-                if !edition.is_stable() {
-                    u_opts.set();
-                }
-                edition.to_str()
-            }
-            Edition::Raw(edition) => edition,
-        };
-
-        cmd.arg(edition);
+        cmd.arg(edition.to_str());
     }
 
     // Regarding crate name querying, let's better honor this option
@@ -441,7 +430,7 @@ pub(crate) struct DebugOptions {
 #[cfg_attr(test, derive(PartialEq, Eq, Debug))]
 pub(crate) enum ExternCrate<'src> {
     Unnamed { path: Spanned<&'src str> },
-    Named { name: CrateNameRef<'src>, path: Option<Spanned<Cow<'src, str>>> },
+    Named { name: CrateName<&'src str>, path: Option<Spanned<Cow<'src, str>>> },
 }
 
 #[derive(Clone, Copy)]
@@ -498,10 +487,4 @@ impl UsesUnstableOptions {
     fn set(&mut self) {
         *self = Self::Yes;
     }
-}
-
-#[derive(Clone, Copy)]
-pub(crate) enum Edition<'a> {
-    Parsed(data::Edition),
-    Raw(&'a str),
 }

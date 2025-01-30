@@ -19,7 +19,6 @@
 #![allow(clippy::match_bool)] // I disagree
 #![allow(clippy::too_many_lines)] // I disagree
 
-use data::{CrateNameBuf, CrateNameCow};
 use diagnostic::{bug, fmt};
 use std::process::ExitCode;
 
@@ -62,15 +61,6 @@ fn try_main() -> error::Result {
     // FIXME: eagerly lower `-f`s to `--cfg`s here (or rather in `cli`?),
     // so we properly support them in `compiletest`+command
 
-    // FIXME: Keep the Option so we can do more stuff in operate
-    let edition = args.edition.unwrap_or_else(|| args.operation.mode().edition());
-
-    // FIXME: maybe delay this???
-    // FIXME: This `unwrap` is obviously reachable (e.g., on `rrc '%$?'`)
-    let crate_name: CrateNameCow<'_> = args.crate_name.map_or_else(
-        || CrateNameBuf::adjust_and_parse_file_path(&args.path).unwrap().into(),
-        Into::into,
-    );
     // FIXME: this is awkward ... can we do this inside cli smh (not the ref op ofc)
     let v_opts = build::VerbatimOptionsBuf {
         arguments: args.verbatim.iter().map(String::as_str).collect(),
@@ -84,8 +74,14 @@ fn try_main() -> error::Result {
         debug: &args.debug,
     };
 
-    let krate =
-        data::Crate { path: &args.path, name: crate_name.as_ref(), typ: args.crate_type, edition };
+    // FIXME: Move the creation of this to the CLI once interface can process
+    //        borrowed program args (i.e. once clap is thrown out).
+    let krate = data::Crate {
+        path: &args.path,
+        name: args.crate_name.as_ref().map(|name| name.as_ref()),
+        typ: args.crate_type,
+        edition: args.edition,
+    };
 
     operate::perform(args.operation, krate, opts, cx)
 }

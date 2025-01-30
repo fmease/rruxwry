@@ -2,7 +2,7 @@
 
 use crate::{
     build::{BuildOptions, CompileOptions, DebugOptions, DocOptions},
-    data::{CrateNameBuf, CrateType, DocBackend, Edition, Identity},
+    data::{CrateName, CrateType, DocBackend, Edition, Identity},
     directive::Flavor,
     operate::{CompileMode, DocMode, Open, Operation, Run},
     utility::{Conjunction, ListingExt as _, parse},
@@ -56,7 +56,7 @@ pub(crate) fn arguments() -> Arguments {
                 .short('n')
                 .long("crate-name")
                 .value_name("NAME")
-                .value_parser(CrateNameBuf::parse_cli_style)
+                .value_parser(CrateName::parse_cli_style)
                 .help("Set the name of the (base) crate"),
             clap::Arg::new(id::CRATE_TYPE)
                 .short('t')
@@ -70,7 +70,6 @@ pub(crate) fn arguments() -> Arguments {
         clap::Arg::new(id::EDITION)
             .short('e')
             .long("edition")
-            .value_parser(Edition::parse_cli_style)
             .help("Set the edition of the source files")
     }
     fn cfgs() -> impl Iterator<Item = clap::Arg> {
@@ -316,18 +315,22 @@ pub(crate) fn arguments() -> Arguments {
         _ => unreachable!(), // handled by `clap`,
     };
 
+    // FIXME: Don't leak the crate type and the edition!
+    //        Sadly, clap doesn't support zero-copy deserialization /
+    //        deserializing from borrowed program arguments and providing &strs.
+    //        Fix: Throw out clap and do it manually.
     Arguments {
         toolchain,
         path: matches.remove_one(id::PATH).unwrap(),
         verbatim: matches.remove_many(id::VERBATIM).map(Iterator::collect).unwrap_or_default(),
         operation,
         crate_name: matches.remove_one(id::CRATE_NAME),
-        // FIXME: Don't leak! Is there a way for clap to *borrow* from the args? Ofc.
-        //        the args must then be provided by the caller, not collected here.
         crate_type: matches
             .remove_one(id::CRATE_TYPE)
             .map(|typ: String| CrateType::parse_cli_style(typ.leak())),
-        edition: matches.remove_one(id::EDITION),
+        edition: matches
+            .remove_one(id::EDITION)
+            .map(|edition: String| Edition::parse_cli_style(edition.leak())),
         build: BuildOptions {
             cfgs: matches.remove_many(id::CFGS).map(Iterator::collect).unwrap_or_default(),
             revision: matches.remove_one(id::REVISION),
@@ -360,17 +363,18 @@ pub(crate) struct Arguments {
     pub(crate) path: PathBuf,
     pub(crate) verbatim: Vec<String>,
     pub(crate) operation: Operation,
-    pub(crate) crate_name: Option<CrateNameBuf>,
+    pub(crate) crate_name: Option<CrateName<String>>,
     pub(crate) crate_type: Option<CrateType>,
-    pub(crate) edition: Option<Edition>,
+    pub(crate) edition: Option<Edition<'static>>,
     pub(crate) build: BuildOptions,
     pub(crate) debug: DebugOptions,
     pub(crate) color: ColorChoice,
 }
 
-impl Edition {
-    fn parse_cli_style(source: &str) -> Result<Self, String> {
-        parse!(
+impl Edition<'static> {
+    // FIXME: Take <'a> &'a str string once clap is thrown out.
+    fn parse_cli_style(source: &'static str) -> Self {
+        match source {
             "d" => Self::RUSTC_DEFAULT,
             "s" => Self::LATEST_STABLE,
             "e" => Self::BLEEDING_EDGE,
@@ -378,12 +382,12 @@ impl Edition {
             "18" | "2018" => Self::Rust2018,
             "21" | "2021" => Self::Rust2021,
             "24" | "2024" => Self::Rust2024,
-        )(source)
-        .map_err(possible_values)
+            _ => Self::Unknown(source),
+        }
     }
 }
 
-impl CrateNameBuf {
+impl CrateName<String> {
     fn parse_cli_style(source: &str) -> Result<Self, &'static str> {
         Self::adjust_and_parse(source).map_err(|()| "not a non-empty alphanumeric string")
     }

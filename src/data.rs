@@ -1,15 +1,18 @@
-use std::{borrow::Cow, fmt, path::Path, str::FromStr};
+use std::{borrow::Cow, fmt, path::Path};
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-#[cfg_attr(test, derive(Debug))]
-pub(crate) enum Edition {
+pub(crate) enum Edition<'a> {
     Rust2015,
     Rust2018,
     Rust2021,
     Rust2024,
+    // For forward compatibility with future versions of Rust.
+    // I don't want to assume that rruxwry gets *so* well maintained that
+    // it can keep pace with the development of Rust.
+    Unknown(&'a str),
 }
 
-impl Edition {
+impl<'a> Edition<'a> {
     pub(crate) const RUSTC_DEFAULT: Self = Self::Rust2015;
     pub(crate) const LATEST_STABLE: Self = Self::Rust2024;
     pub(crate) const BLEEDING_EDGE: Self = Self::LATEST_STABLE;
@@ -18,42 +21,24 @@ impl Edition {
         self <= Self::LATEST_STABLE
     }
 
-    pub(crate) const fn to_str(self) -> &'static str {
+    pub(crate) const fn to_str(self) -> &'a str {
         match self {
             Self::Rust2015 => "2015",
             Self::Rust2018 => "2018",
             Self::Rust2021 => "2021",
             Self::Rust2024 => "2024",
+            Self::Unknown(edition) => edition,
         }
     }
 }
 
-impl FromStr for Edition {
-    type Err = ();
-
-    fn from_str(source: &str) -> Result<Self, Self::Err> {
-        Ok(match source {
-            "2015" => Self::Rust2015,
-            "2018" => Self::Rust2018,
-            "2021" => Self::Rust2021,
-            "2024" => Self::Rust2024,
-            _ => return Err(()),
-        })
-    }
-}
-
-// This is just a wrapper around a string. An enum listing all crate types
-// valid at the time of writing wouldn't be forward compatible with future
-// versions of rust{,do}c. I don't want to assume that rruxwry gets so well
-//  maintained that it can keep pace with rust{,do}c.
+// This is just a wrapper around a string. An enum listing all crate types which are
+// valid at the time of writing wouldn't be forward compatible with future versions
+// of rust{,do}c. I don't want to assume that rruxwry gets *so* well maintained that
+// it can keep pace with rust{,do}c.
 #[derive(Clone, Copy, PartialEq, Eq)]
-#[cfg_attr(test, derive(Debug))]
-// FIXME: Switch to <'a> &'a str once we've thrown out clap
+// FIXME: Switch to <'a> &'a str once we've thrown out clap.
 pub(crate) struct CrateType(pub &'static str);
-
-pub(crate) type CrateNameBuf = CrateName<String>;
-pub(crate) type CrateNameRef<'a> = CrateName<&'a str>;
-pub(crate) type CrateNameCow<'a> = CrateName<Cow<'a, str>>;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(test, derive(Debug))]
@@ -73,7 +58,7 @@ impl<T: AsRef<str>> CrateName<T> {
     }
 }
 
-impl<'src> CrateNameRef<'src> {
+impl<'src> CrateName<&'src str> {
     pub(crate) fn parse(source: &'src str) -> Result<Self, ()> {
         // This does indeed follow rustc's rules:
         //
@@ -92,7 +77,7 @@ impl<'src> CrateNameRef<'src> {
     }
 }
 
-impl CrateNameBuf {
+impl CrateName<String> {
     pub(crate) fn adjust_and_parse_file_path(path: &Path) -> Result<Self, ()> {
         path.file_stem().and_then(|name| name.to_str()).ok_or(()).and_then(Self::adjust_and_parse)
     }
@@ -110,19 +95,19 @@ impl CrateNameBuf {
 }
 
 impl<T: AsRef<str>> CrateName<T> {
-    pub(crate) fn as_ref(&self) -> CrateNameRef<'_> {
+    pub(crate) fn as_ref(&self) -> CrateName<&str> {
         CrateName(self.0.as_ref())
     }
 }
 
-impl From<CrateNameBuf> for CrateNameCow<'_> {
-    fn from(name: CrateNameBuf) -> Self {
+impl From<CrateName<String>> for CrateName<Cow<'_, str>> {
+    fn from(name: CrateName<String>) -> Self {
         name.map(Cow::Owned)
     }
 }
 
-impl<'a> From<CrateNameRef<'a>> for CrateNameCow<'a> {
-    fn from(name: CrateNameRef<'a>) -> Self {
+impl<'a> From<CrateName<&'a str>> for CrateName<Cow<'a, str>> {
+    fn from(name: CrateName<&'a str>) -> Self {
         name.map(Cow::Borrowed)
     }
 }
@@ -147,9 +132,9 @@ pub(crate) enum Identity {
 }
 
 #[derive(Clone, Copy)]
-pub(crate) struct Crate<'a, E = Edition> {
+pub(crate) struct Crate<'a> {
     pub(crate) path: &'a Path,
-    pub(crate) name: CrateNameRef<'a>,
+    pub(crate) name: Option<CrateName<&'a str>>,
     pub(crate) typ: Option<CrateType>,
-    pub(crate) edition: E,
+    pub(crate) edition: Option<Edition<'a>>,
 }

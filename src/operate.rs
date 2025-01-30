@@ -9,11 +9,11 @@
 
 use crate::{
     build::{
-        self, CompileOptions, DocOptions, Edition, ExternCrate, ImplyUnstableOptions, Options,
+        self, CompileOptions, DocOptions, ExternCrate, ImplyUnstableOptions, Options,
         VerbatimOptions,
     },
     context::Context,
-    data::{self, Crate, CrateName, CrateType, DocBackend},
+    data::{Crate, CrateName, CrateType, DocBackend, Edition},
     diagnostic::error,
     directive,
     error::Result,
@@ -22,6 +22,7 @@ use crate::{
     utility::default,
 };
 use std::{
+    borrow::Cow,
     cell::LazyCell,
     path::{Path, PathBuf},
 };
@@ -58,11 +59,7 @@ fn compile(
     }
 }
 
-fn run(
-    krate: Crate<'_, Option<build::Edition<'_>>>,
-    opts: Options<'_>,
-    run_v_opts: VerbatimOptions<'_>,
-) -> Result {
+fn run(krate: Crate<'_>, opts: Options<'_>, run_v_opts: VerbatimOptions<'_>) -> Result {
     // FIXME: Explainer
     let crate_name = build::query_crate_name(krate, opts)?;
     let mut path: PathBuf = [".", &crate_name].into_iter().collect();
@@ -82,7 +79,7 @@ fn compile_default(
     c_opts: &CompileOptions,
     run: Run,
 ) -> Result {
-    let krate = Crate { edition: Some(Edition::Parsed(krate.edition)), ..krate };
+    let krate = Crate { edition: krate.edition.or(Some(Edition::LATEST_STABLE)), ..krate };
 
     build::perform(
         build::Engine::Rustc(c_opts),
@@ -125,16 +122,12 @@ fn compile_compiletest(
         .collect::<Result<_>>()?;
 
     directives.build_verbatim.extend(opts.verbatim);
-    // FIXME: Should we generally emit a warning when CLI tests anything that *may* lead to clashes down the line?
-    //        E.g., on `--crate-name`, `--crate-type` and `--edition`? And what about CLI/env verbatim opts?
-
-    // FIXME: Once this one is an `Option<Edition>` instead, so we can tell if it was explicitly set by the user,
-    //        use it to overwrite `directives.edition`.
-    let _ = krate.edition;
 
     // FIXME: Once we support `//@ proc-macro` we need to reflect that in the crate type.
-    let krate =
-        Crate { edition: directives.edition.map(|edition| Edition::Raw(edition.bare)), ..krate };
+    let krate = Crate {
+        edition: krate.edition.or(directives.edition.map(|edition| Edition::Unknown(edition.bare))),
+        ..krate
+    };
 
     let opts = Options { verbatim: directives.build_verbatim.as_ref(), ..opts };
 
@@ -158,6 +151,10 @@ fn compile_compiletest(
 fn compile_compiletest_auxiliary<'a>(
     extern_crate: &ExternCrate<'a>,
     base_path: &Path,
+    // FIXME: Do we actually want to pass along these opts? Arguably they belong to the root crate.
+    //        The status quo is inconsistent because we don't honor the krate.edition (which is
+    //        also just an "Option") etc. (except krate.name obv).
+    //        At the very least, passing this along should be behind an option itself.
     opts: Options<'_>,
     c_opts: &CompileOptions,
     flavor: directive::Flavor,
@@ -170,9 +167,6 @@ fn compile_compiletest_auxiliary<'a>(
             None => Spanned::sham(base_path.join(name.as_str()).with_extension("rs")),
         },
     };
-
-    // FIXME: unwrap
-    let crate_name = CrateName::adjust_and_parse_file_path(&path.bare).unwrap();
 
     let mut directives = directive::gather(
         path.as_deref(),
@@ -188,10 +182,11 @@ fn compile_compiletest_auxiliary<'a>(
         build::Engine::Rustc(c_opts),
         Crate {
             path: &path.bare,
-            name: crate_name.as_ref(),
+            // FIXME: Or does compiletest do something 'smarter'?
+            name: None,
             // FIXME: Make this "dylib" instead unless directives.no_prefer_dynamic then it should be..None?
             typ: Some(CrateType("lib")),
-            edition: directives.edition.map(|edition| Edition::Raw(edition.bare)),
+            edition: directives.edition.map(|edition| Edition::Unknown(edition.bare)),
         },
         &[],
         Options { verbatim: directives.build_verbatim.as_ref(), ..opts },
@@ -206,6 +201,7 @@ fn compile_compiletest_auxiliary<'a>(
         // FIXME: For some reason `compiletest` doesn't support `//@ aux-crate: name=../`
         ExternCrate::Named { name, .. } => {
             // FIXME: unwrap
+            // FIXME: do we *need* to do this???
             let crate_name = CrateName::adjust_and_parse_file_path(&path.bare).unwrap();
 
             ExternCrate::Named {
@@ -234,7 +230,7 @@ fn document(
     }
 }
 
-fn open(krate: Crate<'_, Option<build::Edition<'_>>>, opts: Options<'_>) -> Result<()> {
+fn open(krate: Crate<'_>, opts: Options<'_>) -> Result<()> {
     let crate_name = build::query_crate_name(krate, opts)?;
     let path = format!("./doc/{crate_name}/index.html");
 
@@ -252,7 +248,7 @@ fn document_default(
     d_opts: &DocOptions,
     open: Open,
 ) -> Result<()> {
-    let krate = Crate { edition: Some(Edition::Parsed(krate.edition)), ..krate };
+    let krate = Crate { edition: krate.edition.or(Some(Edition::LATEST_STABLE)), ..krate };
 
     build::perform(
         build::Engine::Rustdoc(d_opts),
@@ -274,16 +270,24 @@ fn document_cross_crate(
     d_opts: &DocOptions,
     open: Open,
 ) -> Result<()> {
+    let edition = krate.edition.or(Some(Edition::LATEST_STABLE));
+
     build::perform(
         build::Engine::Rustc(&CompileOptions { check: false }),
         // FIXME: Should we check for `krate.typ=="bin"` and reject it? Possibly leads to a nicer UX.
-        Crate { typ: krate.typ, edition: Some(Edition::Parsed(krate.edition)), ..krate },
+        Crate { typ: krate.typ, edition, ..krate },
         extern_prelude_for(krate.typ),
         opts,
         ImplyUnstableOptions::Yes,
     )?;
 
-    let root_crate_name = CrateName::new_unchecked(format!("u_{}", krate.name));
+    // FIXME: This `unwrap` is obviously reachable (e.g., on `rrc '%$?'`)
+    let crate_name: CrateName<Cow<'_, _>> = krate.name.map_or_else(
+        || CrateName::adjust_and_parse_file_path(krate.path).unwrap().into(),
+        Into::into,
+    );
+
+    let root_crate_name = CrateName::new_unchecked(format!("u_{crate_name}"));
     let root_crate_path = krate.path.with_file_name(root_crate_name.as_str()).with_extension("rs");
 
     if !opts.debug.dry_run && !root_crate_path.exists() {
@@ -293,18 +297,14 @@ fn document_cross_crate(
         // created for a newer edition or not.
         std::fs::write(
             &root_crate_path,
-            format!("extern crate {0}; pub use {0}::*;\n", krate.name),
+            format!("extern crate {crate_name}; pub use {crate_name}::*;\n"),
         )?;
     };
 
-    let deps = &[ExternCrate::Named { name: krate.name.as_ref(), path: None }];
+    let deps = &[ExternCrate::Named { name: crate_name.as_ref(), path: None }];
 
-    let krate = Crate {
-        path: &root_crate_path,
-        name: root_crate_name.as_ref(),
-        typ: None,
-        edition: Some(Edition::Parsed(krate.edition)),
-    };
+    let krate =
+        Crate { path: &root_crate_path, name: Some(root_crate_name.as_ref()), typ: None, edition };
 
     build::perform(build::Engine::Rustdoc(d_opts), krate, deps, opts, ImplyUnstableOptions::Yes)?;
 
@@ -369,16 +369,12 @@ fn document_compiletest(
         .collect::<Result<_>>()?;
 
     directives.build_verbatim.extend(opts.verbatim);
-    // FIXME: Should we generally emit a warning when CLI tests anything that *may* lead to clashes down the line?
-    //        E.g., on `--crate-name`, `--crate-type` and `--edition`? And what about CLI/env verbatim opts?
-
-    // FIXME: Once this one is an `Option<Edition>` instead, so we can tell if it was explicitly set by the user,
-    //        use it to overwrite `directives.edition`.
-    let _ = krate.edition;
 
     // FIXME: Once we support `//@ proc-macro` we need to reflect that in the crate type.
-    let krate =
-        Crate { edition: directives.edition.map(|edition| Edition::Raw(edition.bare)), ..krate };
+    let krate = Crate {
+        edition: krate.edition.or(directives.edition.map(|edition| Edition::Unknown(edition.bare))),
+        ..krate
+    };
 
     build::perform(
         build::Engine::Rustdoc(d_opts),
@@ -401,6 +397,10 @@ fn document_compiletest_auxiliary<'a>(
     extern_crate: &ExternCrate<'a>,
     base_path: &Path,
     document: bool,
+    // FIXME: Do we actually want to pass along these opts? Arguably they belong to the root crate.
+    //        The status quo is inconsistent because we don't honor the krate.edition (which is
+    //        also just an "Option") etc. (except krate.name obv).
+    //        At the very least, passing this along should be behind an option itself.
     opts: Options<'_>,
     d_opts: &DocOptions,
     flavor: directive::Flavor,
@@ -413,9 +413,6 @@ fn document_compiletest_auxiliary<'a>(
             None => Spanned::sham(base_path.join(name.as_str()).with_extension("rs")),
         },
     };
-
-    // FIXME: unwrap
-    let crate_name = CrateName::adjust_and_parse_file_path(&path.bare).unwrap();
 
     // FIXME: DRY
     // FIXME: Do we actually want to treat !`-j` as `rustdoc/` (Scope::HtmlDocCk)
@@ -441,10 +438,11 @@ fn document_compiletest_auxiliary<'a>(
         build::Engine::Rustc(&CompileOptions { check: false }),
         Crate {
             path: &path.bare,
-            name: crate_name.as_ref(),
+            // FIXME: Does compiletest do something 'smarter'?
+            name: None,
             // FIXME: Make this "dylib" instead unless directives.no_prefer_dynamic then it should be..None?
             typ: Some(CrateType("lib")),
-            edition: directives.edition.map(|edition| Edition::Raw(edition.bare)),
+            edition: directives.edition.map(|edition| Edition::Unknown(edition.bare)),
         },
         &[],
         opts,
@@ -457,10 +455,11 @@ fn document_compiletest_auxiliary<'a>(
             build::Engine::Rustdoc(d_opts),
             Crate {
                 path: &path.bare,
-                name: crate_name.as_ref(),
+                // FIXME: Does compiletest do something 'smarter'?
+                name: None,
                 // FIXME: Should this also be Some("dylib") unless directives.no_prefer_dynamic?
                 typ: None,
-                edition: directives.edition.map(|edition| Edition::Raw(edition.bare)),
+                edition: directives.edition.map(|edition| Edition::Unknown(edition.bare)),
             },
             &[],
             opts,
@@ -476,6 +475,7 @@ fn document_compiletest_auxiliary<'a>(
         // FIXME: For some reason `compiletest` doesn't support `//@ aux-crate: name=../`
         ExternCrate::Named { name, .. } => {
             // FIXME: unwrap
+            // FIXME: Is this strictly necessary?
             let crate_name = CrateName::adjust_and_parse_file_path(&path.bare).unwrap();
 
             ExternCrate::Named {
@@ -494,14 +494,10 @@ pub(crate) enum Operation {
     Document { mode: DocMode, open: Open, options: DocOptions },
 }
 
-impl Operation {
-    // FIXME: Make this private once possible
-    pub(crate) fn mode(&self) -> Mode {
-        match *self {
-            Self::Compile { mode, .. } => mode.into(),
-            Self::Document { mode, .. } => mode.into(),
-        }
-    }
+#[derive(Clone, Copy)]
+pub(crate) enum CompileMode {
+    Default,
+    Compiletest(directive::Flavor),
 }
 
 #[derive(Clone, Copy)]
@@ -511,56 +507,14 @@ pub(crate) enum Run {
 }
 
 #[derive(Clone, Copy)]
-pub(crate) enum Open {
-    Yes,
-    No,
-}
-
-// FIXME: Is there are way to consolidate DocMode and BuildMode?
-//        Plz DRY the compiletest edition code.
-
-#[derive(Clone, Copy)]
 pub(crate) enum DocMode {
     Default,
     CrossCrate,
     Compiletest(directive::Flavor),
 }
 
-impl From<DocMode> for Mode {
-    fn from(mode: DocMode) -> Self {
-        match mode {
-            DocMode::Compiletest(_) => Self::Compiletest,
-            DocMode::Default | DocMode::CrossCrate => Self::Other,
-        }
-    }
-}
-
 #[derive(Clone, Copy)]
-pub(crate) enum CompileMode {
-    Default,
-    Compiletest(directive::Flavor),
-}
-
-impl From<CompileMode> for Mode {
-    fn from(mode: CompileMode) -> Self {
-        match mode {
-            CompileMode::Compiletest(_) => Self::Compiletest,
-            CompileMode::Default => Self::Other,
-        }
-    }
-}
-
-#[derive(Clone, Copy)]
-pub(crate) enum Mode {
-    Compiletest,
-    Other,
-}
-
-impl Mode {
-    pub(crate) fn edition(self) -> data::Edition {
-        match self {
-            Self::Compiletest => data::Edition::RUSTC_DEFAULT,
-            Self::Other => data::Edition::LATEST_STABLE,
-        }
-    }
+pub(crate) enum Open {
+    Yes,
+    No,
 }
