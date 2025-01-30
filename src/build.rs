@@ -11,10 +11,9 @@
 //        as well as those passed via the `RUST{,DOC}FLAGS` env vars.
 
 use crate::{
-    data::{self, CrateName, CrateNameRef, DocBackend, Identity},
+    data::{self, CrateName, CrateNameRef, CrateType, DocBackend, Identity},
     diagnostic::{Paint, Painter, debug},
     source::Spanned,
-    utility::default,
 };
 use anstyle::{AnsiColor, Effects};
 use std::{
@@ -98,10 +97,9 @@ fn configure_basic(
         cmd.arg(krate.name.as_str());
     }
 
-    // FIXME: get rid of check against default?
-    if krate.typ != default() {
+    if let Some(CrateType(typ)) = krate.typ {
         cmd.arg("--crate-type");
-        cmd.arg(krate.typ.to_str());
+        cmd.arg(typ);
     }
 
     // Regarding crate name querying, the edition is vital. After all,

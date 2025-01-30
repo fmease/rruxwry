@@ -62,7 +62,6 @@ pub(crate) fn arguments() -> Arguments {
                 .short('t')
                 .long("crate-type")
                 .value_name("TYPE")
-                .value_parser(CrateType::parse_cli_style)
                 .help("Set the type of the (base) crate"),
         ]
         .into_iter()
@@ -323,7 +322,11 @@ pub(crate) fn arguments() -> Arguments {
         verbatim: matches.remove_many(id::VERBATIM).map(Iterator::collect).unwrap_or_default(),
         operation,
         crate_name: matches.remove_one(id::CRATE_NAME),
-        crate_type: matches.remove_one(id::CRATE_TYPE),
+        // FIXME: Don't leak! Is there a way for clap to *borrow* from the args? Ofc.
+        //        the args must then be provided by the caller, not collected here.
+        crate_type: matches
+            .remove_one(id::CRATE_TYPE)
+            .map(|typ: String| CrateType::parse_cli_style(typ.leak())),
         edition: matches.remove_one(id::EDITION),
         build: BuildOptions {
             cfgs: matches.remove_many(id::CFGS).map(Iterator::collect).unwrap_or_default(),
@@ -368,9 +371,9 @@ pub(crate) struct Arguments {
 impl Edition {
     fn parse_cli_style(source: &str) -> Result<Self, String> {
         parse!(
-            "D" => Self::RUSTC_DEFAULT,
-            "S" => Self::LATEST_STABLE,
-            "E" => Self::BLEEDING_EDGE,
+            "d" => Self::RUSTC_DEFAULT,
+            "s" => Self::LATEST_STABLE,
+            "e" => Self::BLEEDING_EDGE,
             "15" | "2015" => Self::Rust2015,
             "18" | "2018" => Self::Rust2018,
             "21" | "2021" => Self::Rust2021,
@@ -387,17 +390,23 @@ impl CrateNameBuf {
 }
 
 impl CrateType {
-    fn parse_cli_style(source: &str) -> Result<Self, String> {
-        source.parse().map_err(possible_values)
+    // FIXME: Take <'a> &'a str string once clap is thrown out.
+    fn parse_cli_style(source: &'static str) -> Self {
+        match source {
+            "b" => Self("bin"),
+            "l" => Self("lib"),
+            "m" => Self("proc-macro"),
+            _ => Self(source),
+        }
     }
 }
 
 impl Identity {
     fn parse_cli_style(source: &str) -> Result<Self, String> {
         parse!(
-            "T" => Self::True,
-            "S" => Self::Stable,
-            "N" => Self::Nightly,
+            "t" => Self::True,
+            "s" => Self::Stable,
+            "n" => Self::Nightly,
         )(source)
         .map_err(possible_values)
     }

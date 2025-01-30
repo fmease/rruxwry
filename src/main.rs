@@ -71,9 +71,6 @@ fn try_main() -> error::Result {
         || CrateNameBuf::adjust_and_parse_file_path(&args.path).unwrap().into(),
         Into::into,
     );
-    // FIXME: Keep the option?
-    let crate_type = args.crate_type.unwrap_or_default();
-
     // FIXME: this is awkward ... can we do this inside cli smh (not the ref op ofc)
     let v_opts = build::VerbatimOptionsBuf {
         arguments: args.verbatim.iter().map(String::as_str).collect(),
@@ -88,7 +85,7 @@ fn try_main() -> error::Result {
     };
 
     let krate =
-        data::Crate { path: &args.path, name: crate_name.as_ref(), typ: crate_type, edition };
+        data::Crate { path: &args.path, name: crate_name.as_ref(), typ: args.crate_type, edition };
 
     operate::perform(args.operation, krate, opts, cx)
 }

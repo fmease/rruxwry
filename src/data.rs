@@ -1,4 +1,3 @@
-use crate::utility::parse;
 use std::{borrow::Cow, fmt, path::Path, str::FromStr};
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -43,44 +42,14 @@ impl FromStr for Edition {
     }
 }
 
-// FIXME: Support `dylib`, `staticlib`, etc.
-#[derive(Clone, Copy, PartialEq, Eq, Default)]
+// This is just a wrapper around a string. An enum listing all crate types
+// valid at the time of writing wouldn't be forward compatible with future
+// versions of rust{,do}c. I don't want to assume that rruxwry gets so well
+//  maintained that it can keep pace with rust{,do}c.
+#[derive(Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(test, derive(Debug))]
-pub(crate) enum CrateType {
-    #[default]
-    Bin,
-    Lib,
-    ProcMacro,
-}
-
-impl CrateType {
-    pub(crate) const fn to_str(self) -> &'static str {
-        match self {
-            Self::Bin => "bin",
-            Self::Lib => "lib",
-            Self::ProcMacro => "proc-macro",
-        }
-    }
-
-    pub(crate) fn to_non_executable(self) -> Self {
-        match self {
-            Self::Bin => Self::Lib,
-            Self::Lib | Self::ProcMacro => self,
-        }
-    }
-}
-
-impl FromStr for CrateType {
-    type Err = impl Iterator<Item = &'static str> + Clone;
-
-    fn from_str(source: &str) -> std::result::Result<Self, Self::Err> {
-        parse!(
-            "bin" => Self::Bin,
-            "lib" | "rlib" => Self::Lib,
-            "proc-macro" => Self::ProcMacro,
-        )(source)
-    }
-}
+// FIXME: Switch to <'a> &'a str once we've thrown out clap
+pub(crate) struct CrateType(pub &'static str);
 
 pub(crate) type CrateNameBuf = CrateName<String>;
 pub(crate) type CrateNameRef<'a> = CrateName<&'a str>;
@@ -181,6 +150,6 @@ pub(crate) enum Identity {
 pub(crate) struct Crate<'a, E = Edition> {
     pub(crate) path: &'a Path,
     pub(crate) name: CrateNameRef<'a>,
-    pub(crate) typ: CrateType,
+    pub(crate) typ: Option<CrateType>,
     pub(crate) edition: E,
 }

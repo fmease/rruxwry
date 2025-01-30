@@ -189,9 +189,8 @@ fn compile_compiletest_auxiliary<'a>(
         Crate {
             path: &path.bare,
             name: crate_name.as_ref(),
-            // FIXME: Verify this works with `@compile-flags:--crate-type=proc-macro`
-            // FIXME: I don't think it works rn
-            typ: CrateType::Lib,
+            // FIXME: Make this "dylib" instead unless directives.no_prefer_dynamic then it should be..None?
+            typ: Some(CrateType("lib")),
             edition: directives.edition.map(|edition| Edition::Raw(edition.bare)),
         },
         &[],
@@ -277,11 +276,8 @@ fn document_cross_crate(
 ) -> Result<()> {
     build::perform(
         build::Engine::Rustc(&CompileOptions { check: false }),
-        Crate {
-            typ: krate.typ.to_non_executable(),
-            edition: Some(Edition::Parsed(krate.edition)),
-            ..krate
-        },
+        // FIXME: Should we check for `krate.typ=="bin"` and reject it? Possibly leads to a nicer UX.
+        Crate { typ: krate.typ, edition: Some(Edition::Parsed(krate.edition)), ..krate },
         extern_prelude_for(krate.typ),
         opts,
         ImplyUnstableOptions::Yes,
@@ -306,7 +302,7 @@ fn document_cross_crate(
     let krate = Crate {
         path: &root_crate_path,
         name: root_crate_name.as_ref(),
-        typ: default(),
+        typ: None,
         edition: Some(Edition::Parsed(krate.edition)),
     };
 
@@ -318,14 +314,14 @@ fn document_cross_crate(
     }
 }
 
-fn extern_prelude_for(crate_type: CrateType) -> &'static [ExternCrate<'static>] {
-    match crate_type {
-        // For convenience and just like Cargo we add `libproc_macro` to the external prelude.
-        CrateType::ProcMacro => &[ExternCrate::Named {
+fn extern_prelude_for(typ: Option<CrateType>) -> &'static [ExternCrate<'static>] {
+    match typ {
+        // For convenience and just like Cargo we add `proc_macro` to the external prelude.
+        Some(CrateType("proc-macro")) => &[ExternCrate::Named {
             name: const { CrateName::new_unchecked("proc_macro") },
             path: None,
         }],
-        _ => [].as_slice(),
+        _ => default(),
     }
 }
 
@@ -446,9 +442,8 @@ fn document_compiletest_auxiliary<'a>(
         Crate {
             path: &path.bare,
             name: crate_name.as_ref(),
-            // FIXME: Verify this works with `@compile-flags:--crate-type=proc-macro`
-            // FIXME: I don't think it works rn
-            typ: CrateType::Lib,
+            // FIXME: Make this "dylib" instead unless directives.no_prefer_dynamic then it should be..None?
+            typ: Some(CrateType("lib")),
             edition: directives.edition.map(|edition| Edition::Raw(edition.bare)),
         },
         &[],
@@ -463,9 +458,8 @@ fn document_compiletest_auxiliary<'a>(
             Crate {
                 path: &path.bare,
                 name: crate_name.as_ref(),
-                // FIXME: Verify this works with `@compile-flags:--crate-type=proc_macro`
-                // FIXME: I don't think it works rn
-                typ: default(),
+                // FIXME: Should this also be Some("dylib") unless directives.no_prefer_dynamic?
+                typ: None,
                 edition: directives.edition.map(|edition| Edition::Raw(edition.bare)),
             },
             &[],
