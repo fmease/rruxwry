@@ -46,7 +46,7 @@ pub(crate) fn perform(
 }
 
 pub(crate) fn query_crate_name(krate: Crate<'_>, opts: Options<'_>) -> io::Result<String> {
-    let engine = Engine::Rustc(&CompileOptions { check: false });
+    let engine = Engine::Rustc(&CompileOptions { check_only: false });
 
     let mut cmd = Command::new(engine.name());
 
@@ -233,7 +233,7 @@ fn configure_engine_specific(
 ) {
     match engine {
         Engine::Rustc(c_opts) => {
-            if c_opts.check {
+            if c_opts.check_only {
                 // FIXME: Should we `-o $null`?
                 cmd.arg("--emit=metadata");
             }
@@ -390,7 +390,7 @@ mod palette {
 }
 
 pub(crate) struct CompileOptions {
-    pub(crate) check: bool,
+    pub(crate) check_only: bool,
 }
 
 #[allow(clippy::struct_excessive_bools)] // not worth to address

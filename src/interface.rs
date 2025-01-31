@@ -4,13 +4,10 @@ use crate::{
     build::{BuildOptions, CompileOptions, DebugOptions, DocOptions},
     data::{CrateName, CrateType, DocBackend, Edition, Identity},
     directive::Flavor,
-    operate::{CompileMode, DocMode, Open, Operation, Run},
+    operate::{Bless, CompileMode, DocMode, Open, Operation, Run, Test},
     utility::{Conjunction, ListingExt as _, parse},
 };
-use clap::ColorChoice;
 use std::{ffi::OsString, path::PathBuf};
-
-// FIXME: Improve naming: *Flags, Arguments, ...
 
 pub(crate) fn arguments() -> Arguments {
     let mut args = std::env::args_os().peekable();
@@ -42,37 +39,52 @@ pub(crate) fn arguments() -> Arguments {
     fn verbatim() -> clap::Arg {
         clap::Arg::new(id::VERBATIM).num_args(..).last(true).value_name("VERBATIM")
     }
-    fn compiletest() -> clap::Arg {
-        clap::Arg::new(id::COMPILETEST)
-            .short('@')
-            .long("compiletest")
-            // FIXME: Limit number of occurrences to 0..=2 (`max_occurences` no longer exists).
-            .action(clap::ArgAction::Count)
-            .help("Enable compiletest directives")
+    fn compiletest() -> impl IntoIterator<Item = clap::Arg> {
+        [
+            // FIXME: Ideally the long form for Flavor::Rruxwry wasn't
+            //        `--directives --directives` (yuck!) but sth. like
+            //        `--directives=rruxwry` while the short form remains `-@@`!
+            clap::Arg::new(id::DIRECTIVES)
+                .short('@')
+                .long("directives")
+                // FIXME: Limit number of occurrences to 0..=2 (`max_occurences` no longer exists).
+                .action(clap::ArgAction::Count)
+                .help("Enable compiletest-like directives"),
+            // FIXME: (Reminder) Warn on `--bless`+`--dry-run` (outside of clap)
+            clap::Arg::new(id::COMPILETEST)
+                .short('T')
+                .long("compiletest")
+                .action(clap::ArgAction::SetTrue)
+                // FIXME: Requires -@ but incompatible with -@@ etc!
+                .requires(id::DIRECTIVES)
+                .help("Check in a compiletest-esque manner"),
+            clap::Arg::new(id::BLESS)
+                .short('.')
+                .long("bless")
+                .requires(id::COMPILETEST)
+                .action(clap::ArgAction::SetTrue)
+                .help("Update the test expectations"),
+        ]
     }
-    fn crate_name_and_type() -> impl Iterator<Item = clap::Arg> {
+    fn crate_name_and_type() -> impl IntoIterator<Item = clap::Arg> {
         [
             clap::Arg::new(id::CRATE_NAME)
                 .short('n')
                 .long("crate-name")
                 .value_name("NAME")
                 .value_parser(CrateName::parse_cli_style)
-                .help("Set the name of the (base) crate"),
+                .help("Set the name of the crate"),
             clap::Arg::new(id::CRATE_TYPE)
                 .short('t')
                 .long("crate-type")
                 .value_name("TYPE")
-                .help("Set the type of the (base) crate"),
+                .help("Set the type of the crate"),
         ]
-        .into_iter()
     }
     fn edition() -> clap::Arg {
-        clap::Arg::new(id::EDITION)
-            .short('e')
-            .long("edition")
-            .help("Set the edition of the source files")
+        clap::Arg::new(id::EDITION).short('e').long("edition").help("Set the edition of the crate")
     }
-    fn cfgs() -> impl Iterator<Item = clap::Arg> {
+    fn cfgs() -> impl IntoIterator<Item = clap::Arg> {
         [
             clap::Arg::new(id::CFGS)
                 .long("cfg")
@@ -80,9 +92,10 @@ pub(crate) fn arguments() -> Arguments {
                 .action(clap::ArgAction::Append)
                 .help("Enable a `cfg`"),
             clap::Arg::new(id::REVISION)
-                .long("rev")
+                .short('R')
+                .long("revision")
                 .value_name("NAME")
-                .requires(id::COMPILETEST)
+                .requires(id::DIRECTIVES)
                 .help("Enable a compiletest revision"),
             clap::Arg::new(id::CARGO_FEATURES)
                 .short('f')
@@ -98,9 +111,8 @@ pub(crate) fn arguments() -> Arguments {
                 .action(clap::ArgAction::Append)
                 .help("Enable an experimental rustc library or language feature"),
         ]
-        .into_iter()
     }
-    fn extra() -> impl Iterator<Item = clap::Arg> {
+    fn extra() -> impl IntoIterator<Item = clap::Arg> {
         [
             clap::Arg::new(id::SUPPRESS_LINTS)
                 .short('/')
@@ -144,16 +156,14 @@ pub(crate) fn arguments() -> Arguments {
                 .short('0')
                 .long("dry-run")
                 .action(clap::ArgAction::SetTrue)
-                // FIXME: Inaccurate description
                 .help("Run through without making any changes"),
             clap::Arg::new(id::COLOR)
                 .long("color")
                 .value_name("WHEN")
                 .default_value("auto")
-                .value_parser(clap::builder::EnumValueParser::<ColorChoice>::new())
+                .value_parser(clap::builder::EnumValueParser::<clap::ColorChoice>::new())
                 .help("Control when to use color"),
         ]
-        .into_iter()
     }
 
     // FIXME: Use `try_get_matches_from`. Blocker: Define an error type that leads to an exit code of 2 instead of 1.
@@ -173,17 +183,18 @@ pub(crate) fn arguments() -> Arguments {
                                 .short('r')
                                 .long("run")
                                 .action(clap::ArgAction::SetTrue)
+                                .conflicts_with(id::COMPILETEST)
                                 .help("Run the built binary"),
                         )
                         .arg(
-                            clap::Arg::new(id::CHECK)
+                            clap::Arg::new(id::CHECK_ONLY)
                                 .short('c')
-                                .long("check")
+                                .long("check-only")
                                 .action(clap::ArgAction::SetTrue)
                                 .conflicts_with(id::RUN)
                                 .help("Don't fully compile, only check the crate"),
                         )
-                        .arg(compiletest())
+                        .args(compiletest())
                         .args(crate_name_and_type())
                         .arg(edition())
                         .args(cfgs())
@@ -201,6 +212,7 @@ pub(crate) fn arguments() -> Arguments {
                                 .short('o')
                                 .long("open")
                                 .action(clap::ArgAction::SetTrue)
+                                .conflicts_with(id::COMPILETEST)
                                 .help("Open the generated docs in a browser"),
                         )
                         .arg(
@@ -211,13 +223,13 @@ pub(crate) fn arguments() -> Arguments {
                                 .action(clap::ArgAction::SetTrue)
                                 .help("Output JSON instead of HTML"),
                         )
-                        .arg(compiletest())
+                        .args(compiletest())
                         .arg(
                             clap::Arg::new(id::CROSS_CRATE)
                                 .short('X')
                                 .long("cross-crate")
                                 .action(clap::ArgAction::SetTrue)
-                                .conflicts_with(id::COMPILETEST)
+                                .conflicts_with(id::DIRECTIVES)
                                 .help("Enable the cross-crate re-export mode"),
                         )
                         .args(crate_name_and_type())
@@ -267,11 +279,19 @@ pub(crate) fn arguments() -> Arguments {
     // unwrap: handled by `clap`.
     let (operation, mut matches) = matches.remove_subcommand().unwrap();
 
-    let compiletest = match matches.remove_one::<u8>(id::COMPILETEST).unwrap_or_default() {
+    let directives = match matches.remove_one::<u8>(id::DIRECTIVES).unwrap_or_default() {
         0 => None,
         1 => Some(Flavor::Vanilla),
         // FIXME: Reject count > 2.
         _ => Some(Flavor::Rruxwry),
+    };
+
+    let test = match matches.remove_one(id::COMPILETEST).unwrap_or_default() {
+        false => Test::No,
+        true => Test::Yes(match matches.remove_one(id::BLESS).unwrap_or_default() {
+            false => Bless::No,
+            true => Bless::Yes,
+        }),
     };
 
     let operation = match operation.as_str() {
@@ -280,20 +300,22 @@ pub(crate) fn arguments() -> Arguments {
                 true => Run::Yes,
                 false => Run::No,
             },
-            mode: match compiletest {
-                Some(flavor) => CompileMode::Compiletest(flavor),
+            mode: match directives {
+                Some(flavor) => CompileMode::DirectiveDriven(flavor, test),
                 None => CompileMode::Default,
             },
-            options: CompileOptions { check: matches.remove_one(id::CHECK).unwrap_or_default() },
+            options: CompileOptions {
+                check_only: matches.remove_one(id::CHECK_ONLY).unwrap_or_default(),
+            },
         },
         id::DOC => Operation::Document {
             open: match matches.remove_one::<bool>(id::OPEN).unwrap_or_default() {
                 true => Open::Yes,
                 false => Open::No,
             },
-            mode: match (matches.remove_one(id::CROSS_CRATE).unwrap_or_default(), compiletest) {
+            mode: match (matches.remove_one(id::CROSS_CRATE).unwrap_or_default(), directives) {
                 (true, None) => DocMode::CrossCrate,
-                (false, Some(flavor)) => DocMode::Compiletest(flavor),
+                (false, Some(flavor)) => DocMode::DirectiveDriven(flavor, test),
                 (false, None) => DocMode::Default,
                 (true, Some(_)) => unreachable!(), // Already caught by `clap`.
             },
@@ -368,7 +390,7 @@ pub(crate) struct Arguments {
     pub(crate) edition: Option<Edition<'static>>,
     pub(crate) build: BuildOptions,
     pub(crate) debug: DebugOptions,
-    pub(crate) color: ColorChoice,
+    pub(crate) color: clap::ColorChoice,
 }
 
 impl Edition<'static> {
@@ -424,16 +446,18 @@ fn possible_values(values: impl Iterator<Item: std::fmt::Display> + Clone) -> St
 }
 
 mod id {
+    pub(super) const BLESS: &str = "BLESS";
     pub(super) const BUILD: &str = "build";
     pub(super) const CARGO_FEATURES: &str = "CARGO_FEATURES";
     pub(super) const CFGS: &str = "CFGS";
-    pub(super) const CHECK: &str = "CHECK";
+    pub(super) const CHECK_ONLY: &str = "CHECK_ONLY";
     pub(super) const COLOR: &str = "COLOR";
     pub(super) const COMPILETEST: &str = "COMPILETEST";
     pub(super) const CRATE_NAME: &str = "CRATE_NAME";
     pub(super) const CRATE_TYPE: &str = "CRATE_TYPE";
     pub(super) const CRATE_VERSION: &str = "CRATE_VERSION";
     pub(super) const CROSS_CRATE: &str = "CROSS_CRATE";
+    pub(super) const DIRECTIVES: &str = "DIRECTIVES";
     pub(super) const DOC: &str = "doc";
     pub(super) const DRY_RUN: &str = "DRY_RUN";
     pub(super) const EDITION: &str = "EDITION";

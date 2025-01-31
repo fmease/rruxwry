@@ -9,13 +9,13 @@
 
 use crate::{
     build::{
-        self, CompileOptions, DocOptions, ExternCrate, ImplyUnstableOptions, Options,
+        self, CompileOptions, DocOptions, Engine, ExternCrate, ImplyUnstableOptions, Options,
         VerbatimOptions,
     },
     context::Context,
     data::{Crate, CrateName, CrateType, DocBackend, Edition},
     diagnostic::error,
-    directive,
+    directive::{self, BuildAuxDocs},
     error::Result,
     fmt,
     source::Spanned,
@@ -52,9 +52,16 @@ fn compile(
     cx: Context<'_>,
 ) -> Result {
     match mode {
-        CompileMode::Default => compile_default(krate, opts, c_opts, run),
-        CompileMode::Compiletest(flavor) => {
-            compile_compiletest(krate, opts, c_opts, flavor, run, cx)
+        CompileMode::Default => {
+            let krate = build_default(Engine::Rustc(c_opts), krate, opts)?;
+            match run {
+                Run::Yes => self::run(krate, opts, default()),
+                Run::No => Ok(()),
+            }
+        }
+        // FIXME: _test
+        CompileMode::DirectiveDriven(flavor, _test) => {
+            compile_directive_driven(krate, opts, c_opts, flavor, run, cx)
         }
     }
 }
@@ -73,29 +80,7 @@ fn run(krate: Crate<'_>, opts: Options<'_>, run_v_opts: VerbatimOptions<'_>) -> 
     Ok(())
 }
 
-fn compile_default(
-    krate: Crate<'_>,
-    opts: Options<'_>,
-    c_opts: &CompileOptions,
-    run: Run,
-) -> Result {
-    let krate = Crate { edition: krate.edition.or(Some(Edition::LATEST_STABLE)), ..krate };
-
-    build::perform(
-        build::Engine::Rustc(c_opts),
-        krate,
-        extern_prelude_for(krate.typ),
-        opts,
-        ImplyUnstableOptions::Yes,
-    )?;
-
-    match run {
-        Run::Yes => self::run(krate, opts, default()),
-        Run::No => Ok(()),
-    }
-}
-
-fn compile_compiletest(
+fn compile_directive_driven(
     krate: Crate<'_>,
     opts: Options<'_>,
     c_opts: &CompileOptions,
@@ -103,6 +88,8 @@ fn compile_compiletest(
     run: Run,
     cx: Context<'_>,
 ) -> Result {
+    let engine = Engine::Rustc(c_opts);
+
     let mut directives = directive::gather(
         Spanned::sham(krate.path),
         directive::Scope::Base,
@@ -118,7 +105,9 @@ fn compile_compiletest(
     let deps: Vec<_> = directives
         .dependencies
         .iter()
-        .map(|dep| compile_compiletest_auxiliary(dep, &aux_base_path, opts, c_opts, flavor, cx))
+        .map(|dep| {
+            compile_auxiliary(dep, &aux_base_path, engine, opts, BuildAuxDocs::No, flavor, cx)
+        })
         .collect::<Result<_>>()?;
 
     directives.build_verbatim.extend(opts.verbatim);
@@ -132,9 +121,9 @@ fn compile_compiletest(
     let opts = Options { verbatim: directives.build_verbatim.as_ref(), ..opts };
 
     build::perform(
-        build::Engine::Rustc(c_opts),
+        engine,
         krate,
-        // FIXME: Once we support `//@ proc-macro` we need to add `proc_macro` (to the client) similar to `extern_prelude_for` here.
+        // FIXME: Once we support `//@ proc-macro` we need to add `proc_macro` (to the client).
         &deps,
         opts,
         ImplyUnstableOptions::No,
@@ -146,75 +135,6 @@ fn compile_compiletest(
     }
 }
 
-// FIXME: Support nested auxiliaries!
-// FIXME: Detect and reject circular/cyclic auxiliaries.
-fn compile_compiletest_auxiliary<'a>(
-    extern_crate: &ExternCrate<'a>,
-    base_path: &Path,
-    // FIXME: Do we actually want to pass along these opts? Arguably they belong to the root crate.
-    //        The status quo is inconsistent because we don't honor the krate.edition (which is
-    //        also just an "Option") etc. (except krate.name obv).
-    //        At the very least, passing this along should be behind an option itself.
-    opts: Options<'_>,
-    c_opts: &CompileOptions,
-    flavor: directive::Flavor,
-    cx: Context<'_>,
-) -> Result<ExternCrate<'a>> {
-    let path = match extern_crate {
-        ExternCrate::Unnamed { path } => path.map(|path| base_path.join(path)),
-        ExternCrate::Named { name, path } => match path {
-            Some(path) => path.as_deref().map(|path| base_path.join(path)),
-            None => Spanned::sham(base_path.join(name.as_str()).with_extension("rs")),
-        },
-    };
-
-    let mut directives = directive::gather(
-        path.as_deref(),
-        directive::Scope::Base,
-        directive::Role::Auxiliary,
-        flavor,
-        opts.build.revision.as_deref(),
-        cx,
-    )?;
-
-    directives.build_verbatim.extend(opts.verbatim);
-    build::perform(
-        build::Engine::Rustc(c_opts),
-        Crate {
-            path: &path.bare,
-            // FIXME: Or does compiletest do something 'smarter'?
-            name: None,
-            // FIXME: Make this "dylib" instead unless directives.no_prefer_dynamic then it should be..None?
-            typ: Some(CrateType("lib")),
-            edition: directives.edition.map(|edition| Edition::Unknown(edition.bare)),
-        },
-        &[],
-        Options { verbatim: directives.build_verbatim.as_ref(), ..opts },
-        ImplyUnstableOptions::No,
-    )?;
-
-    // FIXME: Clean up this junk!
-    // FIXME: Do we need to respect `compile-flags: --crate-name` and adjust `ExternCrate` accordingly?
-    Ok(match *extern_crate {
-        // FIXME: probably doesn't handle `//@ aux-build: ../file.rs` correctly since `-L.` wouldn't pick it up
-        ExternCrate::Unnamed { path } => ExternCrate::Unnamed { path },
-        // FIXME: For some reason `compiletest` doesn't support `//@ aux-crate: name=../`
-        ExternCrate::Named { name, .. } => {
-            // FIXME: unwrap
-            // FIXME: do we *need* to do this???
-            let crate_name = CrateName::adjust_and_parse_file_path(&path.bare).unwrap();
-
-            ExternCrate::Named {
-                name,
-                // FIXME: needs to be relative to the base_path
-                // FIXME: layer violation?? should this be the job of mod command?
-                path: (name != crate_name.as_ref())
-                    .then(|| Spanned::sham(format!("lib{crate_name}.rlib").into())),
-            }
-        }
-    })
-}
-
 fn document(
     mode: DocMode,
     open: Open,
@@ -224,9 +144,18 @@ fn document(
     cx: Context<'_>,
 ) -> Result<()> {
     match mode {
-        DocMode::Default => document_default(krate, opts, d_opts, open),
+        DocMode::Default => {
+            let krate = build_default(Engine::Rustdoc(d_opts), krate, opts)?;
+            match open {
+                Open::Yes => self::open(krate, opts),
+                Open::No => Ok(()),
+            }
+        }
         DocMode::CrossCrate => document_cross_crate(krate, opts, d_opts, open),
-        DocMode::Compiletest(flavor) => document_compiletest(krate, opts, d_opts, flavor, open, cx),
+        // FIXME: _test
+        DocMode::DirectiveDriven(flavor, _test) => {
+            document_directive_driven(krate, opts, d_opts, flavor, open, cx)
+        }
     }
 }
 
@@ -242,44 +171,14 @@ fn open(krate: Crate<'_>, opts: Options<'_>) -> Result<()> {
     Ok(())
 }
 
-fn document_default(
-    krate: Crate<'_>,
-    opts: Options<'_>,
-    d_opts: &DocOptions,
-    open: Open,
-) -> Result<()> {
-    let krate = Crate { edition: krate.edition.or(Some(Edition::LATEST_STABLE)), ..krate };
-
-    build::perform(
-        build::Engine::Rustdoc(d_opts),
-        krate,
-        extern_prelude_for(krate.typ),
-        opts,
-        ImplyUnstableOptions::Yes,
-    )?;
-
-    match open {
-        Open::Yes => self::open(krate, opts),
-        Open::No => Ok(()),
-    }
-}
-
 fn document_cross_crate(
     krate: Crate<'_>,
     opts: Options<'_>,
     d_opts: &DocOptions,
     open: Open,
 ) -> Result<()> {
-    let edition = krate.edition.or(Some(Edition::LATEST_STABLE));
-
-    build::perform(
-        build::Engine::Rustc(&CompileOptions { check: false }),
-        // FIXME: Should we check for `krate.typ=="bin"` and reject it? Possibly leads to a nicer UX.
-        Crate { typ: krate.typ, edition, ..krate },
-        extern_prelude_for(krate.typ),
-        opts,
-        ImplyUnstableOptions::Yes,
-    )?;
+    // FIXME: Should we we reject krate.typ==bin? Possibly nicer UX-wise?
+    let krate = build_default(Engine::Rustc(&CompileOptions { check_only: false }), krate, opts)?;
 
     // FIXME: This `unwrap` is obviously reachable (e.g., on `rrc '%$?'`)
     let crate_name: CrateName<Cow<'_, _>> = krate.name.map_or_else(
@@ -304,9 +203,9 @@ fn document_cross_crate(
     let deps = &[ExternCrate::Named { name: crate_name.as_ref(), path: None }];
 
     let krate =
-        Crate { path: &root_crate_path, name: Some(root_crate_name.as_ref()), typ: None, edition };
+        Crate { path: &root_crate_path, name: Some(root_crate_name.as_ref()), typ: None, ..krate };
 
-    build::perform(build::Engine::Rustdoc(d_opts), krate, deps, opts, ImplyUnstableOptions::Yes)?;
+    build::perform(Engine::Rustdoc(d_opts), krate, deps, opts, ImplyUnstableOptions::Yes)?;
 
     match open {
         Open::Yes => self::open(krate, opts),
@@ -314,18 +213,7 @@ fn document_cross_crate(
     }
 }
 
-fn extern_prelude_for(typ: Option<CrateType>) -> &'static [ExternCrate<'static>] {
-    match typ {
-        // For convenience and just like Cargo we add `proc_macro` to the external prelude.
-        Some(CrateType("proc-macro")) => &[ExternCrate::Named {
-            name: const { CrateName::new_unchecked("proc_macro") },
-            path: None,
-        }],
-        _ => default(),
-    }
-}
-
-fn document_compiletest(
+fn document_directive_driven(
     krate: Crate<'_>,
     opts: Options<'_>,
     // FIXME: tempory
@@ -334,15 +222,11 @@ fn document_compiletest(
     open: Open,
     cx: Context<'_>,
 ) -> Result<()> {
-    // FIXME: Do we actually want to treat !`-j` as `rustdoc/` (Scope::HtmlDocCk)
-    //        instead of `rustdoc-ui/` ("Scope::Rustdoc")
-    let scope = match d_opts.backend {
-        DocBackend::Html => directive::Scope::HtmlDocCk,
-        DocBackend::Json => directive::Scope::JsonDocCk,
-    };
+    let engine = Engine::Rustdoc(d_opts);
+
     let mut directives = directive::gather(
         Spanned::sham(krate.path),
-        scope,
+        scope(engine),
         directive::Role::Principal,
         flavor,
         opts.build.revision.as_deref(),
@@ -356,12 +240,12 @@ fn document_compiletest(
         .dependencies
         .iter()
         .map(|dep| {
-            document_compiletest_auxiliary(
+            compile_auxiliary(
                 dep,
                 &aux_base_path,
-                directives.build_aux_docs,
+                engine,
                 opts,
-                d_opts,
+                directives.build_aux_docs,
                 flavor,
                 cx,
             )
@@ -377,9 +261,9 @@ fn document_compiletest(
     };
 
     build::perform(
-        build::Engine::Rustdoc(d_opts),
+        engine,
         krate,
-        // FIXME: Once we support `//@ proc-macro` we need to add `proc_macro` (to the client) similar to `extern_prelude_for` here.
+        // FIXME: Once we support `//@ proc-macro` we need to add `proc_macro` (to the client)
         &dependencies,
         Options { verbatim: directives.build_verbatim.as_ref(), ..opts },
         ImplyUnstableOptions::No,
@@ -391,18 +275,34 @@ fn document_compiletest(
     }
 }
 
+fn build_default<'a>(engine: Engine<'_>, krate: Crate<'a>, opts: Options<'_>) -> Result<Crate<'a>> {
+    let krate = Crate { edition: krate.edition.or(Some(Edition::LATEST_STABLE)), ..krate };
+    let deps: &[_] = match krate.typ {
+        // For convenience and just like Cargo we add `proc_macro` to the external prelude.
+        Some(CrateType("proc-macro")) => &[ExternCrate::Named {
+            name: const { CrateName::new_unchecked("proc_macro") },
+            path: None,
+        }],
+        _ => &[],
+    };
+    build::perform(engine, krate, deps, opts, ImplyUnstableOptions::Yes)?;
+    Ok(krate)
+}
+
 // FIXME: Support nested auxiliaries!
 // FIXME: Detect and reject circular/cyclic auxiliaries.
-fn document_compiletest_auxiliary<'a>(
+fn compile_auxiliary<'a>(
     extern_crate: &ExternCrate<'a>,
     base_path: &Path,
-    document: bool,
-    // FIXME: Do we actually want to pass along these opts? Arguably they belong to the root crate.
-    //        The status quo is inconsistent because we don't honor the krate.edition (which is
-    //        also just an "Option") etc. (except krate.name obv).
-    //        At the very least, passing this along should be behind an option itself.
+    engine: Engine<'_>,
+    // FIXME: Do we actually want to pass along *all* of these opts?
+    //        Arguably some of them belong to the root crate only (e.g. crate name).
+    //        On top of that, the status quo is inconsistent because
+    //        we don't honor the edition (which is also just an "option").
+    //        Some options should however be inherited: toolchain, cfgs, rev,
+    //        debug. Should subset vs. all be a CLI option?
     opts: Options<'_>,
-    d_opts: &DocOptions,
+    build_aux_docs: BuildAuxDocs,
     flavor: directive::Flavor,
     cx: Context<'_>,
 ) -> Result<ExternCrate<'a>> {
@@ -414,17 +314,9 @@ fn document_compiletest_auxiliary<'a>(
         },
     };
 
-    // FIXME: DRY
-    // FIXME: Do we actually want to treat !`-j` as `rustdoc/` (Scope::HtmlDocCk)
-    //        instead of `rustdoc-ui/` ("Scope::Rustdoc")
-    let scope = match d_opts.backend {
-        DocBackend::Html => directive::Scope::HtmlDocCk,
-        DocBackend::Json => directive::Scope::JsonDocCk,
-    };
-
     let mut directives = directive::gather(
         path.as_deref(),
-        scope,
+        scope(engine),
         directive::Role::Auxiliary,
         flavor,
         opts.build.revision.as_deref(),
@@ -434,15 +326,28 @@ fn document_compiletest_auxiliary<'a>(
     directives.build_verbatim.extend(opts.verbatim);
     let opts = Options { verbatim: directives.build_verbatim.as_ref(), ..opts };
 
+    let krate = Crate {
+        path: &path.bare,
+        // FIXME: Does compiletest do something 'smarter'?
+        name: None,
+        typ: None,
+        edition: directives.edition.map(|edition| Edition::Unknown(edition.bare)),
+    };
+
     build::perform(
-        build::Engine::Rustc(&CompileOptions { check: false }),
+        match engine {
+            // FIXME: Does this actually work as expected wrt. to check-only?
+            //        Does this lead to all crates in the dependency graph to
+            //        get checked-only and everything working out (linking correctly etc)?
+            //        I suspect is doesn't because we need to s%/rlib/rmeta/
+            Engine::Rustc(_) => engine,
+            // FIXME: Wait, would check_only=true also work and be better?
+            Engine::Rustdoc(_) => Engine::Rustc(&CompileOptions { check_only: false }),
+        },
         Crate {
-            path: &path.bare,
-            // FIXME: Does compiletest do something 'smarter'?
-            name: None,
             // FIXME: Make this "dylib" instead unless directives.no_prefer_dynamic then it should be..None?
             typ: Some(CrateType("lib")),
-            edition: directives.edition.map(|edition| Edition::Unknown(edition.bare)),
+            ..krate
         },
         &[],
         opts,
@@ -450,17 +355,13 @@ fn document_compiletest_auxiliary<'a>(
     )?;
 
     // FIXME: Is this how `//@ build-aux-docs` is supposed to work?
-    if document {
+    if let BuildAuxDocs::Yes = build_aux_docs
+        && let Engine::Rustdoc(d_opts) = engine
+    {
         build::perform(
-            build::Engine::Rustdoc(d_opts),
-            Crate {
-                path: &path.bare,
-                // FIXME: Does compiletest do something 'smarter'?
-                name: None,
-                // FIXME: Should this also be Some("dylib") unless directives.no_prefer_dynamic?
-                typ: None,
-                edition: directives.edition.map(|edition| Edition::Unknown(edition.bare)),
-            },
+            Engine::Rustdoc(d_opts),
+            // FIXME: Should typ also be Some("dylib") unless directives.no_prefer_dynamic?
+            krate,
             &[],
             opts,
             ImplyUnstableOptions::No,
@@ -475,18 +376,30 @@ fn document_compiletest_auxiliary<'a>(
         // FIXME: For some reason `compiletest` doesn't support `//@ aux-crate: name=../`
         ExternCrate::Named { name, .. } => {
             // FIXME: unwrap
-            // FIXME: Is this strictly necessary?
+            // FIXME: do we *need* to do this???
             let crate_name = CrateName::adjust_and_parse_file_path(&path.bare).unwrap();
 
             ExternCrate::Named {
                 name,
                 // FIXME: needs to be relative to the base_path
-                // FIXME: layer violation?? should this be the job of mod command?
+                // FIXME: layer violation?? should this be the job of crate::build?
                 path: (name != crate_name.as_ref())
                     .then(|| Spanned::sham(format!("lib{crate_name}.rlib").into())),
             }
         }
     })
+}
+
+fn scope(engine: Engine<'_>) -> directive::Scope {
+    match engine {
+        Engine::Rustc(_) => directive::Scope::Base,
+        // FIXME: Do we actually want to treat !`-j` as `rustdoc/` (Scope::HtmlDocCk)
+        //        instead of `rustdoc-ui/` ("Scope::Rustdoc")
+        Engine::Rustdoc(d_opts) => match d_opts.backend {
+            DocBackend::Html => directive::Scope::HtmlDocCk,
+            DocBackend::Json => directive::Scope::JsonDocCk,
+        },
+    }
 }
 
 pub(crate) enum Operation {
@@ -497,7 +410,7 @@ pub(crate) enum Operation {
 #[derive(Clone, Copy)]
 pub(crate) enum CompileMode {
     Default,
-    Compiletest(directive::Flavor),
+    DirectiveDriven(directive::Flavor, Test),
 }
 
 #[derive(Clone, Copy)]
@@ -510,11 +423,24 @@ pub(crate) enum Run {
 pub(crate) enum DocMode {
     Default,
     CrossCrate,
-    Compiletest(directive::Flavor),
+    DirectiveDriven(directive::Flavor, Test),
 }
 
 #[derive(Clone, Copy)]
 pub(crate) enum Open {
+    Yes,
+    No,
+}
+
+#[derive(Clone, Copy)]
+pub(crate) enum Test {
+    #[allow(dead_code)] // FIXME
+    Yes(Bless),
+    No,
+}
+
+#[derive(Clone, Copy)]
+pub(crate) enum Bless {
     Yes,
     No,
 }

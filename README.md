@@ -140,13 +140,15 @@ Arguments:
 
 Options:
   -r, --run                   Run the built binary
-  -c, --check                 Don't fully compile, only check the crate
-  -@, --compiletest...        Enable compiletest directives
-  -n, --crate-name <NAME>     Set the name of the (base) crate
-  -t, --crate-type <TYPE>     Set the type of the (base) crate
-  -e, --edition <EDITION>     Set the edition of the source files
+  -c, --check-only            Don't fully compile, only check the crate
+  -@, --directives...         Enable compiletest-like directives
+  -T, --compiletest           Check in a compiletest-esque manner
+  -., --bless                 Update the test expectations
+  -n, --crate-name <NAME>     Set the name of the crate
+  -t, --crate-type <TYPE>     Set the type of the crate
+  -e, --edition <EDITION>     Set the edition of the crate
       --cfg <NAME>            Enable a `cfg`
-      --rev <NAME>            Enable a compiletest revision
+  -R, --revision <NAME>       Enable a compiletest revision
   -f, --cargo-feature <NAME>  Enable a Cargo-like feature
   -F, --rustc-feature <NAME>  Enable an experimental rustc library or language feature
   -/, --suppress-lints        Cap lints at allow level
@@ -176,14 +178,16 @@ Arguments:
 Options:
   -o, --open                     Open the generated docs in a browser
   -j, --json                     Output JSON instead of HTML
-  -@, --compiletest...           Enable compiletest directives
+  -@, --directives...            Enable compiletest-like directives
+  -T, --compiletest              Check in a compiletest-esque manner
+  -., --bless                    Update the test expectations
   -X, --cross-crate              Enable the cross-crate re-export mode
-  -n, --crate-name <NAME>        Set the name of the (base) crate
-  -t, --crate-type <TYPE>        Set the type of the (base) crate
+  -n, --crate-name <NAME>        Set the name of the crate
+  -t, --crate-type <TYPE>        Set the type of the crate
   -v, --crate-version <VERSION>  Set the version of the (base) crate
-  -e, --edition <EDITION>        Set the edition of the source files
+  -e, --edition <EDITION>        Set the edition of the crate
       --cfg <NAME>               Enable a `cfg`
-      --rev <NAME>               Enable a compiletest revision
+  -R, --revision <NAME>          Enable a compiletest revision
   -f, --cargo-feature <NAME>     Enable a Cargo-like feature
   -F, --rustc-feature <NAME>     Enable an experimental rustc library or language feature
   -P, --private                  Document private items
