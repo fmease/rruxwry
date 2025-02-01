@@ -271,7 +271,7 @@ fn compile_flags_directives() {
     assert_eq!(directives, Directives {
         revisions: default(),
         instantiated: InstantiatedDirectives {
-            build_verbatim: VerbatimOptionsBuf {
+            build_verbatim: VerbatimOptions {
                 arguments: vec!["--crate-type", "lib", "--edition=2021"],
                 ..default()
             },
@@ -298,7 +298,7 @@ fn conditional_directives() {
     assert_eq!(directives, Directives {
         revisions: ["one", "two"].into(),
         instantiated: InstantiatedDirectives {
-            build_verbatim: VerbatimOptionsBuf { arguments: vec!["--crate-type=lib"], ..default() },
+            build_verbatim: VerbatimOptions { arguments: vec!["--crate-type=lib"], ..default() },
             ..default()
         },
         uninstantiated: vec![
@@ -330,7 +330,7 @@ fn instantiate_conditional_directives() {
     assert_eq!(
         directives,
         Ok(InstantiatedDirectives {
-            build_verbatim: VerbatimOptionsBuf {
+            build_verbatim: VerbatimOptions {
                 arguments: vec!["--crate-type=lib", "-Zparse-crate-root-only"],
                 ..default()
             },

@@ -14,7 +14,7 @@
 //        want to provide a mechanism to circumvent that. E.g., `--force` or `-S <allow|warn>=...`.
 
 use crate::{
-    build::{ExternCrate, VerbatimOptionsBuf},
+    build::{ExternCrate, VerbatimOptions},
     context::Context,
     data::CrateName,
     diagnostic::{EmittedError, error, fmt, warn},
@@ -220,11 +220,11 @@ impl InstantiationError<'_, '_> {
 #[derive(Default, Clone)]
 #[cfg_attr(test, derive(PartialEq, Eq, Debug))]
 pub(crate) struct InstantiatedDirectives<'src> {
-    pub(crate) build_aux_docs: BuildAuxDocs,
+    pub(crate) build_aux_docs: bool,
     pub(crate) dependencies: Vec<ExternCrate<'src>>,
     pub(crate) edition: Option<Spanned<&'src str>>,
-    pub(crate) build_verbatim: VerbatimOptionsBuf<'src>,
-    pub(crate) run_verbatim: VerbatimOptionsBuf<'src>,
+    pub(crate) build_verbatim: VerbatimOptions<'src>,
+    pub(crate) run_verbatim: VerbatimOptions<'src>,
 }
 
 impl<'src> InstantiatedDirectives<'src> {
@@ -238,7 +238,7 @@ impl<'src> InstantiatedDirectives<'src> {
                 self.dependencies
                     .push(ExternCrate::Named { name, path: path.map(|path| path.map(Into::into)) });
             }
-            SimpleDirective::BuildAuxDocs => self.build_aux_docs = BuildAuxDocs::Yes,
+            SimpleDirective::BuildAuxDocs => self.build_aux_docs = true,
 
             SimpleDirective::Flags(flags, stage) => {
                 let stage = match stage {
@@ -269,14 +269,6 @@ impl<'src> InstantiatedDirectives<'src> {
 }
 
 type UninstantiatedDirectives<'src> = Vec<(Spanned<&'src str>, SimpleDirective<'src>)>;
-
-#[derive(Clone, Copy, Default)]
-#[cfg_attr(test, derive(PartialEq, Eq, Debug))]
-pub(crate) enum BuildAuxDocs {
-    #[default]
-    No,
-    Yes,
-}
 
 #[cfg_attr(test, derive(PartialEq, Eq, Debug))]
 struct Directive<'src> {

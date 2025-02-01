@@ -62,7 +62,7 @@ fn try_main() -> error::Result {
     // so we properly support them in `compiletest`+command
 
     // FIXME: this is awkward ... can we do this inside cli smh (not the ref op ofc)
-    let v_opts = build::VerbatimOptionsBuf {
+    let v_opts = build::VerbatimOptions {
         arguments: args.verbatim.iter().map(String::as_str).collect(),
         variables: Vec::new(),
     };
@@ -70,7 +70,7 @@ fn try_main() -> error::Result {
     let opts = build::Options {
         toolchain: args.toolchain.as_deref(),
         build: &args.build,
-        verbatim: v_opts.as_ref(),
+        verbatim: v_opts,
         debug: &args.debug,
     };
 

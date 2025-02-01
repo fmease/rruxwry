@@ -31,7 +31,7 @@ pub(crate) fn perform(
     engine: Engine<'_>,
     krate: Crate<'_>,
     extern_crates: &[ExternCrate<'_>],
-    opts: Options<'_>,
+    opts: &Options<'_>,
     imply_u_opts: ImplyUnstableOptions,
 ) -> io::Result<()> {
     let mut cmd = Command::new(engine.name());
@@ -45,7 +45,7 @@ pub(crate) fn perform(
     execute(cmd, opts.debug)
 }
 
-pub(crate) fn query_crate_name(krate: Crate<'_>, opts: Options<'_>) -> io::Result<String> {
+pub(crate) fn query_crate_name(krate: Crate<'_>, opts: &Options<'_>) -> io::Result<String> {
     let engine = Engine::Rustc(&CompileOptions { check_only: false });
 
     let mut cmd = Command::new(engine.name());
@@ -75,7 +75,7 @@ fn configure_basic(
     cmd: &mut Command,
     engine: Engine<'_>,
     krate: Crate<'_>,
-    opts: Options<'_>,
+    opts: &Options<'_>,
 ) -> UsesUnstableOptions {
     let mut u_opts = UsesUnstableOptions::No;
 
@@ -119,7 +119,7 @@ fn configure_basic(
         });
     }
 
-    configure_verbatim(cmd, opts.verbatim);
+    configure_verbatim(cmd, &opts.verbatim);
     configure_engine_specific(cmd, engine, &mut u_opts);
 
     if let Some(opts) = engine.env_opts() {
@@ -134,7 +134,7 @@ fn configure_extra(
     cmd: &mut Command,
     engine: Engine<'_>,
     extern_crates: &[ExternCrate<'_>],
-    opts: Options<'_>,
+    opts: &Options<'_>,
 ) {
     // The crate name can't depend on any dependency crates, it's fine to skip this.
     // The opposite used to be the case actually prior to rust-lang/rust#117584.
@@ -212,8 +212,8 @@ fn configure_extra(
     }
 }
 
-fn configure_verbatim(cmd: &mut process::Command, verbatim: VerbatimOptions<'_>) {
-    for (key, value) in verbatim.variables {
+fn configure_verbatim(cmd: &mut process::Command, verbatim: &VerbatimOptions<'_>) {
+    for (key, value) in &verbatim.variables {
         match value {
             Some(value) => cmd.env(key, value),
             None => cmd.env_remove(key),
@@ -223,7 +223,7 @@ fn configure_verbatim(cmd: &mut process::Command, verbatim: VerbatimOptions<'_>)
     // Regardin crate name querying,...
     // It's vital that we pass through verbatim arguments when querying the crate name as they might
     // contain impactful options like `--crate-name …`, `-Zcrate-attr=crate_name(…)`, or `--edition …`.
-    cmd.args(verbatim.arguments);
+    cmd.args(&verbatim.arguments);
 }
 
 fn configure_engine_specific(
@@ -280,7 +280,7 @@ fn configure_engine_specific(
 
 pub(crate) fn run(
     program: impl AsRef<OsStr>,
-    v_opts: VerbatimOptions<'_>,
+    v_opts: &VerbatimOptions<'_>,
     dbg_opts: &DebugOptions,
 ) -> io::Result<()> {
     let mut cmd = Command::new(program);
@@ -433,7 +433,7 @@ pub(crate) enum ExternCrate<'src> {
     Named { name: CrateName<&'src str>, path: Option<Spanned<Cow<'src, str>>> },
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub(crate) struct Options<'a> {
     pub(crate) toolchain: Option<&'a OsStr>,
     pub(crate) build: &'a BuildOptions,
@@ -441,32 +441,20 @@ pub(crate) struct Options<'a> {
     pub(crate) debug: &'a DebugOptions,
 }
 
-#[derive(Clone, Copy, Default)]
-pub(crate) struct VerbatimOptions<'a> {
-    /// Program arguments to be passed verbatim.
-    pub(crate) arguments: &'a [&'a str],
-    /// Environment variables to be passed verbatim.
-    pub(crate) variables: &'a [(&'a str, Option<&'a str>)],
-}
-
 /// Program arguments and environment variables to be passed verbatim.
 #[derive(Clone, Default)]
 #[cfg_attr(test, derive(PartialEq, Eq, Debug))]
-pub(crate) struct VerbatimOptionsBuf<'a> {
+pub(crate) struct VerbatimOptions<'a> {
     /// Program arguments to be passed verbatim.
     pub(crate) arguments: Vec<&'a str>,
     /// Environment variables to be passed verbatim.
     pub(crate) variables: Vec<(&'a str, Option<&'a str>)>,
 }
 
-impl<'a> VerbatimOptionsBuf<'a> {
-    pub(crate) fn extend(&mut self, other: VerbatimOptions<'a>) {
-        self.arguments.extend_from_slice(other.arguments);
-        self.variables.extend_from_slice(other.variables);
-    }
-
-    pub(crate) fn as_ref(&self) -> VerbatimOptions<'_> {
-        VerbatimOptions { arguments: &self.arguments, variables: &self.variables }
+impl<'a> VerbatimOptions<'a> {
+    pub(crate) fn extend(&mut self, mut other: VerbatimOptions<'a>) {
+        self.arguments.append(&mut other.arguments);
+        self.variables.append(&mut other.variables);
     }
 }
 

@@ -14,10 +14,9 @@ use crate::{
     },
     context::Context,
     data::{Crate, CrateName, CrateType, DocBackend, Edition},
-    diagnostic::error,
-    directive::{self, BuildAuxDocs},
+    diagnostic::{error, fmt},
+    directive,
     error::Result,
-    fmt,
     source::Spanned,
     utility::default,
 };
@@ -43,30 +42,32 @@ pub(crate) fn perform(
     }
 }
 
-fn compile(
+fn compile<'a>(
     mode: CompileMode,
     run: Run,
-    krate: Crate<'_>,
-    opts: Options<'_>,
+    krate: Crate<'a>,
+    mut opts: Options<'a>,
     c_opts: &CompileOptions,
-    cx: Context<'_>,
+    cx: Context<'a>,
 ) -> Result {
-    match mode {
+    let engine = Engine::Rustc(c_opts);
+    let (krate, run_v_opts) = match mode {
         CompileMode::Default => {
-            let krate = build_default(Engine::Rustc(c_opts), krate, opts)?;
-            match run {
-                Run::Yes => self::run(krate, opts, default()),
-                Run::No => Ok(()),
-            }
+            let krate = build_default(engine, krate, &opts)?;
+            (krate, default())
         }
         // FIXME: _test
         CompileMode::DirectiveDriven(flavor, _test) => {
-            compile_directive_driven(krate, opts, c_opts, flavor, run, cx)
+            build_directive_driven(engine, krate, &mut opts, flavor, cx)?
         }
+    };
+    match run {
+        Run::Yes => self::run(krate, &opts, &run_v_opts),
+        Run::No => Ok(()),
     }
 }
 
-fn run(krate: Crate<'_>, opts: Options<'_>, run_v_opts: VerbatimOptions<'_>) -> Result {
+fn run(krate: Crate<'_>, opts: &Options<'_>, run_v_opts: &VerbatimOptions<'_>) -> Result {
     // FIXME: Explainer
     let crate_name = build::query_crate_name(krate, opts)?;
     let mut path: PathBuf = [".", &crate_name].into_iter().collect();
@@ -80,86 +81,34 @@ fn run(krate: Crate<'_>, opts: Options<'_>, run_v_opts: VerbatimOptions<'_>) -> 
     Ok(())
 }
 
-fn compile_directive_driven(
-    krate: Crate<'_>,
-    opts: Options<'_>,
-    c_opts: &CompileOptions,
-    flavor: directive::Flavor,
-    run: Run,
-    cx: Context<'_>,
-) -> Result {
-    let engine = Engine::Rustc(c_opts);
-
-    let mut directives = directive::gather(
-        Spanned::sham(krate.path),
-        directive::Scope::Base,
-        directive::Role::Principal,
-        flavor,
-        opts.build.revision.as_deref(),
-        cx,
-    )?;
-
-    // FIXME: unwrap
-    let aux_base_path = LazyCell::new(|| krate.path.parent().unwrap().join("auxiliary"));
-
-    let deps: Vec<_> = directives
-        .dependencies
-        .iter()
-        .map(|dep| {
-            compile_auxiliary(dep, &aux_base_path, engine, opts, BuildAuxDocs::No, flavor, cx)
-        })
-        .collect::<Result<_>>()?;
-
-    directives.build_verbatim.extend(opts.verbatim);
-
-    // FIXME: Once we support `//@ proc-macro` we need to reflect that in the crate type.
-    let krate = Crate {
-        edition: krate.edition.or(directives.edition.map(|edition| Edition::Unknown(edition.bare))),
-        ..krate
-    };
-
-    let opts = Options { verbatim: directives.build_verbatim.as_ref(), ..opts };
-
-    build::perform(
-        engine,
-        krate,
-        // FIXME: Once we support `//@ proc-macro` we need to add `proc_macro` (to the client).
-        &deps,
-        opts,
-        ImplyUnstableOptions::No,
-    )?;
-
-    match run {
-        Run::Yes => self::run(krate, opts, directives.run_verbatim.as_ref()),
-        Run::No => Ok(()),
-    }
-}
-
-fn document(
+fn document<'a>(
     mode: DocMode,
     open: Open,
-    krate: Crate<'_>,
-    opts: Options<'_>,
+    krate: Crate<'a>,
+    mut opts: Options<'a>,
     d_opts: &DocOptions,
-    cx: Context<'_>,
+    cx: Context<'a>,
 ) -> Result<()> {
-    match mode {
+    let engine = Engine::Rustdoc(d_opts);
+    let (krate, opts) = match mode {
         DocMode::Default => {
-            let krate = build_default(Engine::Rustdoc(d_opts), krate, opts)?;
-            match open {
-                Open::Yes => self::open(krate, opts),
-                Open::No => Ok(()),
-            }
+            let krate = build_default(engine, krate, &opts)?;
+            (krate, opts)
         }
-        DocMode::CrossCrate => document_cross_crate(krate, opts, d_opts, open),
+        DocMode::CrossCrate => return document_cross_crate(krate, &opts, d_opts, open),
         // FIXME: _test
         DocMode::DirectiveDriven(flavor, _test) => {
-            document_directive_driven(krate, opts, d_opts, flavor, open, cx)
+            let (krate, _) = build_directive_driven(engine, krate, &mut opts, flavor, cx)?;
+            (krate, opts)
         }
+    };
+    match open {
+        Open::Yes => self::open(krate, &opts),
+        Open::No => Ok(()),
     }
 }
 
-fn open(krate: Crate<'_>, opts: Options<'_>) -> Result<()> {
+fn open(krate: Crate<'_>, opts: &Options<'_>) -> Result<()> {
     let crate_name = build::query_crate_name(krate, opts)?;
     let path = format!("./doc/{crate_name}/index.html");
 
@@ -173,7 +122,7 @@ fn open(krate: Crate<'_>, opts: Options<'_>) -> Result<()> {
 
 fn document_cross_crate(
     krate: Crate<'_>,
-    opts: Options<'_>,
+    opts: &Options<'_>,
     d_opts: &DocOptions,
     open: Open,
 ) -> Result<()> {
@@ -207,75 +156,18 @@ fn document_cross_crate(
 
     build::perform(Engine::Rustdoc(d_opts), krate, deps, opts, ImplyUnstableOptions::Yes)?;
 
+    // FIXME: Move this out of this function into the caller `document` to further simplify things
     match open {
         Open::Yes => self::open(krate, opts),
         Open::No => Ok(()),
     }
 }
 
-fn document_directive_driven(
-    krate: Crate<'_>,
-    opts: Options<'_>,
-    // FIXME: tempory
-    d_opts: &DocOptions,
-    flavor: directive::Flavor,
-    open: Open,
-    cx: Context<'_>,
-) -> Result<()> {
-    let engine = Engine::Rustdoc(d_opts);
-
-    let mut directives = directive::gather(
-        Spanned::sham(krate.path),
-        scope(engine),
-        directive::Role::Principal,
-        flavor,
-        opts.build.revision.as_deref(),
-        cx,
-    )?;
-
-    // FIXME: unwrap
-    let aux_base_path = LazyCell::new(|| krate.path.parent().unwrap().join("auxiliary"));
-
-    let dependencies: Vec<_> = directives
-        .dependencies
-        .iter()
-        .map(|dep| {
-            compile_auxiliary(
-                dep,
-                &aux_base_path,
-                engine,
-                opts,
-                directives.build_aux_docs,
-                flavor,
-                cx,
-            )
-        })
-        .collect::<Result<_>>()?;
-
-    directives.build_verbatim.extend(opts.verbatim);
-
-    // FIXME: Once we support `//@ proc-macro` we need to reflect that in the crate type.
-    let krate = Crate {
-        edition: krate.edition.or(directives.edition.map(|edition| Edition::Unknown(edition.bare))),
-        ..krate
-    };
-
-    build::perform(
-        engine,
-        krate,
-        // FIXME: Once we support `//@ proc-macro` we need to add `proc_macro` (to the client)
-        &dependencies,
-        Options { verbatim: directives.build_verbatim.as_ref(), ..opts },
-        ImplyUnstableOptions::No,
-    )?;
-
-    match open {
-        Open::Yes => self::open(krate, opts),
-        Open::No => Ok(()),
-    }
-}
-
-fn build_default<'a>(engine: Engine<'_>, krate: Crate<'a>, opts: Options<'_>) -> Result<Crate<'a>> {
+fn build_default<'a>(
+    engine: Engine<'_>,
+    krate: Crate<'a>,
+    opts: &Options<'_>,
+) -> Result<Crate<'a>> {
     let krate = Crate { edition: krate.edition.or(Some(Edition::LATEST_STABLE)), ..krate };
     let deps: &[_] = match krate.typ {
         // For convenience and just like Cargo we add `proc_macro` to the external prelude.
@@ -287,6 +179,60 @@ fn build_default<'a>(engine: Engine<'_>, krate: Crate<'a>, opts: Options<'_>) ->
     };
     build::perform(engine, krate, deps, opts, ImplyUnstableOptions::Yes)?;
     Ok(krate)
+}
+
+fn build_directive_driven<'a>(
+    engine: Engine<'_>,
+    krate: Crate<'a>,
+    opts: &mut Options<'a>,
+    flavor: directive::Flavor,
+    cx: Context<'a>,
+) -> Result<(Crate<'a>, VerbatimOptions<'a>)> {
+    let directives = directive::gather(
+        Spanned::sham(krate.path),
+        scope(engine),
+        directive::Role::Principal,
+        flavor,
+        opts.build.revision.as_deref(),
+        cx,
+    )?;
+
+    // FIXME: unwrap
+    let aux_base_path = LazyCell::new(|| krate.path.parent().unwrap().join("auxiliary"));
+
+    let deps: Vec<_> = directives
+        .dependencies
+        .iter()
+        .map(|dep| {
+            compile_auxiliary(
+                dep,
+                &aux_base_path,
+                engine,
+                opts.clone(),
+                directives.build_aux_docs,
+                flavor,
+                cx,
+            )
+        })
+        .collect::<Result<_>>()?;
+
+    // FIXME: Once we support `//@ proc-macro` we need to reflect that in the crate type.
+    let krate = Crate {
+        edition: krate.edition.or(directives.edition.map(|edition| Edition::Unknown(edition.bare))),
+        ..krate
+    };
+
+    opts.verbatim.extend(directives.build_verbatim);
+
+    build::perform(
+        engine,
+        krate,
+        // FIXME: Once we support `//@ proc-macro` we need to add `proc_macro` (to the client).
+        &deps,
+        opts,
+        ImplyUnstableOptions::No,
+    )?;
+    Ok((krate, directives.run_verbatim))
 }
 
 // FIXME: Support nested auxiliaries!
@@ -301,10 +247,10 @@ fn compile_auxiliary<'a>(
     //        we don't honor the edition (which is also just an "option").
     //        Some options should however be inherited: toolchain, cfgs, rev,
     //        debug. Should subset vs. all be a CLI option?
-    opts: Options<'_>,
-    build_aux_docs: BuildAuxDocs,
+    mut opts: Options<'a>,
+    build_aux_docs: bool,
     flavor: directive::Flavor,
-    cx: Context<'_>,
+    cx: Context<'a>,
 ) -> Result<ExternCrate<'a>> {
     let path = match extern_crate {
         ExternCrate::Unnamed { path } => path.map(|path| base_path.join(path)),
@@ -314,7 +260,7 @@ fn compile_auxiliary<'a>(
         },
     };
 
-    let mut directives = directive::gather(
+    let directives = directive::gather(
         path.as_deref(),
         scope(engine),
         directive::Role::Auxiliary,
@@ -323,8 +269,7 @@ fn compile_auxiliary<'a>(
         cx,
     )?;
 
-    directives.build_verbatim.extend(opts.verbatim);
-    let opts = Options { verbatim: directives.build_verbatim.as_ref(), ..opts };
+    opts.verbatim.extend(directives.build_verbatim);
 
     let krate = Crate {
         path: &path.bare,
@@ -350,20 +295,18 @@ fn compile_auxiliary<'a>(
             ..krate
         },
         &[],
-        opts,
+        &opts,
         ImplyUnstableOptions::No,
     )?;
 
     // FIXME: Is this how `//@ build-aux-docs` is supposed to work?
-    if let BuildAuxDocs::Yes = build_aux_docs
-        && let Engine::Rustdoc(d_opts) = engine
-    {
+    if build_aux_docs && let Engine::Rustdoc(d_opts) = engine {
         build::perform(
             Engine::Rustdoc(d_opts),
             // FIXME: Should typ also be Some("dylib") unless directives.no_prefer_dynamic?
             krate,
             &[],
-            opts,
+            &opts,
             ImplyUnstableOptions::No,
         )?;
     }
