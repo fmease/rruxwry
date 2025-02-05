@@ -201,7 +201,7 @@ impl InstantiationError<'_, '_> {
                 let it = match available.len() {
                     0 => it
                         .note(fmt!("the crate does not declare any revisions"))
-                        .help(fmt!("remove `--rev {revision}` from the invocation")),
+                        .help(fmt!("remove `-R{revision}` from the invocation")),
                     _ => it.note(fmt!("available revisions are: {}", list(available))),
                 };
                 it.finish()
@@ -209,7 +209,7 @@ impl InstantiationError<'_, '_> {
             // Avoid violating abstraction layers (this module shouldn't know about the CLI)!
             Self::MissingActiveRevision { available } => {
                 error(fmt!("no revision specified (on the command line)"))
-                    .help(fmt!("specifiy a revision with `--rev <NAME>` on the command line"))
+                    .help(fmt!("specifiy a revision with `-R<NAME>` on the command line"))
                     .note(fmt!("available revisions are: {}", list(available)))
                     .finish()
             }
