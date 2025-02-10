@@ -126,7 +126,7 @@ fn document_cross_crate(
     d_opts: &DocOptions,
     open: Open,
 ) -> Result<()> {
-    // FIXME: Should we we reject krate.typ==bin? Possibly nicer UX-wise?
+    let krate = Crate { typ: krate.typ.or(Some(CrateType("lib"))), ..krate };
     let krate = build_default(Engine::Rustc(&CompileOptions { check_only: false }), krate, opts)?;
 
     // FIXME: This `unwrap` is obviously reachable (e.g., on `rrc '%$?'`)
