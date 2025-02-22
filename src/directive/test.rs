@@ -208,7 +208,7 @@ fn quoted_revision_not_unquoted() {
         parse_directive("[\"literally\"] compile-flags:", Scope::Base),
         Ok(Directive {
             revision: Some(spanned(1, 12, "\"literally\"")),
-            bare: SimpleDirective::Flags("", Stage::CompileTime)
+            bare: SimpleDirective::Flags("", Stage::CompileTime, FlagScope::Base)
         })
     );
 }
@@ -220,7 +220,7 @@ fn commas_inside_revision() {
         parse_directive("[one,two] compile-flags:", Scope::Base),
         Ok(Directive {
             revision: Some(spanned(1, 8, "one,two")),
-            bare: SimpleDirective::Flags("", Stage::CompileTime)
+            bare: SimpleDirective::Flags("", Stage::CompileTime, FlagScope::Base)
         })
     );
 }
@@ -271,7 +271,7 @@ fn compile_flags_directives() {
     assert_eq!(directives, Directives {
         revisions: default(),
         instantiated: InstantiatedDirectives {
-            build_verbatim: VerbatimOptions {
+            v_opts: VerbatimOptions {
                 arguments: vec!["--crate-type", "lib", "--edition=2021"],
                 ..default()
             },
@@ -298,14 +298,18 @@ fn conditional_directives() {
     assert_eq!(directives, Directives {
         revisions: ["one", "two"].into(),
         instantiated: InstantiatedDirectives {
-            build_verbatim: VerbatimOptions { arguments: vec!["--crate-type=lib"], ..default() },
+            v_opts: VerbatimOptions { arguments: vec!["--crate-type=lib"], ..default() },
             ..default()
         },
         uninstantiated: vec![
             (spanned(27, 30, "one"), SimpleDirective::Edition(spanned(41, 45, "2018"))),
             (
                 spanned(86, 89, "two"),
-                SimpleDirective::Flags("-Zparse-crate-root-only", Stage::CompileTime)
+                SimpleDirective::Flags(
+                    "-Zparse-crate-root-only",
+                    Stage::CompileTime,
+                    FlagScope::Base
+                )
             )
         ],
         role: Role::Principal
@@ -330,7 +334,7 @@ fn instantiate_conditional_directives() {
     assert_eq!(
         directives,
         Ok(InstantiatedDirectives {
-            build_verbatim: VerbatimOptions {
+            v_opts: VerbatimOptions {
                 arguments: vec!["--crate-type=lib", "-Zparse-crate-root-only"],
                 ..default()
             },
@@ -354,7 +358,7 @@ fn conditional_directives_revision_declared_after_use() {
         instantiated: default(),
         uninstantiated: vec![(
             spanned(4, 8, "next"),
-            SimpleDirective::Flags("-Znext-solver", Stage::CompileTime)
+            SimpleDirective::Flags("-Znext-solver", Stage::CompileTime, FlagScope::Base)
         )],
         role: Role::Principal
     });
@@ -377,7 +381,7 @@ fn conditional_directives_undeclared_revisions() {
         uninstantiated: vec![
             (
                 spanned(4, 9, "block"),
-                SimpleDirective::Flags("--crate-type lib", Stage::CompileTime)
+                SimpleDirective::Flags("--crate-type lib", Stage::CompileTime, FlagScope::Base)
             ),
             (spanned(47, 51, "wall"), SimpleDirective::Edition(spanned(62, 66, "2021"))),
         ],

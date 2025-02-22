@@ -34,10 +34,10 @@ pub(crate) fn perform(
 ) -> Result<()> {
     match op {
         Operation::Compile { mode, run, options: c_opts } => {
-            compile(mode, run, krate, opts, &c_opts, cx)
+            compile(mode, run, krate, opts, c_opts, cx)
         }
         Operation::Document { mode, open, options: d_opts } => {
-            document(mode, open, krate, opts, &d_opts, cx)
+            document(mode, open, krate, opts, d_opts, cx)
         }
     }
 }
@@ -47,18 +47,18 @@ fn compile<'a>(
     run: Run,
     krate: Crate<'a>,
     mut opts: Options<'a>,
-    c_opts: &CompileOptions,
+    c_opts: CompileOptions,
     cx: Context<'a>,
 ) -> Result {
-    let engine = Engine::Rustc(c_opts);
+    let mut engine = Engine::Rustc(c_opts);
     let (krate, run_v_opts) = match mode {
         CompileMode::Default => {
-            let krate = build_default(engine, krate, &opts)?;
+            let krate = build_default(&engine, krate, &opts)?;
             (krate, default())
         }
         // FIXME: _test
         CompileMode::DirectiveDriven(flavor, _test) => {
-            build_directive_driven(engine, krate, &mut opts, flavor, cx)?
+            build_directive_driven(&mut engine, krate, &mut opts, flavor, cx)?
         }
     };
     match run {
@@ -73,7 +73,7 @@ fn run(krate: Crate<'_>, opts: &Options<'_>, run_v_opts: &VerbatimOptions<'_>) -
     let mut path: PathBuf = [".", &crate_name].into_iter().collect();
     path.set_extension(std::env::consts::EXE_EXTENSION);
 
-    build::run(&path, run_v_opts, opts.debug).map_err(|error| {
+    build::run(&path, run_v_opts, opts.dbg_opts).map_err(|error| {
         self::error(fmt!("failed to run the built binary `{}`", path.display()))
             .note(fmt!("{error}"))
             .finish()
@@ -86,19 +86,19 @@ fn document<'a>(
     open: Open,
     krate: Crate<'a>,
     mut opts: Options<'a>,
-    d_opts: &DocOptions,
+    d_opts: DocOptions<'a>,
     cx: Context<'a>,
 ) -> Result<()> {
-    let engine = Engine::Rustdoc(d_opts);
     let (krate, opts) = match mode {
         DocMode::Default => {
-            let krate = build_default(engine, krate, &opts)?;
+            let krate = build_default(&Engine::Rustdoc(d_opts), krate, &opts)?;
             (krate, opts)
         }
         DocMode::CrossCrate => return document_cross_crate(krate, &opts, d_opts, open),
         // FIXME: _test
         DocMode::DirectiveDriven(flavor, _test) => {
-            let (krate, _) = build_directive_driven(engine, krate, &mut opts, flavor, cx)?;
+            let (krate, _) =
+                build_directive_driven(&mut Engine::Rustdoc(d_opts), krate, &mut opts, flavor, cx)?;
             (krate, opts)
         }
     };
@@ -112,7 +112,7 @@ fn open(krate: Crate<'_>, opts: &Options<'_>) -> Result<()> {
     let crate_name = build::query_crate_name(krate, opts)?;
     let path = format!("./doc/{crate_name}/index.html");
 
-    build::open(Path::new(&path), opts.debug).map_err(|error| {
+    build::open(Path::new(&path), opts.dbg_opts).map_err(|error| {
         self::error(fmt!("failed to open the generated docs in a browser"))
             .note(fmt!("{error}"))
             .finish()
@@ -123,11 +123,11 @@ fn open(krate: Crate<'_>, opts: &Options<'_>) -> Result<()> {
 fn document_cross_crate(
     krate: Crate<'_>,
     opts: &Options<'_>,
-    d_opts: &DocOptions,
+    d_opts: DocOptions<'_>,
     open: Open,
 ) -> Result<()> {
     let krate = Crate { typ: krate.typ.or(Some(CrateType("lib"))), ..krate };
-    let krate = build_default(Engine::Rustc(&CompileOptions { check_only: false }), krate, opts)?;
+    let krate = build_default(&Engine::Rustc(CompileOptions { check_only: false }), krate, opts)?;
 
     // FIXME: This `unwrap` is obviously reachable (e.g., on `rrc '%$?'`)
     let crate_name: CrateName<Cow<'_, _>> = krate.name.map_or_else(
@@ -138,7 +138,7 @@ fn document_cross_crate(
     let root_crate_name = CrateName::new_unchecked(format!("u_{crate_name}"));
     let root_crate_path = krate.path.with_file_name(root_crate_name.as_str()).with_extension("rs");
 
-    if !opts.debug.dry_run && !root_crate_path.exists() {
+    if !opts.dbg_opts.dry_run && !root_crate_path.exists() {
         // While we could omit the `extern crate` declaration in `edition >= Edition::Edition2018`,
         // we would need to recreate the file on each rerun if the edition was 2015 instead of
         // skipping that step since we wouldn't know whether the existing file if applicable was
@@ -154,7 +154,7 @@ fn document_cross_crate(
     let krate =
         Crate { path: &root_crate_path, name: Some(root_crate_name.as_ref()), typ: None, ..krate };
 
-    build::perform(Engine::Rustdoc(d_opts), krate, deps, opts, ImplyUnstableOptions::Yes)?;
+    build::perform(&Engine::Rustdoc(d_opts), krate, deps, opts, ImplyUnstableOptions::Yes)?;
 
     // FIXME: Move this out of this function into the caller `document` to further simplify things
     match open {
@@ -164,7 +164,7 @@ fn document_cross_crate(
 }
 
 fn build_default<'a>(
-    engine: Engine<'_>,
+    engine: &Engine<'_>,
     krate: Crate<'a>,
     opts: &Options<'_>,
 ) -> Result<Crate<'a>> {
@@ -182,7 +182,7 @@ fn build_default<'a>(
 }
 
 fn build_directive_driven<'a>(
-    engine: Engine<'_>,
+    engine: &mut Engine<'a>,
     krate: Crate<'a>,
     opts: &mut Options<'a>,
     flavor: directive::Flavor,
@@ -193,7 +193,7 @@ fn build_directive_driven<'a>(
         scope(engine),
         directive::Role::Principal,
         flavor,
-        opts.build.revision.as_deref(),
+        opts.b_opts.revision.as_deref(),
         cx,
     )?;
 
@@ -222,7 +222,11 @@ fn build_directive_driven<'a>(
         ..krate
     };
 
-    opts.verbatim.extend(directives.build_verbatim);
+    opts.v_opts.extend(directives.v_opts);
+    match engine {
+        Engine::Rustc(_) => {} // rustc-exclusive (verbatim) flags is not a thing.
+        Engine::Rustdoc(d_opts) => d_opts.v_opts.extend(directives.v_d_opts),
+    }
 
     build::perform(
         engine,
@@ -232,7 +236,7 @@ fn build_directive_driven<'a>(
         opts,
         ImplyUnstableOptions::No,
     )?;
-    Ok((krate, directives.run_verbatim))
+    Ok((krate, directives.run_v_opts))
 }
 
 // FIXME: Support nested auxiliaries!
@@ -240,7 +244,7 @@ fn build_directive_driven<'a>(
 fn compile_auxiliary<'a>(
     extern_crate: &ExternCrate<'a>,
     base_path: &Path,
-    engine: Engine<'_>,
+    engine: &Engine<'_>,
     // FIXME: Do we actually want to pass along *all* of these opts?
     //        Arguably some of them belong to the root crate only (e.g. crate name).
     //        On top of that, the status quo is inconsistent because
@@ -265,11 +269,11 @@ fn compile_auxiliary<'a>(
         scope(engine),
         directive::Role::Auxiliary,
         flavor,
-        opts.build.revision.as_deref(),
+        opts.b_opts.revision.as_deref(),
         cx,
     )?;
 
-    opts.verbatim.extend(directives.build_verbatim);
+    opts.v_opts.extend(directives.v_opts);
 
     let krate = Crate {
         path: &path.bare,
@@ -287,7 +291,7 @@ fn compile_auxiliary<'a>(
             //        I suspect is doesn't because we need to s%/rlib/rmeta/
             Engine::Rustc(_) => engine,
             // FIXME: Wait, would check_only=true also work and be better?
-            Engine::Rustdoc(_) => Engine::Rustc(&CompileOptions { check_only: false }),
+            Engine::Rustdoc(_) => &Engine::Rustc(CompileOptions { check_only: false }),
         },
         Crate {
             // FIXME: Make this "dylib" instead unless directives.no_prefer_dynamic then it should be..None?
@@ -302,7 +306,8 @@ fn compile_auxiliary<'a>(
     // FIXME: Is this how `//@ build-aux-docs` is supposed to work?
     if build_aux_docs && let Engine::Rustdoc(d_opts) = engine {
         build::perform(
-            Engine::Rustdoc(d_opts),
+            // FIXME: Do we actually want to forward these doc opts from the parent crate??
+            &Engine::Rustdoc(d_opts.clone()),
             // FIXME: Should typ also be Some("dylib") unless directives.no_prefer_dynamic?
             krate,
             &[],
@@ -333,7 +338,7 @@ fn compile_auxiliary<'a>(
     })
 }
 
-fn scope(engine: Engine<'_>) -> directive::Scope {
+fn scope(engine: &Engine<'_>) -> directive::Scope {
     match engine {
         Engine::Rustc(_) => directive::Scope::Base,
         // FIXME: Do we actually want to treat !`-j` as `rustdoc/` (Scope::HtmlDocCk)
@@ -347,7 +352,7 @@ fn scope(engine: Engine<'_>) -> directive::Scope {
 
 pub(crate) enum Operation {
     Compile { mode: CompileMode, run: Run, options: CompileOptions },
-    Document { mode: DocMode, open: Open, options: DocOptions },
+    Document { mode: DocMode, open: Open, options: DocOptions<'static> },
 }
 
 #[derive(Clone, Copy)]

@@ -223,8 +223,9 @@ pub(crate) struct InstantiatedDirectives<'src> {
     pub(crate) build_aux_docs: bool,
     pub(crate) dependencies: Vec<ExternCrate<'src>>,
     pub(crate) edition: Option<Spanned<&'src str>>,
-    pub(crate) build_verbatim: VerbatimOptions<'src>,
-    pub(crate) run_verbatim: VerbatimOptions<'src>,
+    pub(crate) v_opts: VerbatimOptions<'src>,
+    pub(crate) v_d_opts: VerbatimOptions<'src>,
+    pub(crate) run_v_opts: VerbatimOptions<'src>,
 }
 
 impl<'src> InstantiatedDirectives<'src> {
@@ -240,10 +241,13 @@ impl<'src> InstantiatedDirectives<'src> {
             }
             SimpleDirective::BuildAuxDocs => self.build_aux_docs = true,
 
-            SimpleDirective::Flags(flags, stage) => {
-                let stage = match stage {
-                    Stage::CompileTime => &mut self.build_verbatim,
-                    Stage::RunTime => &mut self.run_verbatim,
+            SimpleDirective::Flags(flags, stage, scope) => {
+                let stage = match (stage, scope) {
+                    (Stage::CompileTime, FlagScope::Base) => &mut self.v_opts,
+                    (Stage::CompileTime, FlagScope::Rustdoc) => &mut self.v_d_opts,
+                    (Stage::RunTime, FlagScope::Base) => &mut self.run_v_opts,
+                    // FIXME: Make this state unrepresentable!
+                    (Stage::RunTime, FlagScope::Rustdoc) => unreachable!(),
                 };
                 // FIXME: Supported quotes arguments (they shouldn't be split in halves).
                 //        Use crate `shlex` for this. What does compiletest do btw?
@@ -255,8 +259,8 @@ impl<'src> InstantiatedDirectives<'src> {
             SimpleDirective::Revisions(_) => unreachable!(), // Already dealt with in `Directives::add`.
             SimpleDirective::EnvVar(key, value, stage) => {
                 let stage = match stage {
-                    Stage::CompileTime => &mut self.build_verbatim,
-                    Stage::RunTime => &mut self.run_verbatim,
+                    Stage::CompileTime => &mut self.v_opts,
+                    Stage::RunTime => &mut self.run_v_opts,
                 };
                 stage.variables.push((key, value));
             }
@@ -290,7 +294,9 @@ enum SimpleDirective<'src> {
     },
     BuildAuxDocs,
     Edition(Spanned<&'src str>),
-    Flags(&'src str, Stage),
+    // FIXME: Badly modeled: Stage::Runtime is incompatible with Receiver::Rustdoc.
+    //        Make this state unrepresentable!
+    Flags(&'src str, Stage, FlagScope),
     Revisions(Vec<&'src str>),
     EnvVar(&'src str, Option<&'src str>, Stage),
     #[allow(dead_code)]
@@ -473,7 +479,7 @@ impl<'src> Parser<'src> {
                 SimpleDirective::BuildAuxDocs
             }
             "compile-flags" => {
-                return self.parse_flags(Stage::CompileTime).map(Some);
+                return self.parse_flags(Stage::CompileTime, FlagScope::Base).map(Some);
             }
             "doc-flags" => {
                 match self.scope {
@@ -489,7 +495,7 @@ impl<'src> Parser<'src> {
                     }
                 };
 
-                return self.parse_flags(Stage::CompileTime).map(Some);
+                return self.parse_flags(Stage::CompileTime, FlagScope::Rustdoc).map(Some);
             }
             "edition" => {
                 // FIXME: To be fully "compliant", under Flavor::Vanilla this should be
@@ -528,7 +534,7 @@ impl<'src> Parser<'src> {
             }
             "run-flags" => {
                 self.limit(source, Scope::Base)?;
-                return self.parse_flags(Stage::RunTime).map(Some);
+                return self.parse_flags(Stage::RunTime, FlagScope::Base).map(Some);
             }
             "rustc-env" => return self.parse_set_env_var(Stage::CompileTime).map(Some),
             "unset-rustc-env" => return self.parse_unset_env_var(Stage::CompileTime).map(Some),
@@ -618,9 +624,13 @@ impl<'src> Parser<'src> {
         Ok(())
     }
 
-    fn parse_flags(&mut self, stage: Stage) -> Result<SimpleDirective<'src>, Error<'src>> {
+    fn parse_flags(
+        &mut self,
+        stage: Stage,
+        scope: FlagScope,
+    ) -> Result<SimpleDirective<'src>, Error<'src>> {
         self.parse_separator(Padding::Yes)?; // FIXME: audit AllowPadding (before)
-        Ok(SimpleDirective::Flags(self.parse_until_line_break().bare, stage))
+        Ok(SimpleDirective::Flags(self.parse_until_line_break().bare, stage, scope))
     }
 
     fn parse_set_env_var(&mut self, stage: Stage) -> Result<SimpleDirective<'src>, Error<'src>> {
@@ -951,4 +961,12 @@ enum Padding {
 enum Stage {
     CompileTime,
     RunTime,
+}
+
+// FIXME: Merge with Scope smh maybe?
+#[derive(Clone, Copy)]
+#[cfg_attr(test, derive(PartialEq, Eq, Debug))]
+enum FlagScope {
+    Base,
+    Rustdoc,
 }

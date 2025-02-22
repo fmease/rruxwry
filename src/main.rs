@@ -69,9 +69,9 @@ fn try_main() -> error::Result {
     // FIXME: this is awkward ... can we do this inside cli smh (not the ref op ofc)
     let opts = build::Options {
         toolchain: args.toolchain.as_deref(),
-        build: &args.build,
-        verbatim: v_opts,
-        debug: &args.debug,
+        b_opts: &args.b_opts,
+        v_opts,
+        dbg_opts: &args.dbg_opts,
     };
 
     // FIXME: Move the creation of this to the CLI once interface can process

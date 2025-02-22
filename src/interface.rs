@@ -5,7 +5,7 @@ use crate::{
     data::{CrateName, CrateType, DocBackend, Edition, Identity},
     directive::Flavor,
     operate::{Bless, CompileMode, DocMode, Open, Operation, Run, Test},
-    utility::{Conjunction, ListingExt as _, parse},
+    utility::{Conjunction, ListingExt as _, default, parse},
 };
 use std::{ffi::OsString, path::PathBuf};
 
@@ -332,6 +332,7 @@ pub(crate) fn arguments() -> Arguments {
                 link_to_def: matches.remove_one(id::LINK_TO_DEF).unwrap_or_default(),
                 normalize: matches.remove_one(id::NORMALIZE).unwrap_or_default(),
                 theme: matches.remove_one(id::THEME).unwrap(),
+                v_opts: default(),
             },
         },
         _ => unreachable!(), // handled by `clap`,
@@ -353,7 +354,7 @@ pub(crate) fn arguments() -> Arguments {
         edition: matches
             .remove_one(id::EDITION)
             .map(|edition: String| Edition::parse_cli_style(edition.leak())),
-        build: BuildOptions {
+        b_opts: BuildOptions {
             cfgs: matches.remove_many(id::CFGS).map(Iterator::collect).unwrap_or_default(),
             revision: matches.remove_one(id::REVISION),
             cargo_features: matches
@@ -371,7 +372,7 @@ pub(crate) fn arguments() -> Arguments {
             log: matches.remove_one(id::LOG),
             no_backtrace: matches.remove_one(id::NO_BACKTRACE).unwrap_or_default(),
         },
-        debug: DebugOptions {
+        dbg_opts: DebugOptions {
             verbose: matches.remove_one(id::VERBOSE).unwrap(),
             dry_run: matches.remove_one(id::DRY_RUN).unwrap(),
         },
@@ -388,8 +389,8 @@ pub(crate) struct Arguments {
     pub(crate) crate_name: Option<CrateName<String>>,
     pub(crate) crate_type: Option<CrateType>,
     pub(crate) edition: Option<Edition<'static>>,
-    pub(crate) build: BuildOptions,
-    pub(crate) debug: DebugOptions,
+    pub(crate) b_opts: BuildOptions,
+    pub(crate) dbg_opts: DebugOptions,
     pub(crate) color: clap::ColorChoice,
 }
 

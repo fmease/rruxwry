@@ -28,7 +28,7 @@ use std::{
 mod environment;
 
 pub(crate) fn perform(
-    engine: Engine<'_>,
+    engine: &Engine<'_>,
     krate: Crate<'_>,
     extern_crates: &[ExternCrate<'_>],
     opts: &Options<'_>,
@@ -42,27 +42,36 @@ pub(crate) fn perform(
     {
         cmd.arg("-Zunstable-options");
     }
-    execute(cmd, opts.debug)
+    execute(cmd, opts.dbg_opts)
 }
 
 pub(crate) fn query_crate_name(krate: Crate<'_>, opts: &Options<'_>) -> io::Result<String> {
-    let engine = Engine::Rustc(&CompileOptions { check_only: false });
+    let engine = Engine::Rustc(CompileOptions { check_only: false });
 
     let mut cmd = Command::new(engine.name());
 
-    configure_basic(&mut cmd, engine, krate, opts);
+    configure_basic(&mut cmd, &engine, krate, opts);
 
     cmd.arg("--print=crate-name");
 
-    match gate(|p| render(&cmd, p), opts.debug) {
+    match gate(|p| render(&cmd, p), opts.dbg_opts) {
         ControlFlow::Continue(()) => {}
         ControlFlow::Break(()) => return Ok("UNKNOWN_DUE_TO_DRY_RUN".into()),
     }
 
     // FIXME: Double check that `path`=`-` (STDIN) properly works with `output()` once we support that ourselves.
     let output = cmd.output()?;
-    output.status.exit_ok().map_err(io::Error::other)?;
     _ = output.stderr;
+
+    // If we trigger this we likely passed incorrect flags to the rustc invocation.
+    // FIXME: Unfortunately, this can actually be triggered in practice under `d -@`
+    // since we pass along verbatim flags as obtained by `compile-flags` directives
+    // which may "erroneously" contain rustdoc-specific flags. See also
+    // <https://github.com/rust-lang/rust/issues/137442>.
+    // If the r-l/r doesn't go anywhere provide a mechanism(s) (via a flag) to
+    // somehow remedy this situation (e.g., filtering flags or skipping given
+    // directives).
+    assert!(output.status.success(), "failed to properly query rustc about the crate name");
 
     // FIXME: Don't unwrap or return an io::Error, provide a proper bug() instead.
     let mut output = String::from_utf8(output.stdout).unwrap();
@@ -73,7 +82,7 @@ pub(crate) fn query_crate_name(krate: Crate<'_>, opts: &Options<'_>) -> io::Resu
 
 fn configure_basic(
     cmd: &mut Command,
-    engine: Engine<'_>,
+    engine: &Engine<'_>,
     krate: Crate<'_>,
     opts: &Options<'_>,
 ) -> UsesUnstableOptions {
@@ -111,7 +120,7 @@ fn configure_basic(
 
     // Regarding crate name querying, let's better honor this option
     // since it may significantly affect rustc's behavior.
-    if let Some(identity) = opts.build.identity {
+    if let Some(identity) = opts.b_opts.identity {
         cmd.env("RUSTC_BOOTSTRAP", match identity {
             Identity::True => "0",
             Identity::Stable => "-1",
@@ -119,7 +128,7 @@ fn configure_basic(
         });
     }
 
-    configure_verbatim(cmd, &opts.verbatim);
+    configure_verbatim(cmd, &opts.v_opts);
     configure_engine_specific(cmd, engine, &mut u_opts);
 
     if let Some(opts) = engine.env_opts() {
@@ -132,7 +141,7 @@ fn configure_basic(
 // FIXME: Explainer: This is stuff that isn't necessary for query_crate_name
 fn configure_extra(
     cmd: &mut Command,
-    engine: Engine<'_>,
+    engine: &Engine<'_>,
     extern_crates: &[ExternCrate<'_>],
     opts: &Options<'_>,
 ) {
@@ -168,52 +177,52 @@ fn configure_extra(
     // `#[cfg_attr(…, crate_name = "…")]` is a hard error (if the spec holds).
     // See also rust-lang/rust#91632.
     {
-        for cfg in &opts.build.cfgs {
+        for cfg in &opts.b_opts.cfgs {
             cmd.arg("--cfg");
             cmd.arg(cfg);
         }
         // FIXME: This shouldn't be done here.
-        for feature in &opts.build.cargo_features {
+        for feature in &opts.b_opts.cargo_features {
             // FIXME: Warn on conflicts with `cfgs` from `cmd.arguments.cfgs`.
             // FIXME: collapse
             cmd.arg("--cfg");
             cmd.arg(format!("feature=\"{feature}\""));
         }
         // FIXME: This shouldn't be done here.
-        if let Some(revision) = &opts.build.revision {
+        if let Some(revision) = &opts.b_opts.revision {
             cmd.arg("--cfg");
             cmd.arg(revision);
         }
     }
 
-    for feature in &opts.build.rustc_features {
+    for feature in &opts.b_opts.rustc_features {
         cmd.arg(format!("-Zcrate-attr=feature({feature})"));
     }
 
-    if opts.build.suppress_lints {
+    if opts.b_opts.suppress_lints {
         cmd.arg("--cap-lints=allow");
     }
 
-    if opts.build.next_solver {
+    if opts.b_opts.next_solver {
         cmd.arg("-Znext-solver");
     }
 
-    if opts.build.internals {
+    if opts.b_opts.internals {
         cmd.arg("-Zverbose-internals");
     }
 
-    if opts.build.no_backtrace {
+    if opts.b_opts.no_backtrace {
         cmd.env("RUST_BACKTRACE", "0");
     }
 
     // The logging output would just get thrown away.
-    if let Some(filter) = &opts.build.log {
+    if let Some(filter) = &opts.b_opts.log {
         cmd.env(engine.logging_env_var(), filter);
     }
 }
 
-fn configure_verbatim(cmd: &mut process::Command, verbatim: &VerbatimOptions<'_>) {
-    for (key, value) in &verbatim.variables {
+fn configure_verbatim(cmd: &mut process::Command, v_opts: &VerbatimOptions<'_>) {
+    for (key, value) in &v_opts.variables {
         match value {
             Some(value) => cmd.env(key, value),
             None => cmd.env_remove(key),
@@ -223,12 +232,12 @@ fn configure_verbatim(cmd: &mut process::Command, verbatim: &VerbatimOptions<'_>
     // Regardin crate name querying,...
     // It's vital that we pass through verbatim arguments when querying the crate name as they might
     // contain impactful options like `--crate-name …`, `-Zcrate-attr=crate_name(…)`, or `--edition …`.
-    cmd.args(&verbatim.arguments);
+    cmd.args(&v_opts.arguments);
 }
 
 fn configure_engine_specific(
     cmd: &mut Command,
-    engine: Engine<'_>,
+    engine: &Engine<'_>,
     u_opts: &mut UsesUnstableOptions,
 ) {
     match engine {
@@ -317,28 +326,27 @@ fn gate(message: impl Paint, dbg_opts: &DebugOptions) -> ControlFlow<()> {
     }
 }
 
-#[derive(Clone, Copy)]
 pub(crate) enum Engine<'a> {
-    Rustc(&'a CompileOptions),
-    Rustdoc(&'a DocOptions),
+    Rustc(CompileOptions),
+    Rustdoc(DocOptions<'a>),
 }
 
 impl Engine<'_> {
-    const fn name<'a>(self) -> &'a str {
+    const fn name(&self) -> &'static str {
         match self {
             Self::Rustc(_) => "rustc",
             Self::Rustdoc(_) => "rustdoc",
         }
     }
 
-    const fn logging_env_var<'a>(self) -> &'a str {
+    const fn logging_env_var(&self) -> &'static str {
         match self {
             Self::Rustc(_) => "RUSTC_LOG",
             Self::Rustdoc(_) => "RUSTDOC_LOG",
         }
     }
 
-    fn env_opts<'a>(self) -> Option<&'a [String]> {
+    fn env_opts(&self) -> Option<&'static [String]> {
         match self {
             Self::Rustc(_) => environment::rustc_options(),
             Self::Rustdoc(_) => environment::rustdoc_options(),
@@ -394,7 +402,8 @@ pub(crate) struct CompileOptions {
 }
 
 #[allow(clippy::struct_excessive_bools)] // not worth to address
-pub(crate) struct DocOptions {
+#[derive(Clone)]
+pub(crate) struct DocOptions<'a> {
     pub(crate) backend: DocBackend,
     pub(crate) crate_version: Option<String>,
     pub(crate) private: bool,
@@ -403,6 +412,7 @@ pub(crate) struct DocOptions {
     pub(crate) link_to_def: bool,
     pub(crate) normalize: bool,
     pub(crate) theme: String,
+    pub(crate) v_opts: VerbatimOptions<'a>,
 }
 
 #[allow(clippy::struct_excessive_bools)] // not worth to address
@@ -436,9 +446,9 @@ pub(crate) enum ExternCrate<'src> {
 #[derive(Clone)]
 pub(crate) struct Options<'a> {
     pub(crate) toolchain: Option<&'a OsStr>,
-    pub(crate) build: &'a BuildOptions,
-    pub(crate) verbatim: VerbatimOptions<'a>,
-    pub(crate) debug: &'a DebugOptions,
+    pub(crate) b_opts: &'a BuildOptions,
+    pub(crate) v_opts: VerbatimOptions<'a>,
+    pub(crate) dbg_opts: &'a DebugOptions,
 }
 
 /// Program arguments and environment variables to be passed verbatim.
