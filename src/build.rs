@@ -35,8 +35,8 @@ pub(crate) fn perform(
     imply_u_opts: ImplyUnstableOptions,
 ) -> io::Result<()> {
     let mut cmd = Command::new(engine.name());
-    let u_opts = configure_basic(&mut cmd, engine, krate, opts);
-    configure_extra(&mut cmd, engine, extern_crates, opts);
+    let u_opts = configure_early(&mut cmd, engine, krate, opts);
+    configure_late(&mut cmd, engine, extern_crates, opts);
     if let ImplyUnstableOptions::Yes = imply_u_opts
         && let UsesUnstableOptions::Yes = u_opts
     {
@@ -50,7 +50,7 @@ pub(crate) fn query_crate_name(krate: Crate<'_>, opts: &Options<'_>) -> io::Resu
 
     let mut cmd = Command::new(engine.name());
 
-    configure_basic(&mut cmd, &engine, krate, opts);
+    configure_early(&mut cmd, &engine, krate, opts);
 
     cmd.arg("--print=crate-name");
 
@@ -80,7 +80,9 @@ pub(crate) fn query_crate_name(krate: Crate<'_>, opts: &Options<'_>) -> io::Resu
     Ok(output)
 }
 
-fn configure_basic(
+/// Configure the engine invocation with options that it needs very early
+/// (i.e., during certain print requests).
+fn configure_early(
     cmd: &mut Command,
     engine: &Engine<'_>,
     krate: Crate<'_>,
@@ -138,8 +140,9 @@ fn configure_basic(
     u_opts
 }
 
-// FIXME: Explainer: This is stuff that isn't necessary for query_crate_name
-fn configure_extra(
+/// Configure the engine invocation with options that it doesn't need early
+/// (i.e., during certain print requests).
+fn configure_late(
     cmd: &mut Command,
     engine: &Engine<'_>,
     extern_crates: &[ExternCrate<'_>],
