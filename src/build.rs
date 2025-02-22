@@ -128,7 +128,7 @@ fn configure_basic(
         });
     }
 
-    configure_verbatim(cmd, &opts.v_opts);
+    configure_v_opts(cmd, &opts.v_opts);
     configure_engine_specific(cmd, engine, &mut u_opts);
 
     if let Some(opts) = engine.env_opts() {
@@ -221,7 +221,7 @@ fn configure_extra(
     }
 }
 
-fn configure_verbatim(cmd: &mut process::Command, v_opts: &VerbatimOptions<'_>) {
+fn configure_v_opts(cmd: &mut process::Command, v_opts: &VerbatimOptions<'_>) {
     for (key, value) in &v_opts.variables {
         match value {
             Some(value) => cmd.env(key, value),
@@ -283,6 +283,8 @@ fn configure_engine_specific(
 
             cmd.arg("--default-theme");
             cmd.arg(&d_opts.theme);
+
+            cmd.args(&d_opts.v_opts.arguments);
         }
     }
 }
@@ -293,7 +295,7 @@ pub(crate) fn run(
     dbg_opts: &DebugOptions,
 ) -> io::Result<()> {
     let mut cmd = Command::new(program);
-    configure_verbatim(&mut cmd, v_opts);
+    configure_v_opts(&mut cmd, v_opts);
     execute(cmd, dbg_opts)
 }
 
@@ -412,7 +414,7 @@ pub(crate) struct DocOptions<'a> {
     pub(crate) link_to_def: bool,
     pub(crate) normalize: bool,
     pub(crate) theme: String,
-    pub(crate) v_opts: VerbatimOptions<'a>,
+    pub(crate) v_opts: VerbatimOptions<'a, ()>,
 }
 
 #[allow(clippy::struct_excessive_bools)] // not worth to address
@@ -454,18 +456,32 @@ pub(crate) struct Options<'a> {
 /// Program arguments and environment variables to be passed verbatim.
 #[derive(Clone, Default)]
 #[cfg_attr(test, derive(PartialEq, Eq, Debug))]
-pub(crate) struct VerbatimOptions<'a> {
+pub(crate) struct VerbatimOptions<'a, V: Append = Vec<(&'a str, Option<&'a str>)>> {
     /// Program arguments to be passed verbatim.
     pub(crate) arguments: Vec<&'a str>,
     /// Environment variables to be passed verbatim.
-    pub(crate) variables: Vec<(&'a str, Option<&'a str>)>,
+    pub(crate) variables: V,
 }
 
-impl<'a> VerbatimOptions<'a> {
-    pub(crate) fn extend(&mut self, mut other: VerbatimOptions<'a>) {
+impl<'a, V: Append> VerbatimOptions<'a, V> {
+    pub(crate) fn extend(&mut self, mut other: VerbatimOptions<'a, V>) {
         self.arguments.append(&mut other.arguments);
         self.variables.append(&mut other.variables);
     }
+}
+
+pub(crate) trait Append {
+    fn append(&mut self, other: &mut Self);
+}
+
+impl<T> Append for Vec<T> {
+    fn append(&mut self, other: &mut Self) {
+        self.append(other);
+    }
+}
+
+impl Append for () {
+    fn append(&mut self, (): &mut Self) {}
 }
 
 /// Whether to imply `-Zunstable-options`.

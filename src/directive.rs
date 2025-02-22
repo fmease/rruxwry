@@ -224,7 +224,7 @@ pub(crate) struct InstantiatedDirectives<'src> {
     pub(crate) dependencies: Vec<ExternCrate<'src>>,
     pub(crate) edition: Option<Spanned<&'src str>>,
     pub(crate) v_opts: VerbatimOptions<'src>,
-    pub(crate) v_d_opts: VerbatimOptions<'src>,
+    pub(crate) v_d_opts: VerbatimOptions<'src, ()>,
     pub(crate) run_v_opts: VerbatimOptions<'src>,
 }
 
@@ -243,15 +243,15 @@ impl<'src> InstantiatedDirectives<'src> {
 
             SimpleDirective::Flags(flags, stage, scope) => {
                 let stage = match (stage, scope) {
-                    (Stage::CompileTime, FlagScope::Base) => &mut self.v_opts,
-                    (Stage::CompileTime, FlagScope::Rustdoc) => &mut self.v_d_opts,
-                    (Stage::RunTime, FlagScope::Base) => &mut self.run_v_opts,
+                    (Stage::CompileTime, FlagScope::Base) => &mut self.v_opts.arguments,
+                    (Stage::CompileTime, FlagScope::Rustdoc) => &mut self.v_d_opts.arguments,
+                    (Stage::RunTime, FlagScope::Base) => &mut self.run_v_opts.arguments,
                     // FIXME: Make this state unrepresentable!
                     (Stage::RunTime, FlagScope::Rustdoc) => unreachable!(),
                 };
                 // FIXME: Supported quotes arguments (they shouldn't be split in halves).
                 //        Use crate `shlex` for this. What does compiletest do btw?
-                stage.arguments.extend(flags.split_whitespace());
+                stage.extend(flags.split_whitespace());
             }
             // FIXME: Emit an error if multiple `edition` directives were specified just like `compiletest` does.
             // FIXME: When encountering unconditional+conditional, emit a warning.
