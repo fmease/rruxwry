@@ -5,15 +5,11 @@
 > [!IMPORTANT]
 > This project is undergoing major reworks and is not yet suitable for general use.
 
-<!-- FIXME: We now have a `build` vs `doc`. The README is super out of date! -->
+<!--
+
+FIXME: Rework the whole commented-out section. It's completely out of date!
 
 ## Introduction
-
-<!--FIXME:
-NOTE: This only works as expected once we support rustup toolchains *after* the
-subcommands, too; allowing `rruxwry [+<TOOLCHAIN>] <subcommand> <...>` and
-`rruxwry <subcommand> [+<TOOLCHAIN>]` (if both are specified, idk what to do yet).
--->
 
 > [!NOTE]
 > This section is incomplete.
@@ -47,7 +43,7 @@ The *default* and the *cross crate* build modes are pretty fleshed out and shoul
 On the other hand, you might experience some bugs in the *compiletest* build mode since it was added pretty recently and hasn't been thoroughly tested yet.
 
 Feel free to report any bugs and other unpleasantries on [the issue tracker][bugs].
-If `rruxwry {b,d} -@` fails to build a `tests/rustdoc{,-ui,-json}/` file, e.g., due to unsupported directives, that's definitely a bug. <!-- FIXME: Change policy -->
+If `rruxwry {b,d} -@` fails to build a `tests/rustdoc{,-ui,-json}/` file, e.g., due to unsupported directives, that's definitely a bug. [!-- FIXME: Change policy --]
 
 ## Explainer & Tutorial
 
@@ -86,9 +82,9 @@ NB: If you have previously run the default build mode and passed `-o` to open th
 
 This mode is entirely separate from the default & the cross-crate build mode.
 
-<!-- FIXME: Expand upon this section. -->
+[!-- FIXME: Expand upon this section. --]
 
-*rruxwry* natively understands the following [`ui_test`]-style [`compiletest`] directives: `aux-build`, `aux-crate`, `build-aux-docs`, `compile-flags`, `edition`, `force-host`<!-- FIXME: Well, we ignore it right now -->, `no-prefer-dynamic`<!-- FIXME: Well, we ignore it right now -->, `revisions`, `rustc-env` and `unset-rustc-env`. Any other directives get skipped and *rruxwry* emits a warning for the sake of transparency. This selection should suffice, it should cover the majority of use cases. We intentionally don't support `{,unset-}exec-env` since it's not meaningful.
+*rruxwry* natively understands the following [`ui_test`]-style [`compiletest`] directives: `aux-build`, `aux-crate`, `build-aux-docs`, `compile-flags`, `edition`, `force-host`[!-- FIXME: Well, we ignore it right now --], `no-prefer-dynamic`[!-- FIXME: Well, we ignore it right now --], `revisions`, `rustc-env` and `unset-rustc-env`. Any other directives get skipped and *rruxwry* emits a warning for the sake of transparency. This selection should suffice, it should cover the majority of use cases. We intentionally don't support `{,unset-}exec-env` since it's not meaningful.
 
 *rruxwry* has *full* support for *revisions*. You can pass `--rev ⟨NAME⟩` or `--cfg ⟨SPEC⟩` to enable individual revisions. The former is checked against the revisions declared by `//@ revisions`, the latter is *not*. In the future, *rruxwry* will have support for `--all-revs` (executing *rruxwry* (incl. `--open`) for all declared revisions; useful for swiftly comparing minor changes to the source code).
 
@@ -107,6 +103,8 @@ Just like *Cargo*, *rruxwry* recognizes the environment variables `RUSTFLAGS` an
 However if that's too wordy for you and you don't care about passing arguments / flags to *both* `rustc` *and* `rustdoc`, you can simply provide them inline after `--`. Example: `rrd file.rs -X -- -Ztreat-err-as-bug`. Here, the `-Z` flag gets passed to both `rustc file.rs` and `rustdoc u_file.rs` (remember, `-X` enables the cross-crate build mode).
 
 `-e`/`--edition` supports the following edition *aliases*: `D` (rustc's **d**efault edition), `S` (latest **s**table edition) and `E` ("bleeding **e**dge": latest edition, no matter if stable or unstable).
+
+-->
 
 ## Command-Line Interface
 
