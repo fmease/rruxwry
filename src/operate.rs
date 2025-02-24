@@ -14,11 +14,11 @@ use crate::{
     },
     context::Context,
     data::{Crate, CrateName, CrateType, DocBackend, Edition},
-    diagnostic::{error, fmt},
+    diagnostic::{error, fmt, warn},
     directive,
     error::Result,
     source::Spanned,
-    utility::default,
+    utility::{OsStrExt as _, default},
 };
 use std::{
     borrow::Cow,
@@ -188,17 +188,49 @@ fn build_directive_driven<'a>(
     flavor: directive::Flavor,
     cx: Context<'a>,
 ) -> Result<(Crate<'a>, VerbatimOptions<'a>)> {
+    let (path, revision) = match krate.path.as_os_str().rsplit_once(b'#') {
+        Some((path, revision)) => {
+            let Some(revision) = revision.to_str() else {
+                return Err(error(fmt!(
+                    "active revision suffix `{}` is not valid UTF-8",
+                    revision.display()
+                ))
+                .finish()
+                .into());
+            };
+            (Path::new(path), Some(revision))
+        }
+        None => (krate.path, None),
+    };
+
+    let revision = match (revision, opts.b_opts.revision.as_deref()) {
+        (Some(rev0), Some(rev1)) if rev0 == rev1 => {
+            warn(fmt!("the active revision `{rev0}` was passed twice"))
+                .note(fmt!("once as a path suffix, once via a flag"))
+                .finish();
+            Some(rev0)
+        }
+        (Some(rev0), Some(rev1)) => {
+            return Err(error(fmt!("two conflicting active revisions were passed"))
+                .note(fmt!("path suffix `{rev0}` and flag argument `{rev1}` do not match"))
+                .finish()
+                .into());
+        }
+        (rev @ Some(_), None) | (None, rev @ Some(_)) => rev,
+        (None, None) => None,
+    };
+
     let directives = directive::gather(
-        Spanned::sham(krate.path),
+        Spanned::sham(path),
         scope(engine),
         directive::Role::Principal,
         flavor,
-        opts.b_opts.revision.as_deref(),
+        revision,
         cx,
     )?;
 
     // FIXME: unwrap
-    let aux_base_path = LazyCell::new(|| krate.path.parent().unwrap().join("auxiliary"));
+    let aux_base_path = LazyCell::new(|| path.parent().unwrap().join("auxiliary"));
 
     let deps: Vec<_> = directives
         .dependencies
@@ -218,6 +250,7 @@ fn build_directive_driven<'a>(
 
     // FIXME: Once we support `//@ proc-macro` we need to reflect that in the crate type.
     let krate = Crate {
+        path,
         edition: krate.edition.or(directives.edition.map(|edition| Edition::Unknown(edition.bare))),
         ..krate
     };
