@@ -149,7 +149,7 @@ fn document_cross_crate(
         )?;
     };
 
-    let deps = &[ExternCrate::Named { name: crate_name.as_ref(), path: None }];
+    let deps = &[ExternCrate::Named { name: crate_name.as_ref(), path: None, typ: None }];
 
     let krate =
         Crate { path: &root_crate_path, name: Some(root_crate_name.as_ref()), typ: None, ..krate };
@@ -169,15 +169,7 @@ fn build_default<'a>(
     opts: &Options<'_>,
 ) -> Result<Crate<'a>> {
     let krate = Crate { edition: krate.edition.or(Some(Edition::LATEST_STABLE)), ..krate };
-    let deps: &[_] = match krate.typ {
-        // For convenience and just like Cargo we add `proc_macro` to the external prelude.
-        Some(CrateType("proc-macro")) => &[ExternCrate::Named {
-            name: const { CrateName::new_unchecked("proc_macro") },
-            path: None,
-        }],
-        _ => &[],
-    };
-    build::perform(engine, krate, deps, opts, ImplyUnstableOptions::Yes)?;
+    build::perform(engine, krate, prelude(krate.typ), opts, ImplyUnstableOptions::Yes)?;
     Ok(krate)
 }
 
@@ -248,7 +240,6 @@ fn build_directive_driven<'a>(
         })
         .collect::<Result<_>>()?;
 
-    // FIXME: Once we support `//@ proc-macro` we need to reflect that in the crate type.
     let krate = Crate {
         path,
         edition: krate.edition.or(directives.edition.map(|edition| Edition::Unknown(edition.bare))),
@@ -261,14 +252,7 @@ fn build_directive_driven<'a>(
         Engine::Rustdoc(d_opts) => d_opts.v_opts.extend(directives.v_d_opts),
     }
 
-    build::perform(
-        engine,
-        krate,
-        // FIXME: Once we support `//@ proc-macro` we need to add `proc_macro` (to the client).
-        &deps,
-        opts,
-        ImplyUnstableOptions::No,
-    )?;
+    build::perform(engine, krate, &deps, opts, ImplyUnstableOptions::No)?;
     Ok((krate, directives.run_v_opts))
 }
 
@@ -289,12 +273,15 @@ fn compile_auxiliary<'a>(
     flavor: directive::Flavor,
     cx: Context<'a>,
 ) -> Result<ExternCrate<'a>> {
-    let path = match extern_crate {
-        ExternCrate::Unnamed { path } => path.map(|path| base_path.join(path)),
-        ExternCrate::Named { name, path } => match path {
-            Some(path) => path.as_deref().map(|path| base_path.join(path)),
-            None => Spanned::sham(base_path.join(name.as_str()).with_extension("rs")),
-        },
+    let (path, typ) = match *extern_crate {
+        ExternCrate::Unnamed { ref path, typ } => (path.map(|path| base_path.join(path)), typ),
+        ExternCrate::Named { name, ref path, typ } => (
+            match path {
+                Some(path) => path.as_deref().map(|path| base_path.join(path)),
+                None => Spanned::sham(base_path.join(name.as_str()).with_extension("rs")),
+            },
+            typ,
+        ),
     };
 
     let directives = directive::gather(
@@ -312,9 +299,11 @@ fn compile_auxiliary<'a>(
         path: &path.bare,
         // FIXME: Does compiletest do something 'smarter'?
         name: None,
-        typ: None,
+        typ,
         edition: directives.edition.map(|edition| Edition::Unknown(edition.bare)),
     };
+
+    let deps = prelude(typ);
 
     build::perform(
         match engine {
@@ -326,12 +315,8 @@ fn compile_auxiliary<'a>(
             // FIXME: Wait, would check_only=true also work and be better?
             Engine::Rustdoc(_) => &Engine::Rustc(CompileOptions { check_only: false }),
         },
-        Crate {
-            // FIXME: Make this "dylib" instead unless directives.no_prefer_dynamic then it should be..None?
-            typ: Some(CrateType("lib")),
-            ..krate
-        },
-        &[],
+        krate,
+        deps,
         &opts,
         ImplyUnstableOptions::No,
     )?;
@@ -341,9 +326,8 @@ fn compile_auxiliary<'a>(
         build::perform(
             // FIXME: Do we actually want to forward these doc opts from the parent crate??
             &Engine::Rustdoc(d_opts.clone()),
-            // FIXME: Should typ also be Some("dylib") unless directives.no_prefer_dynamic?
             krate,
-            &[],
+            deps,
             &opts,
             ImplyUnstableOptions::No,
         )?;
@@ -353,7 +337,7 @@ fn compile_auxiliary<'a>(
     // FIXME: Do we need to respect `compile-flags: --crate-name` and adjust `ExternCrate` accordingly?
     Ok(match *extern_crate {
         // FIXME: probably doesn't handle `//@ aux-build: ../file.rs` correctly since `-L.` wouldn't pick it up
-        ExternCrate::Unnamed { path } => ExternCrate::Unnamed { path },
+        ExternCrate::Unnamed { path, .. } => ExternCrate::Unnamed { path, typ: None },
         // FIXME: For some reason `compiletest` doesn't support `//@ aux-crate: name=../`
         ExternCrate::Named { name, .. } => {
             // FIXME: unwrap
@@ -366,6 +350,7 @@ fn compile_auxiliary<'a>(
                 // FIXME: layer violation?? should this be the job of crate::build?
                 path: (name != crate_name.as_ref())
                     .then(|| Spanned::sham(format!("lib{crate_name}.rlib").into())),
+                typ: None,
             }
         }
     })
@@ -383,6 +368,17 @@ fn scope(engine: &Engine<'_>) -> directive::Scope {
     }
 }
 
+fn prelude(typ: Option<CrateType>) -> &'static [ExternCrate<'static>] {
+    match typ {
+        // For convenience and just like Cargo we add `proc_macro` to the external prelude.
+        Some(CrateType("proc-macro")) => &[ExternCrate::Named {
+            name: const { CrateName::new_unchecked("proc_macro") },
+            path: None,
+            typ: None,
+        }],
+        _ => &[],
+    }
+}
 pub(crate) enum Operation {
     Compile { mode: CompileMode, run: Run, options: CompileOptions },
     Document { mode: DocMode, open: Open, options: DocOptions<'static> },

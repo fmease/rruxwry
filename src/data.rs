@@ -37,6 +37,7 @@ impl<'a> Edition<'a> {
 // of rust{,do}c. I don't want to assume that rruxwry gets *so* well maintained that
 // it can keep pace with rust{,do}c.
 #[derive(Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(test, derive(Debug))]
 // FIXME: Switch to <'a> &'a str once we've thrown out clap.
 pub(crate) struct CrateType(pub &'static str);
 

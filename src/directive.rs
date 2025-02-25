@@ -16,7 +16,7 @@
 use crate::{
     build::{ExternCrate, VerbatimOptions},
     context::Context,
-    data::CrateName,
+    data::{CrateName, CrateType},
     diagnostic::{EmittedError, error, fmt, warn},
     source::{LocalSpan, SourceFileRef, Span, Spanned},
     utility::{Conjunction, ListingExt, default},
@@ -226,21 +226,53 @@ pub(crate) struct InstantiatedDirectives<'src> {
     pub(crate) v_opts: VerbatimOptions<'src>,
     pub(crate) v_d_opts: VerbatimOptions<'src, ()>,
     pub(crate) run_v_opts: VerbatimOptions<'src>,
+    no_prefer_dynamic: bool,
 }
 
 impl<'src> InstantiatedDirectives<'src> {
     #[allow(clippy::needless_pass_by_value)]
     fn adjoin(&mut self, directive: SimpleDirective<'src>) {
+        // Compiletest defaults to `dylib` unless the target architecture
+        // doesn't support dynamic linking in which case it also uses `lib`.
+        // Since we don't have any "infrastructure" in place for checking
+        // target architectures, let's fall back to the "safer" option.
+        let typ = || match self.no_prefer_dynamic {
+            true => None,
+            false => Some(CrateType("lib")),
+        };
+
         match directive {
+            // FIXME: Audit this.
+            SimpleDirective::AuxBin { path } => {
+                self.dependencies.push(ExternCrate::Unnamed { path, typ: Some(CrateType("bin")) });
+            }
             SimpleDirective::AuxBuild { path } => {
-                self.dependencies.push(ExternCrate::Unnamed { path });
+                self.dependencies.push(ExternCrate::Unnamed { path, typ: typ() });
             }
             SimpleDirective::AuxCrate { name, path } => {
-                self.dependencies
-                    .push(ExternCrate::Named { name, path: path.map(|path| path.map(Into::into)) });
+                self.dependencies.push(ExternCrate::Named {
+                    name,
+                    path: path.map(|path| path.map(Into::into)),
+                    typ: typ(),
+                });
             }
-            SimpleDirective::BuildAuxDocs => self.build_aux_docs = true,
+            // FIXME: Audit this: Doesn't this need to be a named crate?
+            SimpleDirective::AuxProcMacro { path } => {
+                self.dependencies
+                    .push(ExternCrate::Unnamed { path, typ: Some(CrateType("proc-macro")) });
+            }
 
+            SimpleDirective::BuildAuxDocs => self.build_aux_docs = true,
+            // FIXME: Emit an error if multiple `edition` directives were specified just like `compiletest` does.
+            // FIXME: When encountering unconditional+conditional, emit a warning.
+            SimpleDirective::Edition(edition) => self.edition = Some(edition),
+            SimpleDirective::EnvVar(key, value, stage) => {
+                let stage = match stage {
+                    Stage::CompileTime => &mut self.v_opts,
+                    Stage::RunTime => &mut self.run_v_opts,
+                };
+                stage.variables.push((key, value));
+            }
             SimpleDirective::Flags(flags, stage, scope) => {
                 let stage = match (stage, scope) {
                     (Stage::CompileTime, FlagScope::Base) => &mut self.v_opts.arguments,
@@ -253,17 +285,9 @@ impl<'src> InstantiatedDirectives<'src> {
                 //        Use crate `shlex` for this. What does compiletest do btw?
                 stage.extend(flags.split_whitespace());
             }
-            // FIXME: Emit an error if multiple `edition` directives were specified just like `compiletest` does.
-            // FIXME: When encountering unconditional+conditional, emit a warning.
-            SimpleDirective::Edition(edition) => self.edition = Some(edition),
+            // FIXME: What does compiletest do on duplicates? We should at least warn.
+            SimpleDirective::NoPreferDynamic => self.no_prefer_dynamic = true,
             SimpleDirective::Revisions(_) => unreachable!(), // Already dealt with in `Directives::add`.
-            SimpleDirective::EnvVar(key, value, stage) => {
-                let stage = match stage {
-                    Stage::CompileTime => &mut self.v_opts,
-                    Stage::RunTime => &mut self.run_v_opts,
-                };
-                stage.variables.push((key, value));
-            }
             // FIXME: Actually implement these directives.
             | SimpleDirective::HtmlDocCk(..)
             | SimpleDirective::JsonDocCk(..)
@@ -284,6 +308,9 @@ struct Directive<'src> {
 #[derive(Clone)]
 #[cfg_attr(test, derive(PartialEq, Eq, Debug))]
 enum SimpleDirective<'src> {
+    AuxBin {
+        path: Spanned<&'src str>,
+    },
     AuxBuild {
         path: Spanned<&'src str>,
     },
@@ -292,13 +319,17 @@ enum SimpleDirective<'src> {
         name: CrateName<&'src str>,
         path: Option<Spanned<&'src str>>,
     },
+    AuxProcMacro {
+        path: Spanned<&'src str>,
+    },
     BuildAuxDocs,
     Edition(Spanned<&'src str>),
+    EnvVar(&'src str, Option<&'src str>, Stage),
     // FIXME: Badly modeled: Stage::Runtime is incompatible with Receiver::Rustdoc.
     //        Make this state unrepresentable!
     Flags(&'src str, Stage, FlagScope),
     Revisions(Vec<&'src str>),
-    EnvVar(&'src str, Option<&'src str>, Stage),
+    NoPreferDynamic,
     #[allow(dead_code)]
     HtmlDocCk(HtmlDocCkDirective, Polarity),
     #[allow(dead_code)]
@@ -439,16 +470,25 @@ impl<'src> Parser<'src> {
         source: Spanned<&'src str>,
     ) -> Result<Option<SimpleDirective<'src>>, Error<'src>> {
         Ok(Some(match source.bare {
+            "aux-bin" => {
+                self.parse_separator(Padding::Yes)?; // FIXME: Audit Padding::Yes.
+                SimpleDirective::AuxBin { path: self.parse_until_line_break() }
+            }
             "aux-build" => {
-                self.parse_separator(Padding::Yes)?; // FIXME: audit AllowPadding
+                self.parse_separator(Padding::Yes)?; // FIXME: Audit Padding::Yes.
                 SimpleDirective::AuxBuild { path: self.parse_until_line_break() }
             }
-            // `compiletest` doesn't support extern options like `priv`, `noprelude`, `nounused` or `force`
-            // at the time of writing. Therefore, we don't need to deal with them here either.
-            // Neither does it support optional paths (`//@ aux-crate:name`).
-            // FIXME: Under Flavor::Rruxwry make the path optional.
+            // FIXME: `compiletest` automatically supports extern options like
+            //        `priv`, `noprelude`, `nounused` or `force` by virtue of passing
+            //        the RHS verbatim to rustc (I think).
+            //        Example: `//@ aux-crate:priv,noprelude:somedep=somedep.rs`.
+            //        Add support for extern options but actually perform *some*
+            //        validation without being too forward-incompatible.
+            // Compiletest doesn't support optional paths (`//@ aux-crate:name`)
+            // last time I checked.
+            // FIXME: Under Flavor::Rruxwry make the path optional (should we tho?).
             "aux-crate" => {
-                self.parse_separator(Padding::Yes)?; // FIXME: audit AllowPadding
+                self.parse_separator(Padding::Yes)?; // FIXME: Audit Padding::Yes.
 
                 // We're doing this two-step process — (greedy) lexing followed by validation —
                 // to be able to provide a better error message.
@@ -510,6 +550,12 @@ impl<'src> Parser<'src> {
                 self.limit(source, Scope::Base)?;
                 return self.parse_set_env_var(Stage::RunTime).map(Some);
             }
+            "no-prefer-dynamic" => SimpleDirective::NoPreferDynamic,
+            "proc-macro" => {
+                self.parse_separator(Padding::Yes)?; // FIXME: Audit Padding::Yes
+
+                SimpleDirective::AuxProcMacro { path: self.parse_until_line_break() }
+            }
             // FIXME: Warn/error if we're inside of an auxiliary file.
             //        ->Warn: "directive gets ignored // revisions are inherited in aux"
             //        ->Error: "directive not permitted // revisions are inherited in aux"
@@ -543,14 +589,11 @@ impl<'src> Parser<'src> {
                 return self.parse_unset_env_var(Stage::RunTime).map(Some);
             }
             // FIXME: Actually support some of these flags. In order of importance:
-            //        `proc-macro`, `aux-bin`,
-            //        `no-prefer-dynamic` (once our auxes are actually dylibs),
             //        `unique-doc-out-dir` (I think),
             //        `incremental`,
             //        `no-auto-check-cfg` (once we actually automatically check-cfg)
             | "add-core-stubs"
             | "assembly-output"
-            | "aux-bin"
             | "aux-codegen-backend"
             | "build-fail"
             | "build-pass"
@@ -578,7 +621,6 @@ impl<'src> Parser<'src> {
             | "min-llvm-version"
             | "min-system-llvm-version"
             | "no-auto-check-cfg"
-            | "no-prefer-dynamic"
             | "normalize-stderr-32bit"
             | "normalize-stderr-64bit"
             | "normalize-stderr"
@@ -586,7 +628,6 @@ impl<'src> Parser<'src> {
             | "pp-exact"
             | "pretty-compare-only"
             | "pretty-mode"
-            | "proc-macro"
             | "reference"
             | "regex-error-pattern"
             | "remap-src-base"

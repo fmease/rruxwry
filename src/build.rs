@@ -164,7 +164,7 @@ fn configure_late(
     }
 
     for extern_crate in extern_crates {
-        let ExternCrate::Named { name, path } = extern_crate else {
+        let ExternCrate::Named { name, path, typ: _ } = extern_crate else {
             continue;
         };
 
@@ -440,12 +440,21 @@ pub(crate) struct DebugOptions {
     pub(crate) dry_run: bool,
 }
 
-// FIXME: This type leads to such awkward code; consider reworking it.
+// FIXME: This type leads to such awkward code; consider remodeling it.
 #[derive(Clone)]
 #[cfg_attr(test, derive(PartialEq, Eq, Debug))]
 pub(crate) enum ExternCrate<'src> {
-    Unnamed { path: Spanned<&'src str> },
-    Named { name: CrateName<&'src str>, path: Option<Spanned<Cow<'src, str>>> },
+    Unnamed {
+        path: Spanned<&'src str>,
+        // FIXME: This field is only relevant for compiletest auxiliaries. Model this better.
+        typ: Option<CrateType>,
+    },
+    Named {
+        name: CrateName<&'src str>,
+        path: Option<Spanned<Cow<'src, str>>>,
+        // FIXME: This field is only relevant for compiletest auxiliaries. Model this better.
+        typ: Option<CrateType>,
+    },
 }
 
 #[derive(Clone)]
