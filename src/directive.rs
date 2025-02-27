@@ -378,7 +378,6 @@ pub(crate) enum Polarity {
 
 struct Parser<'src> {
     chars: CharIndices<'src>,
-    #[allow(clippy::option_option)] // most natural representation in this case
     peeked: Option<Option<(usize, char)>>,
     source: &'src str,
     scope: Scope,

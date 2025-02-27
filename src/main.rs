@@ -1,23 +1,23 @@
 // Features //
 #![feature(adt_const_params)]
+#![feature(ascii_char_variants)]
+#![feature(ascii_char)]
 #![feature(decl_macro)]
 #![feature(exact_size_is_empty)]
 #![feature(exit_status_error)]
-#![feature(impl_trait_in_assoc_type)]
 #![feature(iter_collect_into)]
 #![feature(let_chains)]
 #![feature(os_str_display)]
+#![feature(slice_split_once)]
 #![feature(substr_range)]
 #![feature(trait_alias)]
-#![feature(type_alias_impl_trait)]
-#![feature(type_changing_struct_update)]
-#![feature(slice_split_once)]
 // Lints //
 #![deny(rust_2018_idioms, unused_must_use, unused_crate_dependencies)]
 #![deny(clippy::all, clippy::pedantic)]
 #![allow(clippy::if_not_else)] // I disagree
 #![allow(clippy::items_after_statements)] // I disagree
 #![allow(clippy::match_bool)] // I disagree
+#![allow(clippy::option_option)] // I disagree
 #![allow(clippy::too_many_lines)] // I disagree
 
 use diagnostic::{bug, fmt};

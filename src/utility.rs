@@ -1,4 +1,4 @@
-use std::ffi::OsStr;
+use std::{ascii::Char, ffi::OsStr};
 
 pub(crate) mod monotonic;
 pub(crate) mod paint;
@@ -61,14 +61,13 @@ impl Conjunction {
 }
 
 pub(crate) trait OsStrExt {
-    fn rsplit_once(&self, pat: u8) -> Option<(&OsStr, &OsStr)>;
+    fn rsplit_once(&self, pat: Char) -> Option<(&OsStr, &OsStr)>;
 }
 
 impl OsStrExt for OsStr {
-    fn rsplit_once(&self, pat: u8) -> Option<(&OsStr, &OsStr)> {
-        assert!(pat <= 0x7F);
-        let (a, b) = self.as_encoded_bytes().rsplit_once(|&byte| byte == pat)?;
-        // SAFETY: Each substring was separated by a 7-bit ASCII length-one substring.
+    fn rsplit_once(&self, pat: Char) -> Option<(&OsStr, &OsStr)> {
+        let (a, b) = self.as_encoded_bytes().rsplit_once(|&byte| byte == pat as _)?;
+        // SAFETY: Each substring was separated by a 7-bit ASCII char (length-one substring).
         let a = unsafe { OsStr::from_encoded_bytes_unchecked(a) };
         let b = unsafe { OsStr::from_encoded_bytes_unchecked(b) };
         Some((a, b))

@@ -45,7 +45,10 @@ pub(crate) fn perform(
     execute(cmd, opts.dbg_opts)
 }
 
-pub(crate) fn query_crate_name(krate: Crate<'_>, opts: &Options<'_>) -> io::Result<String> {
+pub(crate) fn query_crate_name(
+    krate: Crate<'_>,
+    opts: &Options<'_>,
+) -> io::Result<CrateName<String>> {
     let engine = Engine::Rustc(CompileOptions { check_only: false });
 
     let mut cmd = Command::new(engine.name());
@@ -56,14 +59,16 @@ pub(crate) fn query_crate_name(krate: Crate<'_>, opts: &Options<'_>) -> io::Resu
 
     match gate(|p| render(&cmd, p), opts.dbg_opts) {
         ControlFlow::Continue(()) => {}
-        ControlFlow::Break(()) => return Ok("UNKNOWN_DUE_TO_DRY_RUN".into()),
+        ControlFlow::Break(()) => {
+            return Ok(CrateName::new_unchecked("UNKNOWN_DUE_TO_DRY_RUN".into()));
+        }
     }
 
     // FIXME: Double check that `path`=`-` (STDIN) properly works with `output()` once we support that ourselves.
     let output = cmd.output()?;
     _ = output.stderr;
 
-    // If we trigger this we likely passed incorrect flags to the rustc invocation.
+    // If we trigger this likely means we passed incorrect flags to the rustc invocation.
     // FIXME: Unfortunately, this can actually be triggered in practice under `d -@`
     // since we pass along verbatim flags as obtained by `compile-flags` directives
     // which may "erroneously" contain rustdoc-specific flags. See also
@@ -73,11 +78,12 @@ pub(crate) fn query_crate_name(krate: Crate<'_>, opts: &Options<'_>) -> io::Resu
     // directives).
     assert!(output.status.success(), "failed to properly query rustc about the crate name");
 
-    // FIXME: Don't unwrap or return an io::Error, provide a proper bug() instead.
-    let mut output = String::from_utf8(output.stdout).unwrap();
-    output.truncate(output.trim_end().len());
+    let crate_name = String::from_utf8(output.stdout).map_err(drop).and_then(|mut output| {
+        output.truncate(output.trim_end().len());
+        CrateName::parse(output)
+    });
 
-    Ok(output)
+    Ok(crate_name.expect("rustc provided an invalid crate name"))
 }
 
 /// Configure the engine invocation with options that it needs very early

@@ -21,6 +21,7 @@ use crate::{
     utility::{OsStrExt as _, default},
 };
 use std::{
+    ascii::Char,
     borrow::Cow,
     cell::LazyCell,
     path::{Path, PathBuf},
@@ -70,7 +71,7 @@ fn compile<'a>(
 fn run(krate: Crate<'_>, opts: &Options<'_>, run_v_opts: &VerbatimOptions<'_>) -> Result {
     // FIXME: Explainer
     let crate_name = build::query_crate_name(krate, opts)?;
-    let mut path: PathBuf = [".", &crate_name].into_iter().collect();
+    let mut path: PathBuf = [".", crate_name.as_str()].into_iter().collect();
     path.set_extension(std::env::consts::EXE_EXTENSION);
 
     build::run(&path, run_v_opts, opts.dbg_opts).map_err(|error| {
@@ -180,7 +181,7 @@ fn build_directive_driven<'a>(
     flavor: directive::Flavor,
     cx: Context<'a>,
 ) -> Result<(Crate<'a>, VerbatimOptions<'a>)> {
-    let (path, revision) = match krate.path.as_os_str().rsplit_once(b'#') {
+    let (path, revision) = match krate.path.as_os_str().rsplit_once(Char::NumberSign) {
         Some((path, revision)) => {
             let Some(revision) = revision.to_str() else {
                 return Err(error(fmt!(

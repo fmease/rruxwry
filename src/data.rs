@@ -50,17 +50,7 @@ impl<T: AsRef<str>> CrateName<T> {
         Self(name)
     }
 
-    pub(crate) fn map<U: AsRef<str>>(self, mapper: impl FnOnce(T) -> U) -> CrateName<U> {
-        CrateName(mapper(self.0))
-    }
-
-    pub(crate) fn as_str(&self) -> &str {
-        self.0.as_ref()
-    }
-}
-
-impl<'src> CrateName<&'src str> {
-    pub(crate) fn parse(source: &'src str) -> Result<Self, ()> {
+    pub(crate) fn parse(source: T) -> Result<Self, ()> {
         // This does indeed follow rustc's rules:
         //
         // Crate names are considered to be non-empty Unicode-alphanumeric strings —
@@ -70,11 +60,21 @@ impl<'src> CrateName<&'src str> {
         // to be ASCII-only Rust identifiers.
         //
         // However, we don't really need to care about the latter case.
-        if !source.is_empty() && source.chars().all(|char| char.is_alphanumeric() || char == '_') {
-            Ok(Self::new_unchecked(source))
+        if !source.as_ref().is_empty()
+            && source.as_ref().chars().all(|char| char.is_alphanumeric() || char == '_')
+        {
+            Ok(Self(source))
         } else {
             Err(())
         }
+    }
+
+    pub(crate) fn map<U: AsRef<str>>(self, mapper: impl FnOnce(T) -> U) -> CrateName<U> {
+        CrateName(mapper(self.0))
+    }
+
+    pub(crate) fn as_str(&self) -> &str {
+        self.0.as_ref()
     }
 }
 
