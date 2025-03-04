@@ -35,11 +35,12 @@ pub(crate) fn perform(
     imply_u_opts: ImplyUnstableOptions,
 ) -> io::Result<()> {
     let mut cmd = Command::new(engine.name());
-    let u_opts = configure_early(&mut cmd, engine, krate, opts);
+    configure_early(&mut cmd, engine, krate, opts);
     configure_late(&mut cmd, engine, extern_crates, opts);
     if let ImplyUnstableOptions::Yes = imply_u_opts
-        && let UsesUnstableOptions::Yes = u_opts
+        && opts.b_opts.identity != Some(Identity::Stable)
     {
+        // FIXME: Should we offer an explicit opt out (e.g., via `-I*z` with * in "tsn")?
         cmd.arg("-Zunstable-options");
     }
     execute(cmd, opts.dbg_opts)
@@ -88,14 +89,7 @@ pub(crate) fn query_crate_name(
 
 /// Configure the engine invocation with options that it needs very early
 /// (i.e., during certain print requests).
-fn configure_early(
-    cmd: &mut Command,
-    engine: &Engine<'_>,
-    krate: Crate<'_>,
-    opts: &Options<'_>,
-) -> UsesUnstableOptions {
-    let mut u_opts = UsesUnstableOptions::No;
-
+fn configure_early(cmd: &mut Command, engine: &Engine<'_>, krate: Crate<'_>, opts: &Options<'_>) {
     // Must come first!
     // FIXME: Consider only setting the (rustup) toolchain if the env var `RUSTUP_HOME` exists.
     //        And emitting a warning further up the stack of course.
@@ -118,10 +112,6 @@ fn configure_early(
     // Regarding crate name querying, the edition is vital. After all,
     // rustc needs to parse the crate root to find `#![crate_name]`.
     if let Some(edition) = krate.edition {
-        if !edition.is_stable() {
-            u_opts.set();
-        }
-
         cmd.arg("--edition");
         cmd.arg(edition.to_str());
     }
@@ -137,13 +127,11 @@ fn configure_early(
     }
 
     configure_v_opts(cmd, &opts.v_opts);
-    configure_engine_specific(cmd, engine, &mut u_opts);
+    configure_engine_specific(cmd, engine);
 
     if let Some(opts) = engine.env_opts() {
         cmd.args(opts);
     }
-
-    u_opts
 }
 
 /// Configure the engine invocation with options that it doesn't need early
@@ -244,11 +232,7 @@ fn configure_v_opts(cmd: &mut process::Command, v_opts: &VerbatimOptions<'_>) {
     cmd.args(&v_opts.arguments);
 }
 
-fn configure_engine_specific(
-    cmd: &mut Command,
-    engine: &Engine<'_>,
-    u_opts: &mut UsesUnstableOptions,
-) {
+fn configure_engine_specific(cmd: &mut Command, engine: &Engine<'_>) {
     match engine {
         Engine::Rustc(c_opts) => {
             if c_opts.check_only {
@@ -259,7 +243,6 @@ fn configure_engine_specific(
         Engine::Rustdoc(d_opts) => {
             if let DocBackend::Json = d_opts.backend {
                 cmd.arg("--output-format=json");
-                u_opts.set();
             }
 
             if let Some(crate_version) = &d_opts.crate_version {
@@ -273,17 +256,14 @@ fn configure_engine_specific(
 
             if d_opts.hidden {
                 cmd.arg("--document-hidden-items");
-                u_opts.set();
             }
 
             if d_opts.layout {
                 cmd.arg("--show-type-layout");
-                u_opts.set();
             }
 
             if d_opts.link_to_def {
                 cmd.arg("--generate-link-to-definition");
-                u_opts.set();
             }
 
             if d_opts.normalize {
@@ -502,21 +482,9 @@ impl Append for () {
     fn append(&mut self, (): &mut Self) {}
 }
 
-/// Whether to imply `-Zunstable-options`.
+/// Whether to imply `-Zunstable-options` (for developer convenience).
 #[derive(Clone, Copy)]
 pub(crate) enum ImplyUnstableOptions {
     Yes,
     No,
-}
-
-#[derive(Clone, Copy)]
-enum UsesUnstableOptions {
-    Yes,
-    No,
-}
-
-impl UsesUnstableOptions {
-    fn set(&mut self) {
-        *self = Self::Yes;
-    }
 }

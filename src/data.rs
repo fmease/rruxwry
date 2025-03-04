@@ -17,10 +17,6 @@ impl<'a> Edition<'a> {
     pub(crate) const LATEST_STABLE: Self = Self::Rust2024;
     pub(crate) const BLEEDING_EDGE: Self = Self::LATEST_STABLE;
 
-    pub(crate) fn is_stable(self) -> bool {
-        self <= Self::LATEST_STABLE
-    }
-
     pub(crate) const fn to_str(self) -> &'a str {
         match self {
             Self::Rust2015 => "2015",
@@ -125,7 +121,7 @@ pub(crate) enum DocBackend {
     Json,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Identity {
     True,
     Stable,
