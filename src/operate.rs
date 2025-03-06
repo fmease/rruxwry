@@ -18,12 +18,13 @@ use crate::{
     directive,
     error::Result,
     source::Spanned,
-    utility::{OsStrExt as _, default},
+    utility::{OsStrExt as _, default, paint::Painter},
 };
 use std::{
     ascii::Char,
     borrow::Cow,
     cell::LazyCell,
+    io::{self, Write as _},
     path::{Path, PathBuf},
 };
 
@@ -37,8 +38,45 @@ pub(crate) fn perform(
         Operation::Compile { mode, run, options: c_opts } => {
             compile(mode, run, krate, opts, c_opts, cx)
         }
+        Operation::QueryRustcVersion => {
+            // Don't create a fresh painter that's expensive! Use the one from the Context!
+            let stdout = io::stdout().lock();
+            let colorize = anstream::AutoStream::choice(&stdout) != anstream::ColorChoice::Never;
+            let mut p = Painter::new(io::BufWriter::new(stdout), colorize);
+
+            write!(p, "rustc: ")?;
+            match build::query_engine_version(&opts, Engine::rustc(())) {
+                Ok(version) => version.paint(build::identity(&opts), &mut p),
+                Err(error) => error.paint(&mut p),
+            }?;
+
+            writeln!(p)?;
+            Ok(())
+        }
         Operation::Document { mode, open, options: d_opts } => {
             document(mode, open, krate, opts, d_opts, cx)
+        }
+        Operation::QueryRustdocVersion => {
+            // Don't create a fresh painter that's expensive! Use the one from the Context!
+            let stdout = io::stdout().lock();
+            let colorize = anstream::AutoStream::choice(&stdout) != anstream::ColorChoice::Never;
+            let mut p = Painter::new(io::BufWriter::new(stdout), colorize);
+
+            write!(p, "rustdoc: ")?;
+            match build::query_engine_version(&opts, Engine::Rustdoc(())) {
+                Ok(version) => version.paint(build::identity(&opts), &mut p),
+                Err(error) => error.paint(&mut p),
+            }?;
+
+            writeln!(p)?;
+            write!(p, "  rustc: ")?;
+            match build::query_engine_version(&opts, Engine::rustc(())) {
+                Ok(version) => version.paint(build::identity(&opts), &mut p),
+                Err(error) => error.paint(&mut p),
+            }?;
+
+            writeln!(p)?;
+            Ok(())
         }
     }
 }
@@ -51,7 +89,7 @@ fn compile<'a>(
     c_opts: CompileOptions,
     cx: Context<'a>,
 ) -> Result {
-    let mut engine = Engine::Rustc(c_opts);
+    let mut engine = Engine::rustc(c_opts);
     let (krate, run_v_opts) = match mode {
         CompileMode::Default => {
             let krate = build_default(&engine, krate, &opts)?;
@@ -128,7 +166,7 @@ fn document_cross_crate(
     open: Open,
 ) -> Result<()> {
     let krate = Crate { typ: krate.typ.or(Some(CrateType("lib"))), ..krate };
-    let krate = build_default(&Engine::Rustc(CompileOptions { check_only: false }), krate, opts)?;
+    let krate = build_default(&Engine::rustc(CompileOptions { check_only: false }), krate, opts)?;
 
     // FIXME: This `unwrap` is obviously reachable (e.g., on `rrc '%$?'`)
     let crate_name: CrateName<Cow<'_, _>> = krate.name.map_or_else(
@@ -249,7 +287,7 @@ fn build_directive_driven<'a>(
 
     opts.v_opts.extend(directives.v_opts);
     match engine {
-        Engine::Rustc(_) => {} // rustc-exclusive (verbatim) flags is not a thing.
+        Engine::Rustc(..) => {} // rustc-exclusive (verbatim) flags is not a thing.
         Engine::Rustdoc(d_opts) => d_opts.v_opts.extend(directives.v_d_opts),
     }
 
@@ -312,9 +350,9 @@ fn compile_auxiliary<'a>(
             //        Does this lead to all crates in the dependency graph to
             //        get checked-only and everything working out (linking correctly etc)?
             //        I suspect is doesn't because we need to s%/rlib/rmeta/
-            Engine::Rustc(_) => engine,
+            Engine::Rustc(..) => engine,
             // FIXME: Wait, would check_only=true also work and be better?
-            Engine::Rustdoc(_) => &Engine::Rustc(CompileOptions { check_only: false }),
+            Engine::Rustdoc(_) => const { &Engine::rustc(CompileOptions { check_only: false }) },
         },
         krate,
         deps,
@@ -359,7 +397,7 @@ fn compile_auxiliary<'a>(
 
 fn scope(engine: &Engine<'_>) -> directive::Scope {
     match engine {
-        Engine::Rustc(_) => directive::Scope::Base,
+        Engine::Rustc(..) => directive::Scope::Base,
         // FIXME: Do we actually want to treat !`-j` as `rustdoc/` (Scope::HtmlDocCk)
         //        instead of `rustdoc-ui/` ("Scope::Rustdoc")
         Engine::Rustdoc(d_opts) => match d_opts.backend {
@@ -382,7 +420,9 @@ fn prelude(typ: Option<CrateType>) -> &'static [ExternCrate<'static>] {
 }
 pub(crate) enum Operation {
     Compile { mode: CompileMode, run: Run, options: CompileOptions },
+    QueryRustcVersion,
     Document { mode: DocMode, open: Open, options: DocOptions<'static> },
+    QueryRustdocVersion,
 }
 
 #[derive(Clone, Copy)]

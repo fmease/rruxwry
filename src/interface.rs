@@ -9,6 +9,8 @@ use crate::{
 };
 use std::{ffi::OsString, path::PathBuf};
 
+// FIXME: Should we make `-Q` incompatible with `-r`/`-o`?
+
 pub(crate) fn arguments() -> Arguments {
     let mut args = std::env::args_os().peekable();
 
@@ -32,7 +34,7 @@ pub(crate) fn arguments() -> Arguments {
 
     fn path() -> clap::Arg {
         clap::Arg::new(id::PATH)
-            .required(true)
+            .required_unless_present(id::QUERY)
             .value_parser(clap::builder::ValueParser::path_buf())
             .help("Path to the source file")
     }
@@ -147,6 +149,11 @@ pub(crate) fn arguments() -> Arguments {
                 .long("no-backtrace")
                 .action(clap::ArgAction::SetTrue)
                 .help("Override `RUST_BACKTRACE` to be `0`"),
+            clap::Arg::new(id::QUERY)
+                .short('Q')
+                .long("query")
+                .action(clap::ArgAction::SetTrue)
+                .help("Query the underlying rust{,do}c version and halt"),
             clap::Arg::new(id::VERBOSE)
                 .short('V')
                 .long("verbose")
@@ -294,8 +301,10 @@ pub(crate) fn arguments() -> Arguments {
         }),
     };
 
-    let operation = match operation.as_str() {
-        id::BUILD => Operation::Compile {
+    let query_engine_version: bool = matches.remove_one(id::QUERY).unwrap_or_default();
+
+    let operation = match (operation.as_str(), query_engine_version) {
+        (id::BUILD, false) => Operation::Compile {
             run: match matches.remove_one::<bool>(id::RUN).unwrap_or_default() {
                 true => Run::Yes,
                 false => Run::No,
@@ -308,7 +317,8 @@ pub(crate) fn arguments() -> Arguments {
                 check_only: matches.remove_one(id::CHECK_ONLY).unwrap_or_default(),
             },
         },
-        id::DOC => Operation::Document {
+        (id::BUILD, true) => Operation::QueryRustcVersion,
+        (id::DOC, false) => Operation::Document {
             open: match matches.remove_one::<bool>(id::OPEN).unwrap_or_default() {
                 true => Open::Yes,
                 false => Open::No,
@@ -335,6 +345,7 @@ pub(crate) fn arguments() -> Arguments {
                 v_opts: default(),
             },
         },
+        (id::DOC, true) => Operation::QueryRustdocVersion,
         _ => unreachable!(), // handled by `clap`,
     };
 
@@ -344,7 +355,7 @@ pub(crate) fn arguments() -> Arguments {
     //        Fix: Throw out clap and do it manually.
     Arguments {
         toolchain,
-        path: matches.remove_one(id::PATH).unwrap(),
+        path: matches.remove_one(id::PATH).unwrap_or_default(),
         verbatim: matches.remove_many(id::VERBATIM).map(Iterator::collect).unwrap_or_default(),
         operation,
         crate_name: matches.remove_one(id::CRATE_NAME),
@@ -475,6 +486,7 @@ mod id {
     pub(super) const OPEN: &str = "OPEN";
     pub(super) const PATH: &str = "PATH";
     pub(super) const PRIVATE: &str = "PRIVATE";
+    pub(super) const QUERY: &str = "QUERY";
     pub(super) const REVISION: &str = "REVISION";
     pub(super) const RUN: &str = "RUN";
     pub(super) const RUSTC_FEATURES: &str = "RUSTC_FEATURES";

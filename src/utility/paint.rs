@@ -1,20 +1,20 @@
 use super::{SmallVec, default};
 use anstyle::{AnsiColor, Effects, Style};
-use std::io::{self, Write};
+use std::io;
 
-pub(crate) struct Painter<W: Write> {
+pub(crate) struct Painter<W: io::Write> {
     writer: W,
     colorize: bool,
     stack: SmallVec<Style, 1>,
 }
 
-impl<W: Write> Painter<W> {
+impl<W: io::Write> Painter<W> {
     pub(crate) fn new(writer: W, colorize: bool) -> Self {
         Self { writer, colorize, stack: default() }
     }
 }
 
-impl<W: Write> Painter<W> {
+impl<W: io::Write> Painter<W> {
     pub(crate) fn set(&mut self, style: impl IntoStyle) -> io::Result<()> {
         if !self.colorize {
             return Ok(());
@@ -52,7 +52,7 @@ impl<W: Write> Painter<W> {
     }
 }
 
-impl<W: Write> Write for Painter<W> {
+impl<W: io::Write> io::Write for Painter<W> {
     fn write(&mut self, buffer: &[u8]) -> io::Result<usize> {
         self.writer.write(buffer)
     }

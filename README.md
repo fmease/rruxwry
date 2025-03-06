@@ -130,10 +130,10 @@ Options:
 ```
 Compile the given crate with rustc
 
-Usage: rruxwry build [OPTIONS] <PATH> [-- [VERBATIM]...]
+Usage: rruxwry build [OPTIONS] [PATH] [-- [VERBATIM]...]
 
 Arguments:
-  <PATH>         Path to the source file
+  [PATH]         Path to the source file
   [VERBATIM]...  Flags passed to `rustc` verbatim
 
 Options:
@@ -155,6 +155,7 @@ Options:
   -I, --identity <IDENTITY>   Force rust{,do}c's identity
       --log[=<FILTER>]        Enable rust{,do}c logging. FILTER defaults to `debug`
   -B, --no-backtrace          Override `RUST_BACKTRACE` to be `0`
+  -Q, --query                 Query the underlying rust{,do}c version and halt
   -V, --verbose               Use verbose output
   -0, --dry-run               Run through without making any changes
       --color <WHEN>          Control when to use color [default: auto] [possible values: auto, always, never]
@@ -167,10 +168,10 @@ Options:
 ```
 Document the given crate with rustdoc
 
-Usage: rruxwry doc [OPTIONS] <PATH> [-- [VERBATIM]...]
+Usage: rruxwry doc [OPTIONS] [PATH] [-- [VERBATIM]...]
 
 Arguments:
-  <PATH>         Path to the source file
+  [PATH]         Path to the source file
   [VERBATIM]...  Flags passed to `rustc` and `rustdoc` verbatim
 
 Options:
@@ -200,6 +201,7 @@ Options:
   -I, --identity <IDENTITY>      Force rust{,do}c's identity
       --log[=<FILTER>]           Enable rust{,do}c logging. FILTER defaults to `debug`
   -B, --no-backtrace             Override `RUST_BACKTRACE` to be `0`
+  -Q, --query                    Query the underlying rust{,do}c version and halt
   -V, --verbose                  Use verbose output
   -0, --dry-run                  Run through without making any changes
       --color <WHEN>             Control when to use color [default: auto] [possible values: auto, always, never]

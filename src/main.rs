@@ -5,12 +5,15 @@
 #![feature(decl_macro)]
 #![feature(exact_size_is_empty)]
 #![feature(exit_status_error)]
+#![feature(if_let_guard)]
 #![feature(iter_collect_into)]
 #![feature(let_chains)]
 #![feature(os_str_display)]
 #![feature(slice_split_once)]
+#![feature(str_split_remainder)]
 #![feature(substr_range)]
 #![feature(trait_alias)]
+#![feature(type_changing_struct_update)]
 // Lints //
 #![deny(rust_2018_idioms, unused_must_use, unused_crate_dependencies)]
 #![deny(clippy::all, clippy::pedantic)]
@@ -63,6 +66,7 @@ fn try_main() -> error::Result {
     // so we properly support them in `compiletest`+command
 
     // FIXME: this is awkward ... can we do this inside cli smh (not the ref op ofc)
+    // FIXME: Check if it's possible to make this a build::VerbatimOptions<()>.
     let v_opts = build::VerbatimOptions {
         arguments: args.verbatim.iter().map(String::as_str).collect(),
         variables: Vec::new(),

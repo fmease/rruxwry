@@ -11,15 +11,17 @@
 //        as well as those passed via the `RUST{,DOC}FLAGS` env vars.
 
 use crate::{
-    data::{Crate, CrateName, CrateType, DocBackend, Identity},
-    diagnostic::{Paint, Painter, debug},
+    data::{Crate, CrateName, CrateType, DocBackend, Identity, Version},
+    diagnostic::{self, Paint, debug},
     source::Spanned,
+    utility::paint::Painter,
 };
 use anstyle::{AnsiColor, Effects};
 use std::{
     borrow::Cow,
     ffi::OsStr,
-    io::{self, Write},
+    io::{self, Write as _},
+    marker::PhantomData,
     ops::ControlFlow,
     path::Path,
     process::{self, Command},
@@ -37,8 +39,9 @@ pub(crate) fn perform(
     let mut cmd = Command::new(engine.name());
     configure_early(&mut cmd, engine, krate, opts);
     configure_late(&mut cmd, engine, extern_crates, opts);
+    // FIXME: Also don't emit it if the queried channel != nightly or dev
     if let ImplyUnstableOptions::Yes = imply_u_opts
-        && opts.b_opts.identity != Some(Identity::Stable)
+        && identity(opts) != Identity::Stable
     {
         // FIXME: Should we offer an explicit opt out (e.g., via `-I*z` with * in "tsn")?
         cmd.arg("-Zunstable-options");
@@ -46,11 +49,121 @@ pub(crate) fn perform(
     execute(cmd, opts.dbg_opts)
 }
 
+pub(crate) fn query_engine_version(
+    opts: &Options<'_>,
+    engine: Engine<'static, (), ()>,
+) -> Result<Version<String>, EngineVersionError> {
+    use EngineVersionError as Error;
+
+    let mut cmd = Command::new(engine.name());
+
+    // Must come first!
+    configure_toolchain(&mut cmd, opts);
+
+    cmd.arg("-V");
+
+    // FIXME: Skip this execution if `-00`? (which doesn't exist yet).
+    _ = gate(|p| render(&cmd, p), opts.dbg_opts);
+
+    let output = cmd.output().map_err(|_| Error::Other)?;
+
+    if !output.status.success() {
+        // We failed to obtain version information.
+        // While that's very likely due to rustup complaining about some legitimate issues,
+        // strictly speaking we don't know for sure -- it could be rust{,do}c acting up.
+        //
+        // We don't support rust{,do}c *wrappers* (via `RUST{,DO}C_WRAPPER`) at the time
+        // of writing, so that's a source of problems we *don't* have!
+        //
+        // Ideally we would now try to query various programs that participated (mainly just
+        // rustup that is) to find the culprit / root cause for better error reporting.
+        // Sadly, rustup doesn't offer any mechanism to make it output machine-readable and
+        // stable data. See also <https://github.com/rust-lang/rustup/issues/450>.
+        //
+        // So unfortunately we have no choice but to try and parse stderr output.
+        //
+        // FIXME: Avoid the need for `from_utf8`.
+        if let Ok(stderr) = String::from_utf8(output.stderr)
+            && let Some(line) = stderr.lines().next()
+            && let Some(line) = line.strip_prefix("error: ")
+        {
+            // We now try to find the most common cases of rustup failure in order to
+            // return a more concise error code. I don't want to forward the verbose and
+            // roundabout error diagnostics.
+            //
+            // FIXME: Admittedly, these checks could be stricter by comparing the "variables"
+            // (toolchain, component, …). In practice however it shouldn't really matter.
+
+            if let Some(line) = line.strip_prefix("toolchain '")
+                && line.ends_with("' is not installable")
+            {
+                return Err(Error::UnknownToolchain);
+            }
+
+            if let Some((component, toolchain)) =
+                line.split_once("' is not installed for the custom toolchain '")
+                && component.starts_with('\'')
+                && toolchain.ends_with("'.")
+            {
+                return Err(Error::UnavailableComponent);
+            }
+        }
+
+        return Err(Error::Other);
+    }
+
+    let source = std::str::from_utf8(&output.stdout).map_err(|_| Error::Malformed)?;
+    let source = source.trim_end();
+
+    // The name of the binary *has* to exist for the version string to be considered valid!
+    let (binary_name, source) = source.split_once(' ').ok_or(Error::Malformed)?;
+
+    if binary_name != engine.name() {
+        return Err(Error::Malformed);
+    }
+
+    match source {
+        // Output by rust{,do}c if bootstrap didn't provide a version.
+        "unknown" => Err(Error::Unknown),
+        // This may happen if env var `RUSTC_OVERRIDE_VERSION_STRING` exists
+        // and contains an invalid version as rust{,do}c outputs it verbatim.
+        source => Version::parse(source).map(Version::to_owned).ok_or(Error::Malformed),
+    }
+}
+
+#[derive(Debug)]
+pub(crate) enum EngineVersionError {
+    UnknownToolchain,
+    UnavailableComponent,
+    Unknown,
+    Malformed,
+    Other,
+}
+
+impl EngineVersionError {
+    // FIXME: Figure out how much into detail we want go and how to best word these.
+    //        E.g., do we want to dump underlying IO errors and parts of stderr output
+    //        as emitted by `--version`?
+    pub(crate) fn paint(self, p: &mut Painter<impl io::Write>) -> io::Result<()> {
+        p.set(AnsiColor::Red)?;
+        write!(p, "{{ ")?;
+        match self {
+            Self::UnknownToolchain => write!(p, "unknown toolchain"),
+            Self::UnavailableComponent => write!(p, "component unavailable"),
+            Self::Unknown => write!(p, "unknown"),
+            Self::Malformed => write!(p, "malformed"),
+            Self::Other => write!(p, "error"),
+        }?;
+        write!(p, " }}")?;
+        p.unset()
+    }
+}
+
 pub(crate) fn query_crate_name(
     krate: Crate<'_>,
     opts: &Options<'_>,
 ) -> io::Result<CrateName<String>> {
-    let engine = Engine::Rustc(CompileOptions { check_only: false });
+    let engine = Engine::Rustc(CompileOptions { check_only: false }, PhantomData);
 
     let mut cmd = Command::new(engine.name());
 
@@ -58,6 +171,7 @@ pub(crate) fn query_crate_name(
 
     cmd.arg("--print=crate-name");
 
+    // FIXME: Only skip this execution if `-00` (which doesn't exist yet).
     match gate(|p| render(&cmd, p), opts.dbg_opts) {
         ControlFlow::Continue(()) => {}
         ControlFlow::Break(()) => {
@@ -91,11 +205,7 @@ pub(crate) fn query_crate_name(
 /// (i.e., during certain print requests).
 fn configure_early(cmd: &mut Command, engine: &Engine<'_>, krate: Crate<'_>, opts: &Options<'_>) {
     // Must come first!
-    // FIXME: Consider only setting the (rustup) toolchain if the env var `RUSTUP_HOME` exists.
-    //        And emitting a warning further up the stack of course.
-    if let Some(toolchain) = opts.toolchain {
-        cmd.arg(toolchain);
-    }
+    configure_toolchain(cmd, opts);
 
     cmd.arg(krate.path);
 
@@ -131,6 +241,14 @@ fn configure_early(cmd: &mut Command, engine: &Engine<'_>, krate: Crate<'_>, opt
 
     if let Some(opts) = engine.env_opts() {
         cmd.args(opts);
+    }
+}
+
+fn configure_toolchain(cmd: &mut Command, opts: &Options<'_>) {
+    // FIXME: Consider only setting the (rustup) toolchain if the env var `RUSTUP_HOME` exists.
+    //        And emitting a warning further up the stack of course.
+    if let Some(toolchain) = opts.toolchain {
+        cmd.arg(toolchain);
     }
 }
 
@@ -234,7 +352,7 @@ fn configure_v_opts(cmd: &mut process::Command, v_opts: &VerbatimOptions<'_>) {
 
 fn configure_engine_specific(cmd: &mut Command, engine: &Engine<'_>) {
     match engine {
-        Engine::Rustc(c_opts) => {
+        Engine::Rustc(c_opts, PhantomData) => {
             if c_opts.check_only {
                 // FIXME: Should we `-o $null`?
                 cmd.arg("--emit=metadata");
@@ -289,7 +407,7 @@ pub(crate) fn run(
 }
 
 pub(crate) fn open(path: &Path, dbg_opts: &DebugOptions) -> io::Result<()> {
-    let message = |p: &mut Painter| {
+    let message = |p: &mut diagnostic::Painter| {
         p.with(palette::COMMAND.on_default().bold(), |p| write!(p, "⟨open⟩ "))?;
         p.with(AnsiColor::Green, |p| write!(p, "{}", path.display()))
     };
@@ -317,34 +435,6 @@ fn gate(message: impl Paint, dbg_opts: &DebugOptions) -> ControlFlow<()> {
     }
 }
 
-pub(crate) enum Engine<'a> {
-    Rustc(CompileOptions),
-    Rustdoc(DocOptions<'a>),
-}
-
-impl Engine<'_> {
-    const fn name(&self) -> &'static str {
-        match self {
-            Self::Rustc(_) => "rustc",
-            Self::Rustdoc(_) => "rustdoc",
-        }
-    }
-
-    const fn logging_env_var(&self) -> &'static str {
-        match self {
-            Self::Rustc(_) => "RUSTC_LOG",
-            Self::Rustdoc(_) => "RUSTDOC_LOG",
-        }
-    }
-
-    fn env_opts(&self) -> Option<&'static [String]> {
-        match self {
-            Self::Rustc(_) => environment::rustc_options(),
-            Self::Rustdoc(_) => environment::rustdoc_options(),
-        }
-    }
-}
-
 fn execute(mut cmd: process::Command, dbg_opts: &DebugOptions) -> io::Result<()> {
     match gate(|p| render(&cmd, p), dbg_opts) {
         ControlFlow::Continue(()) => cmd.status()?.exit_ok().map_err(io::Error::other),
@@ -352,9 +442,13 @@ fn execute(mut cmd: process::Command, dbg_opts: &DebugOptions) -> io::Result<()>
     }
 }
 
+pub(crate) fn identity(opts: &Options<'_>) -> Identity {
+    opts.b_opts.identity.or_else(environment::identity_uncached).unwrap_or_default()
+}
+
 // This is very close to `<process::Command as fmt::Debug>::fmt` but prettier.
 // FIXME: This lacks shell escaping!
-fn render(cmd: &process::Command, p: &mut Painter) -> io::Result<()> {
+fn render(cmd: &process::Command, p: &mut diagnostic::Painter) -> io::Result<()> {
     #[allow(irrefutable_let_patterns)]
     if let envs = cmd.get_envs()
         && !envs.is_empty()
@@ -378,6 +472,38 @@ fn render(cmd: &process::Command, p: &mut Painter) -> io::Result<()> {
     }
 
     Ok(())
+}
+
+pub(crate) enum Engine<'a, C = CompileOptions, D = DocOptions<'a>> {
+    Rustc(C, PhantomData<&'a ()>),
+    Rustdoc(D),
+}
+
+impl<C, D> Engine<'_, C, D> {
+    pub(crate) const fn rustc(opts: C) -> Self {
+        Self::Rustc(opts, PhantomData)
+    }
+
+    const fn name(&self) -> &'static str {
+        match self {
+            Self::Rustc(..) => "rustc",
+            Self::Rustdoc(_) => "rustdoc",
+        }
+    }
+
+    const fn logging_env_var(&self) -> &'static str {
+        match self {
+            Self::Rustc(..) => "RUSTC_LOG",
+            Self::Rustdoc(_) => "RUSTDOC_LOG",
+        }
+    }
+
+    fn env_opts(&self) -> Option<&'static [String]> {
+        match self {
+            Self::Rustc(..) => environment::rustc_options(),
+            Self::Rustdoc(_) => environment::rustdoc_options(),
+        }
+    }
 }
 
 mod palette {

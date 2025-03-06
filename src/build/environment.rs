@@ -3,7 +3,10 @@
 // We cache everything in statics because `command` may call these functions over and over if there are
 // multiple source files. Probably not worth it or possibly worse than not caching at all.
 
-use crate::diagnostic::{fmt, warn};
+use crate::{
+    data::Identity,
+    diagnostic::{fmt, warn},
+};
 use std::{
     collections::HashMap,
     ffi::{OsStr, OsString},
@@ -30,6 +33,16 @@ pub(super) fn rustdoc_options<'a>() -> Option<&'a [String]> {
     });
 
     OPTS.as_deref()
+}
+
+// FIXME: Also support `RUSTC_BOOTSTRAP=$crate_name`.
+// FIXME: Cache this, too?
+pub(super) fn identity_uncached() -> Option<Identity> {
+    Some(match ENVIRONMENT.get(OsStr::new("RUSTC_BOOTSTRAP"))?.as_encoded_bytes() {
+        b"1" => Identity::Nightly,
+        b"-1" => Identity::Stable,
+        _ => Identity::True,
+    })
 }
 
 static ENVIRONMENT: LazyLock<Environment> = LazyLock::new(|| std::env::vars_os().collect());
