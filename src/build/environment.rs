@@ -1,7 +1,8 @@
 //! Dealing with environment variables.
 
-// We cache everything in statics because `command` may call these functions over and over if there are
-// multiple source files. Probably not worth it or possibly worse than not caching at all.
+// We cache everything in statics because `build` may call these functions over and over
+// if there are multiple source files or when querying the crate name.
+// Probably not worth it or possibly worse than not caching at all.
 
 use crate::{
     data::Identity,
@@ -37,7 +38,7 @@ pub(super) fn rustdoc_options<'a>() -> Option<&'a [String]> {
 
 // FIXME: Also support `RUSTC_BOOTSTRAP=$crate_name`.
 // FIXME: Cache this, too?
-pub(super) fn identity_uncached() -> Option<Identity> {
+pub(super) fn probe_identity() -> Option<Identity> {
     Some(match ENVIRONMENT.get(OsStr::new("RUSTC_BOOTSTRAP"))?.as_encoded_bytes() {
         b"1" => Identity::Nightly,
         b"-1" => Identity::Stable,
@@ -76,14 +77,13 @@ fn parse_options(
 }
 
 fn warn_env_contains_confusable_var(confusable: &OsStr, suggestion: &OsStr) {
-    // FIXME: We now say "warning[rruxwry] rruxwry ..." which is meh. Rephrase!
     warn(fmt!("rruxwry does not read the environment variable `{}`", confusable.display()))
         .note(fmt!("you might have meant `{}`", suggestion.display()))
         .finish();
 }
 
 fn warn_malformed_env_var(key: &OsStr, note: &'static str) {
-    // FIXME: Make this a (hard/fatal) error.
+    // FIXME: Make this a (hard/fatal) error?
     warn(fmt!("the environment variable `{}` is malformed", key.display()))
         .note(fmt!("{note}"))
         .note(fmt!("ignoring all flags potentially contained within it"))

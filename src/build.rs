@@ -11,6 +11,7 @@
 //        as well as those passed via the `RUST{,DOC}FLAGS` env vars.
 
 use crate::{
+    context::Context,
     data::{Crate, CrateName, CrateType, DocBackend, Identity, Version},
     diagnostic::{self, Paint, debug},
     source::Spanned,
@@ -21,7 +22,6 @@ use std::{
     borrow::Cow,
     ffi::OsStr,
     io::{self, Write as _},
-    marker::PhantomData,
     ops::ControlFlow,
     path::Path,
     process::{self, Command},
@@ -30,40 +30,50 @@ use std::{
 mod environment;
 
 pub(crate) fn perform(
-    engine: &Engine<'_>,
+    e_opts: &EngineOptions<'_>,
     krate: Crate<'_>,
     extern_crates: &[ExternCrate<'_>],
     opts: &Options<'_>,
     imply_u_opts: ImplyUnstableOptions,
+    cx: Context<'_>,
 ) -> io::Result<()> {
+    let engine = e_opts.kind();
+
     let mut cmd = Command::new(engine.name());
-    configure_early(&mut cmd, engine, krate, opts);
+    configure_early(&mut cmd, e_opts, krate, opts);
     configure_late(&mut cmd, engine, extern_crates, opts);
-    // FIXME: Also don't emit it if the queried channel != nightly or dev
+
     if let ImplyUnstableOptions::Yes = imply_u_opts
-        && identity(opts) != Identity::Stable
+        && match probe_identity(opts) {
+            Identity::True => engine.is(cx, |v| v.channel.allows_unstable()),
+            Identity::Stable => false,
+            Identity::Nightly => true,
+        }
     {
         // FIXME: Should we offer an explicit opt out (e.g., via `-I*z` with * in "tsn")?
         cmd.arg("-Zunstable-options");
     }
+
     execute(cmd, opts.dbg_opts)
 }
 
 pub(crate) fn query_engine_version(
-    opts: &Options<'_>,
-    engine: Engine<'static, (), ()>,
+    engine: EngineKind,
+    toolchain: Option<&OsStr>,
+    dbg_opts: DebugOptions,
 ) -> Result<Version<String>, EngineVersionError> {
     use EngineVersionError as Error;
 
     let mut cmd = Command::new(engine.name());
 
     // Must come first!
-    configure_toolchain(&mut cmd, opts);
+    configure_toolchain(&mut cmd, toolchain);
 
     cmd.arg("-V");
 
     // FIXME: Skip this execution if `-00`? (which doesn't exist yet).
-    _ = gate(|p| render(&cmd, p), opts.dbg_opts);
+    // FIXME: Setting dry_run explicitly is hacky.
+    _ = gate(|p| render(&cmd, p), DebugOptions { dry_run: false, ..dbg_opts });
 
     let output = cmd.output().map_err(|_| Error::Other)?;
 
@@ -113,7 +123,7 @@ pub(crate) fn query_engine_version(
     }
 
     let source = std::str::from_utf8(&output.stdout).map_err(|_| Error::Malformed)?;
-    let source = source.trim_end();
+    let source = source.strip_suffix('\n').ok_or(Error::Malformed)?;
 
     // The name of the binary *has* to exist for the version string to be considered valid!
     let (binary_name, source) = source.split_once(' ').ok_or(Error::Malformed)?;
@@ -127,10 +137,11 @@ pub(crate) fn query_engine_version(
         "unknown" => Err(Error::Unknown),
         // This may happen if env var `RUSTC_OVERRIDE_VERSION_STRING` exists
         // and contains an invalid version as rust{,do}c outputs it verbatim.
-        source => Version::parse(source).map(Version::to_owned).ok_or(Error::Malformed),
+        source => Version::parse(source).map(Version::into_owned).ok_or(Error::Malformed),
     }
 }
 
+#[derive(Clone)] // FIXME
 #[derive(Debug)]
 pub(crate) enum EngineVersionError {
     UnknownToolchain,
@@ -163,9 +174,9 @@ pub(crate) fn query_crate_name(
     krate: Crate<'_>,
     opts: &Options<'_>,
 ) -> io::Result<CrateName<String>> {
-    let engine = Engine::Rustc(CompileOptions { check_only: false }, PhantomData);
+    let engine = EngineOptions::Rustc(CompileOptions { check_only: false });
 
-    let mut cmd = Command::new(engine.name());
+    let mut cmd = Command::new(engine.kind().name());
 
     configure_early(&mut cmd, &engine, krate, opts);
 
@@ -203,9 +214,14 @@ pub(crate) fn query_crate_name(
 
 /// Configure the engine invocation with options that it needs very early
 /// (i.e., during certain print requests).
-fn configure_early(cmd: &mut Command, engine: &Engine<'_>, krate: Crate<'_>, opts: &Options<'_>) {
+fn configure_early(
+    cmd: &mut Command,
+    e_opts: &EngineOptions<'_>,
+    krate: Crate<'_>,
+    opts: &Options<'_>,
+) {
     // Must come first!
-    configure_toolchain(cmd, opts);
+    configure_toolchain(cmd, opts.toolchain);
 
     cmd.arg(krate.path);
 
@@ -237,17 +253,17 @@ fn configure_early(cmd: &mut Command, engine: &Engine<'_>, krate: Crate<'_>, opt
     }
 
     configure_v_opts(cmd, &opts.v_opts);
-    configure_engine_specific(cmd, engine);
+    configure_e_opts(cmd, e_opts);
 
-    if let Some(opts) = engine.env_opts() {
+    if let Some(opts) = e_opts.kind().env_opts() {
         cmd.args(opts);
     }
 }
 
-fn configure_toolchain(cmd: &mut Command, opts: &Options<'_>) {
+fn configure_toolchain(cmd: &mut Command, toolchain: Option<&OsStr>) {
     // FIXME: Consider only setting the (rustup) toolchain if the env var `RUSTUP_HOME` exists.
     //        And emitting a warning further up the stack of course.
-    if let Some(toolchain) = opts.toolchain {
+    if let Some(toolchain) = toolchain {
         cmd.arg(toolchain);
     }
 }
@@ -256,7 +272,7 @@ fn configure_toolchain(cmd: &mut Command, opts: &Options<'_>) {
 /// (i.e., during certain print requests).
 fn configure_late(
     cmd: &mut Command,
-    engine: &Engine<'_>,
+    engine: EngineKind,
     extern_crates: &[ExternCrate<'_>],
     opts: &Options<'_>,
 ) {
@@ -350,15 +366,15 @@ fn configure_v_opts(cmd: &mut process::Command, v_opts: &VerbatimOptions<'_>) {
     cmd.args(&v_opts.arguments);
 }
 
-fn configure_engine_specific(cmd: &mut Command, engine: &Engine<'_>) {
-    match engine {
-        Engine::Rustc(c_opts, PhantomData) => {
+fn configure_e_opts(cmd: &mut Command, e_opts: &EngineOptions<'_>) {
+    match e_opts {
+        EngineOptions::Rustc(c_opts) => {
             if c_opts.check_only {
                 // FIXME: Should we `-o $null`?
                 cmd.arg("--emit=metadata");
             }
         }
-        Engine::Rustdoc(d_opts) => {
+        EngineOptions::Rustdoc(d_opts) => {
             if let DocBackend::Json = d_opts.backend {
                 cmd.arg("--output-format=json");
             }
@@ -399,14 +415,14 @@ fn configure_engine_specific(cmd: &mut Command, engine: &Engine<'_>) {
 pub(crate) fn run(
     program: impl AsRef<OsStr>,
     v_opts: &VerbatimOptions<'_>,
-    dbg_opts: &DebugOptions,
+    dbg_opts: DebugOptions,
 ) -> io::Result<()> {
     let mut cmd = Command::new(program);
     configure_v_opts(&mut cmd, v_opts);
     execute(cmd, dbg_opts)
 }
 
-pub(crate) fn open(path: &Path, dbg_opts: &DebugOptions) -> io::Result<()> {
+pub(crate) fn open(path: &Path, dbg_opts: DebugOptions) -> io::Result<()> {
     let message = |p: &mut diagnostic::Painter| {
         p.with(palette::COMMAND.on_default().bold(), |p| write!(p, "⟨open⟩ "))?;
         p.with(AnsiColor::Green, |p| write!(p, "{}", path.display()))
@@ -419,7 +435,7 @@ pub(crate) fn open(path: &Path, dbg_opts: &DebugOptions) -> io::Result<()> {
 }
 
 #[must_use]
-fn gate(message: impl Paint, dbg_opts: &DebugOptions) -> ControlFlow<()> {
+fn gate(message: impl Paint, dbg_opts: DebugOptions) -> ControlFlow<()> {
     if dbg_opts.verbose {
         let verb = if !dbg_opts.dry_run { "running" } else { "skipping" };
         debug(|p| {
@@ -435,15 +451,17 @@ fn gate(message: impl Paint, dbg_opts: &DebugOptions) -> ControlFlow<()> {
     }
 }
 
-fn execute(mut cmd: process::Command, dbg_opts: &DebugOptions) -> io::Result<()> {
+fn execute(mut cmd: process::Command, dbg_opts: DebugOptions) -> io::Result<()> {
     match gate(|p| render(&cmd, p), dbg_opts) {
         ControlFlow::Continue(()) => cmd.status()?.exit_ok().map_err(io::Error::other),
         ControlFlow::Break(()) => Ok(()),
     }
 }
 
-pub(crate) fn identity(opts: &Options<'_>) -> Identity {
-    opts.b_opts.identity.or_else(environment::identity_uncached).unwrap_or_default()
+pub(crate) fn probe_identity(opts: &Options<'_>) -> Identity {
+    // FIXME: This doesn't take into account verbatim env vars (more specifically,
+    //        `//@ rustc-env`).
+    opts.b_opts.identity.or_else(environment::probe_identity).unwrap_or_default()
 }
 
 // This is very close to `<process::Command as fmt::Debug>::fmt` but prettier.
@@ -474,34 +492,50 @@ fn render(cmd: &process::Command, p: &mut diagnostic::Painter) -> io::Result<()>
     Ok(())
 }
 
-pub(crate) enum Engine<'a, C = CompileOptions, D = DocOptions<'a>> {
-    Rustc(C, PhantomData<&'a ()>),
-    Rustdoc(D),
+/// Engine-specific build options.
+pub(crate) enum EngineOptions<'a> {
+    Rustc(CompileOptions),
+    Rustdoc(DocOptions<'a>),
 }
 
-impl<C, D> Engine<'_, C, D> {
-    pub(crate) const fn rustc(opts: C) -> Self {
-        Self::Rustc(opts, PhantomData)
+impl EngineOptions<'_> {
+    pub(crate) fn kind(&self) -> EngineKind {
+        match self {
+            Self::Rustc(_) => EngineKind::Rustc,
+            Self::Rustdoc(_) => EngineKind::Rustdoc,
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+pub(crate) enum EngineKind {
+    Rustc,
+    Rustdoc,
+}
+
+impl EngineKind {
+    fn is(self, cx: Context<'_>, pred: impl FnOnce(Version<String>) -> bool) -> bool {
+        cx.engine(self).is_ok_and(pred)
     }
 
-    const fn name(&self) -> &'static str {
+    const fn name(self) -> &'static str {
         match self {
-            Self::Rustc(..) => "rustc",
-            Self::Rustdoc(_) => "rustdoc",
+            Self::Rustc => "rustc",
+            Self::Rustdoc => "rustdoc",
         }
     }
 
-    const fn logging_env_var(&self) -> &'static str {
+    const fn logging_env_var(self) -> &'static str {
         match self {
-            Self::Rustc(..) => "RUSTC_LOG",
-            Self::Rustdoc(_) => "RUSTDOC_LOG",
+            Self::Rustc => "RUSTC_LOG",
+            Self::Rustdoc => "RUSTDOC_LOG",
         }
     }
 
-    fn env_opts(&self) -> Option<&'static [String]> {
+    fn env_opts(self) -> Option<&'static [String]> {
         match self {
-            Self::Rustc(..) => environment::rustc_options(),
-            Self::Rustdoc(_) => environment::rustdoc_options(),
+            Self::Rustc => environment::rustc_options(),
+            Self::Rustdoc => environment::rustdoc_options(),
         }
     }
 }
@@ -547,6 +581,7 @@ pub(crate) struct BuildOptions {
     pub(crate) no_backtrace: bool,
 }
 
+#[derive(Clone, Copy)]
 pub(crate) struct DebugOptions {
     pub(crate) verbose: bool,
     pub(crate) dry_run: bool,
@@ -574,7 +609,7 @@ pub(crate) struct Options<'a> {
     pub(crate) toolchain: Option<&'a OsStr>,
     pub(crate) b_opts: &'a BuildOptions,
     pub(crate) v_opts: VerbatimOptions<'a>,
-    pub(crate) dbg_opts: &'a DebugOptions,
+    pub(crate) dbg_opts: DebugOptions,
 }
 
 /// Program arguments and environment variables to be passed verbatim.

@@ -9,7 +9,12 @@ use crate::{
 };
 use std::{ffi::OsString, path::PathBuf};
 
-// FIXME: Should we make `-Q` incompatible with `-r`/`-o`?
+// Similar to `-h`, `-Q` is compatible with all other flags and renders required arguments optional.
+// While there could be a world where `-Q` is incompatible with flags like `-r` (run) or `-o` (open)
+// (i.e., action it prevents from being performed potentially confusing the user), I think it's way
+// more convenient for `-Q` to have a higher precedence (I can imagine users spontaneously tacking
+// `-Q` onto a preexisting execution containing `-o` to double check they're using a correctly set up
+// toolchain).
 
 pub(crate) fn arguments() -> Arguments {
     let mut args = std::env::args_os().peekable();

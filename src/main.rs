@@ -60,8 +60,6 @@ fn try_main() -> error::Result {
         clap::ColorChoice::Auto => {}
     }
 
-    context::initialize!(cx);
-
     // FIXME: eagerly lower `-f`s to `--cfg`s here (or rather in `cli`?),
     // so we properly support them in `compiletest`+command
 
@@ -76,7 +74,7 @@ fn try_main() -> error::Result {
         toolchain: args.toolchain.as_deref(),
         b_opts: &args.b_opts,
         v_opts,
-        dbg_opts: &args.dbg_opts,
+        dbg_opts: args.dbg_opts,
     };
 
     // FIXME: Move the creation of this to the CLI once interface can process
@@ -87,6 +85,8 @@ fn try_main() -> error::Result {
         typ: args.crate_type,
         edition: args.edition,
     };
+
+    context::initialize!(cx, &opts);
 
     operate::perform(args.operation, krate, opts, cx)
 }

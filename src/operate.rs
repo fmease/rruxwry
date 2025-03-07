@@ -9,8 +9,8 @@
 
 use crate::{
     build::{
-        self, CompileOptions, DocOptions, Engine, ExternCrate, ImplyUnstableOptions, Options,
-        VerbatimOptions,
+        self, CompileOptions, DocOptions, EngineKind, EngineOptions, ExternCrate,
+        ImplyUnstableOptions, Options, VerbatimOptions,
     },
     context::Context,
     data::{Crate, CrateName, CrateType, DocBackend, Edition},
@@ -27,6 +27,10 @@ use std::{
     io::{self, Write as _},
     path::{Path, PathBuf},
 };
+
+// FIXME: `-@Q` may fail to report fake identities as set via `//@ rustc-env: RUST_BOOTSTRAP=…`.
+//        Should we consider that a bug or "out of scope"? We could theoretically gather directives
+//        under `-@Q` to obtain this piece of information.
 
 pub(crate) fn perform(
     op: Operation,
@@ -45,8 +49,8 @@ pub(crate) fn perform(
             let mut p = Painter::new(io::BufWriter::new(stdout), colorize);
 
             write!(p, "rustc: ")?;
-            match build::query_engine_version(&opts, Engine::rustc(())) {
-                Ok(version) => version.paint(build::identity(&opts), &mut p),
+            match cx.engine(EngineKind::Rustc) {
+                Ok(version) => version.paint(build::probe_identity(&opts), &mut p),
                 Err(error) => error.paint(&mut p),
             }?;
 
@@ -63,15 +67,15 @@ pub(crate) fn perform(
             let mut p = Painter::new(io::BufWriter::new(stdout), colorize);
 
             write!(p, "rustdoc: ")?;
-            match build::query_engine_version(&opts, Engine::Rustdoc(())) {
-                Ok(version) => version.paint(build::identity(&opts), &mut p),
+            match cx.engine(EngineKind::Rustdoc) {
+                Ok(version) => version.paint(build::probe_identity(&opts), &mut p),
                 Err(error) => error.paint(&mut p),
             }?;
 
             writeln!(p)?;
             write!(p, "  rustc: ")?;
-            match build::query_engine_version(&opts, Engine::rustc(())) {
-                Ok(version) => version.paint(build::identity(&opts), &mut p),
+            match cx.engine(EngineKind::Rustc) {
+                Ok(version) => version.paint(build::probe_identity(&opts), &mut p),
                 Err(error) => error.paint(&mut p),
             }?;
 
@@ -89,10 +93,10 @@ fn compile<'a>(
     c_opts: CompileOptions,
     cx: Context<'a>,
 ) -> Result {
-    let mut engine = Engine::rustc(c_opts);
+    let mut engine = EngineOptions::Rustc(c_opts);
     let (krate, run_v_opts) = match mode {
         CompileMode::Default => {
-            let krate = build_default(&engine, krate, &opts)?;
+            let krate = build_default(&engine, krate, &opts, cx)?;
             (krate, default())
         }
         // FIXME: _test
@@ -130,14 +134,19 @@ fn document<'a>(
 ) -> Result<()> {
     let (krate, opts) = match mode {
         DocMode::Default => {
-            let krate = build_default(&Engine::Rustdoc(d_opts), krate, &opts)?;
+            let krate = build_default(&EngineOptions::Rustdoc(d_opts), krate, &opts, cx)?;
             (krate, opts)
         }
-        DocMode::CrossCrate => return document_cross_crate(krate, &opts, d_opts, open),
+        DocMode::CrossCrate => return document_cross_crate(krate, &opts, d_opts, open, cx),
         // FIXME: _test
         DocMode::DirectiveDriven(flavor, _test) => {
-            let (krate, _) =
-                build_directive_driven(&mut Engine::Rustdoc(d_opts), krate, &mut opts, flavor, cx)?;
+            let (krate, _) = build_directive_driven(
+                &mut EngineOptions::Rustdoc(d_opts),
+                krate,
+                &mut opts,
+                flavor,
+                cx,
+            )?;
             (krate, opts)
         }
     };
@@ -164,9 +173,15 @@ fn document_cross_crate(
     opts: &Options<'_>,
     d_opts: DocOptions<'_>,
     open: Open,
+    cx: Context<'_>,
 ) -> Result<()> {
     let krate = Crate { typ: krate.typ.or(Some(CrateType("lib"))), ..krate };
-    let krate = build_default(&Engine::rustc(CompileOptions { check_only: false }), krate, opts)?;
+    let krate = build_default(
+        &EngineOptions::Rustc(CompileOptions { check_only: false }),
+        krate,
+        opts,
+        cx,
+    )?;
 
     // FIXME: This `unwrap` is obviously reachable (e.g., on `rrc '%$?'`)
     let crate_name: CrateName<Cow<'_, _>> = krate.name.map_or_else(
@@ -193,7 +208,14 @@ fn document_cross_crate(
     let krate =
         Crate { path: &root_crate_path, name: Some(root_crate_name.as_ref()), typ: None, ..krate };
 
-    build::perform(&Engine::Rustdoc(d_opts), krate, deps, opts, ImplyUnstableOptions::Yes)?;
+    build::perform(
+        &EngineOptions::Rustdoc(d_opts),
+        krate,
+        deps,
+        opts,
+        ImplyUnstableOptions::Yes,
+        cx,
+    )?;
 
     // FIXME: Move this out of this function into the caller `document` to further simplify things
     match open {
@@ -203,17 +225,18 @@ fn document_cross_crate(
 }
 
 fn build_default<'a>(
-    engine: &Engine<'_>,
+    e_opts: &EngineOptions<'_>,
     krate: Crate<'a>,
     opts: &Options<'_>,
+    cx: Context<'_>,
 ) -> Result<Crate<'a>> {
     let krate = Crate { edition: krate.edition.or(Some(Edition::LATEST_STABLE)), ..krate };
-    build::perform(engine, krate, prelude(krate.typ), opts, ImplyUnstableOptions::Yes)?;
+    build::perform(e_opts, krate, prelude(krate.typ), opts, ImplyUnstableOptions::Yes, cx)?;
     Ok(krate)
 }
 
 fn build_directive_driven<'a>(
-    engine: &mut Engine<'a>,
+    e_opts: &mut EngineOptions<'a>,
     krate: Crate<'a>,
     opts: &mut Options<'a>,
     flavor: directive::Flavor,
@@ -253,7 +276,7 @@ fn build_directive_driven<'a>(
 
     let directives = directive::gather(
         Spanned::sham(path),
-        scope(engine),
+        scope(e_opts),
         directive::Role::Principal,
         flavor,
         revision,
@@ -270,7 +293,7 @@ fn build_directive_driven<'a>(
             compile_auxiliary(
                 dep,
                 &aux_base_path,
-                engine,
+                e_opts,
                 opts.clone(),
                 directives.build_aux_docs,
                 flavor,
@@ -286,12 +309,12 @@ fn build_directive_driven<'a>(
     };
 
     opts.v_opts.extend(directives.v_opts);
-    match engine {
-        Engine::Rustc(..) => {} // rustc-exclusive (verbatim) flags is not a thing.
-        Engine::Rustdoc(d_opts) => d_opts.v_opts.extend(directives.v_d_opts),
+    match e_opts {
+        EngineOptions::Rustc(..) => {} // rustc-exclusive (verbatim) flags is not a thing.
+        EngineOptions::Rustdoc(d_opts) => d_opts.v_opts.extend(directives.v_d_opts),
     }
 
-    build::perform(engine, krate, &deps, opts, ImplyUnstableOptions::No)?;
+    build::perform(e_opts, krate, &deps, opts, ImplyUnstableOptions::No, cx)?;
     Ok((krate, directives.run_v_opts))
 }
 
@@ -300,7 +323,7 @@ fn build_directive_driven<'a>(
 fn compile_auxiliary<'a>(
     extern_crate: &ExternCrate<'a>,
     base_path: &Path,
-    engine: &Engine<'_>,
+    e_opts: &EngineOptions<'_>,
     // FIXME: Do we actually want to pass along *all* of these opts?
     //        Arguably some of them belong to the root crate only (e.g. crate name).
     //        On top of that, the status quo is inconsistent because
@@ -325,7 +348,7 @@ fn compile_auxiliary<'a>(
 
     let directives = directive::gather(
         path.as_deref(),
-        scope(engine),
+        scope(e_opts),
         directive::Role::Auxiliary,
         flavor,
         opts.b_opts.revision.as_deref(),
@@ -345,30 +368,34 @@ fn compile_auxiliary<'a>(
     let deps = prelude(typ);
 
     build::perform(
-        match engine {
+        match e_opts {
             // FIXME: Does this actually work as expected wrt. to check-only?
             //        Does this lead to all crates in the dependency graph to
             //        get checked-only and everything working out (linking correctly etc)?
             //        I suspect is doesn't because we need to s%/rlib/rmeta/
-            Engine::Rustc(..) => engine,
+            EngineOptions::Rustc(..) => e_opts,
             // FIXME: Wait, would check_only=true also work and be better?
-            Engine::Rustdoc(_) => const { &Engine::rustc(CompileOptions { check_only: false }) },
+            EngineOptions::Rustdoc(_) => {
+                const { &EngineOptions::Rustc(CompileOptions { check_only: false }) }
+            }
         },
         krate,
         deps,
         &opts,
         ImplyUnstableOptions::No,
+        cx,
     )?;
 
     // FIXME: Is this how `//@ build-aux-docs` is supposed to work?
-    if build_aux_docs && let Engine::Rustdoc(d_opts) = engine {
+    if build_aux_docs && let EngineOptions::Rustdoc(d_opts) = e_opts {
         build::perform(
             // FIXME: Do we actually want to forward these doc opts from the parent crate??
-            &Engine::Rustdoc(d_opts.clone()),
+            &EngineOptions::Rustdoc(d_opts.clone()),
             krate,
             deps,
             &opts,
             ImplyUnstableOptions::No,
+            cx,
         )?;
     }
 
@@ -395,12 +422,12 @@ fn compile_auxiliary<'a>(
     })
 }
 
-fn scope(engine: &Engine<'_>) -> directive::Scope {
-    match engine {
-        Engine::Rustc(..) => directive::Scope::Base,
+fn scope(e_opts: &EngineOptions<'_>) -> directive::Scope {
+    match e_opts {
+        EngineOptions::Rustc(..) => directive::Scope::Base,
         // FIXME: Do we actually want to treat !`-j` as `rustdoc/` (Scope::HtmlDocCk)
         //        instead of `rustdoc-ui/` ("Scope::Rustdoc")
-        Engine::Rustdoc(d_opts) => match d_opts.backend {
+        EngineOptions::Rustdoc(d_opts) => match d_opts.backend {
             DocBackend::Html => directive::Scope::HtmlDocCk,
             DocBackend::Json => directive::Scope::JsonDocCk,
         },
