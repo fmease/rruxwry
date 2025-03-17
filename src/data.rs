@@ -1,4 +1,4 @@
-use crate::{diagnostic::fmt, utility::paint::Painter};
+use crate::{build::EngineKind, context::Context, diagnostic::fmt, utility::paint::Painter};
 use anstyle::{AnsiColor, Effects};
 use std::{
     borrow::Cow,
@@ -8,22 +8,90 @@ use std::{
     path::Path,
 };
 
+#[cfg(test)]
+mod test;
+
+pub(crate) enum ExtEdition<'a> {
+    EngineDefault,
+    LatestStable,
+    LatestUnstable,
+    Latest,
+    Fixed(Edition<'a>),
+}
+
+impl<'a> ExtEdition<'a> {
+    pub(crate) fn resolve(self, engine: EngineKind, cx: Context<'_>) -> Option<Edition<'a>> {
+        match self {
+            // FIXME: Return `None` for older engines where editions/epochs don't exist yet!
+            Self::EngineDefault => Some(Edition::Rust2015),
+            Self::LatestStable => Edition::latest_stable(engine, cx),
+            // FIXME: Implement.
+            Self::LatestUnstable | Self::Latest => None,
+            Self::Fixed(edition) => Some(edition),
+        }
+    }
+}
+
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum Edition<'a> {
     Rust2015,
     Rust2018,
+    // FIXME: Genesis: https://github.com/rust-lang/rust/pull/79576
     Rust2021,
     Rust2024,
-    // For forward compatibility with future versions of Rust.
-    // I don't want to assume that rruxwry gets *so* well maintained that
-    // it can keep pace with the development of Rust.
+    // <rust-lang/rust#137606>
+    Future,
+    // For forward compatibility with future versions of Rust. I don't want to assume that
+    // rruxwry gets *so* well maintained that it can keep pace with the development of Rust.
     Unknown(&'a str),
 }
 
 impl<'a> Edition<'a> {
-    pub(crate) const RUSTC_DEFAULT: Self = Self::Rust2015;
-    pub(crate) const LATEST_STABLE: Self = Self::Rust2024;
-    pub(crate) const BLEEDING_EDGE: Self = Self::LATEST_STABLE;
+    // FIXME: These dates and versions have been manually verified *with rustc*.
+    //        It's possible that there are differences to rustdoc. Audit!
+    fn latest_stable(engine: EngineKind, cx: Context<'_>) -> Option<Self> {
+        // FIXME: Should we warn on failure?
+        let version = cx.engine(engine).ok()?;
+        match version.channel {
+            Channel::Stable => map! { V(version.triple)
+                Self::Rust2024(1,85,0) // branched: 2025-01-03
+                Self::Rust2021(1,56,0) // branched: 2021-09-03
+                Self::Rust2018(1,31,0) // branched: 2018-10-19
+                // <rust-lang/rust#50080>
+                // Before that, a stable edition flag didn't exist.
+                Self::Rust2015(1,27,0) // branched: 2018-05-04
+            },
+            Channel::Beta { prerelease: _ } => None, // FIXME: Unimplemented.
+            Channel::Nightly | Channel::Dev => match &version.commit {
+                Some(commit) => {
+                    map! { D(commit.date)
+                        Self::Rust2024(2024-11-24) // base: 1.85.0
+                        Self::Rust2021(2021-08-31) // base: 1.56.0
+                        // <rust-lang/rust#54057>
+                        // Note: Back then, unstable editions didn't require you to pass
+                        // `-Zunstable-options`. Being on the nightly was sufficient.
+                        Self::Rust2018(2018-09-09) // base: 1.30.0 (branched: 2018-09-07)
+                        // <rust-lang/rust#50080> stabilized `-Zedition` as `--edition`,
+                        // turn value `2015` stable and kept `2018` unstable.
+                        Self::Rust2015(2018-04-21) // base: 1.27.0
+                    }
+                }
+                _ => {
+                    // FIXME: If there isn't commit info we need to go by date.
+                    //        it's 50/50 whether it coincides with stable_release or
+                    //        not since it could be a nightly from before the stabilization PR
+                    //        so check against ONE_PATCH_LESS(stable_release)
+                    // FIXME: Figure out if we can figure this out procedually from other data
+                    map! { V(version.triple)
+                        Self::Rust2024(1,86,0)
+                        Self::Rust2021(1,57,0)
+                        Self::Rust2018(1,31,0)
+                        Self::Rust2015(1,28,0)
+                    }
+                }
+            },
+        }
+    }
 
     pub(crate) const fn to_str(self) -> &'a str {
         match self {
@@ -31,8 +99,16 @@ impl<'a> Edition<'a> {
             Self::Rust2018 => "2018",
             Self::Rust2021 => "2021",
             Self::Rust2024 => "2024",
+            Self::Future => "future",
             Self::Unknown(edition) => edition,
         }
+    }
+}
+
+pub(crate) macro map($makro:ident($scrutinee:expr) $( $($result:ident)::+($( $data:tt )*) )*) {
+    match () {
+        $( _ if $scrutinee >= $makro!($( $data )*) => Some($( $result )::+), )*
+        _ => None,
     }
 }
 
@@ -138,19 +214,17 @@ pub(crate) enum Identity {
 }
 
 #[derive(Clone, Copy)]
-pub(crate) struct Crate<'a> {
+pub(crate) struct Crate<'a, E = Edition<'a>> {
     pub(crate) path: &'a Path,
     pub(crate) name: Option<CrateName<&'a str>>,
     pub(crate) typ: Option<CrateType>,
-    pub(crate) edition: Option<Edition<'a>>,
+    pub(crate) edition: Option<E>,
 }
 
 #[derive(Clone)] // FIXME
 #[cfg_attr(test, derive(PartialEq, Eq, Debug))]
 pub(crate) struct Version<S: AsRef<str>> {
-    pub(crate) major: u16,
-    pub(crate) minor: u16,
-    pub(crate) patch: u16,
+    pub(crate) triple: VersionTriple,
     pub(crate) channel: Channel,
     pub(crate) commit: Option<Commit<S>>,
     /// Bootstrap calls this the "description" but it's actually a proper part of the version!
@@ -168,13 +242,16 @@ impl<'src> Version<&'src str> {
             (parts.next().filter(|part| !part.is_empty())?, parts.next())
         };
 
-        let mut parts = version.split('.');
-        let major = parts.next().unwrap().parse().ok()?; // unwrap: `split` never returns an empty iterator
-        let minor = parts.next()?.parse().ok()?;
-        let patch = parts.next()?.parse().ok()?;
-        if parts.next().is_some() {
-            return None;
-        }
+        let triple = {
+            let mut parts = version.split('.');
+            let major = parts.next().unwrap().parse().ok()?; // unwrap: `split` never returns an empty iterator
+            let minor = parts.next()?.parse().ok()?;
+            let patch = parts.next()?.parse().ok()?;
+            if parts.next().is_some() {
+                return None;
+            }
+            VersionTriple { major, minor, patch }
+        };
 
         let channel = match channel {
             None => Channel::Stable,
@@ -224,7 +301,7 @@ impl<'src> Version<&'src str> {
             Some(source) => source.strip_prefix('(')?.strip_suffix(')')?,
         };
 
-        Some(Self { major, minor, patch, channel, commit, tag })
+        Some(Self { triple, channel, commit, tag })
     }
 
     pub(crate) fn into_owned(self) -> Version<String> {
@@ -239,14 +316,15 @@ impl<S: AsRef<str>> Version<S> {
         p: &mut Painter<impl io::Write>,
     ) -> io::Result<()> {
         {
+            let VersionTriple { major, minor, patch } = self.triple;
             let (color, highlight) = match self.channel {
                 Channel::Stable | Channel::Beta { .. } => (AnsiColor::BrightWhite, Effects::BOLD),
                 Channel::Nightly | Channel::Dev => (AnsiColor::BrightBlack, Effects::new()),
             };
             p.set(color)?;
-            write!(p, "{}.", self.major)?;
-            p.with(highlight, fmt!("{}", self.minor))?;
-            write!(p, ".{} ", self.patch)?;
+            write!(p, "{major}.")?;
+            p.with(highlight, fmt!("{minor}"))?;
+            write!(p, ".{patch} ")?;
             p.unset()?;
         }
 
@@ -275,6 +353,18 @@ impl<S: AsRef<str>> Version<S> {
     }
 }
 
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[cfg_attr(test, derive(Debug))]
+pub(crate) struct VersionTriple {
+    pub(crate) major: u16,
+    pub(crate) minor: u16,
+    pub(crate) patch: u16,
+}
+
+pub(crate) macro V($major:expr, $minor:expr, $patch:expr) {
+    VersionTriple { major: $major, minor: $minor, patch: $patch }
+}
+
 #[derive(Clone, Copy)]
 #[cfg_attr(test, derive(PartialEq, Eq, Debug))]
 pub(crate) enum Channel {
@@ -284,6 +374,7 @@ pub(crate) enum Channel {
     Nightly,
     Dev,
 }
+
 impl Channel {
     /// Whether unstable features and options are allowed on this channel.
     pub(crate) fn allows_unstable(self) -> bool {
@@ -350,215 +441,23 @@ impl Commit<&str> {
 }
 
 #[derive(Clone)] // FIXME
-#[cfg_attr(test, derive(PartialEq, Eq, Debug))]
+#[derive(PartialEq, Eq, PartialOrd, Ord)]
+#[cfg_attr(test, derive(Debug))]
 pub(crate) struct Date {
     pub(crate) year: u16,
     pub(crate) month: NonZero<u8>,
     pub(crate) day: NonZero<u8>,
 }
 
+pub(crate) macro D($year:literal-$month:literal-$day:literal) {
+    const {
+        #[allow(clippy::zero_prefixed_literal)]
+        Date { year: $year, month: NonZero::new($month).unwrap(), day: NonZero::new($day).unwrap() }
+    }
+}
+
 impl Date {
     fn paint(&self, p: &mut Painter<impl io::Write>) -> io::Result<()> {
         write!(p, "{:04}-{:02}-{:02}", self.year, self.month, self.day)
     }
-}
-
-#[test]
-fn version_empty() {
-    assert_eq!(Version::parse(""), None);
-}
-
-#[test]
-fn version_no_explicit_channel() {
-    assert_eq!(
-        Version::parse("1.2.3"),
-        Some(Version {
-            major: 1,
-            minor: 2,
-            patch: 3,
-            channel: Channel::Stable,
-            commit: None,
-            tag: "",
-        })
-    );
-}
-
-#[test]
-fn version_insufficent_numeric_components() {
-    assert_eq!(Version::parse("1"), None);
-    assert_eq!(Version::parse("1.0"), None);
-}
-
-#[test]
-fn version_too_many_numeric_components() {
-    assert_eq!(Version::parse("1.0.0.0"), None);
-}
-
-#[test]
-fn version_numeric_components_trailing_dot() {
-    assert_eq!(Version::parse("1."), None);
-    assert_eq!(Version::parse("1.0."), None);
-    assert_eq!(Version::parse("1.0.0."), None);
-}
-
-#[test]
-fn version_channel() {
-    assert_eq!(
-        Version::parse("1.20.3-beta"),
-        Some(Version {
-            major: 1,
-            minor: 20,
-            patch: 3,
-            channel: Channel::Beta { prerelease: None },
-            commit: None,
-            tag: "",
-        })
-    );
-    assert_eq!(
-        Version::parse("1.20.3-nightly"),
-        Some(Version {
-            major: 1,
-            minor: 20,
-            patch: 3,
-            channel: Channel::Nightly,
-            commit: None,
-            tag: "",
-        })
-    );
-    assert_eq!(
-        Version::parse("1.20.3-dev"),
-        Some(Version {
-            major: 1,
-            minor: 20,
-            patch: 3,
-            channel: Channel::Dev,
-            commit: None,
-            tag: "",
-        })
-    );
-}
-
-#[test]
-fn version_empty_channel() {
-    assert_eq!(Version::parse("1.0.0-"), None);
-}
-
-#[test]
-fn version_beta_channel_prerelease() {
-    assert_eq!(
-        Version::parse("1.2.3-beta.144"),
-        Some(Version {
-            major: 1,
-            minor: 2,
-            patch: 3,
-            channel: Channel::Beta { prerelease: Some(144) },
-            commit: None,
-            tag: "",
-        })
-    );
-}
-
-#[test]
-fn version_commit_info() {
-    assert_eq!(
-        Version::parse("0.0.0-dev (123456789 2000-01-01)"),
-        Some(Version {
-            major: 0,
-            minor: 0,
-            patch: 0,
-            channel: Channel::Dev,
-            commit: Some(Commit {
-                short_sha: "123456789",
-                date: Date {
-                    year: 2000,
-                    month: NonZero::new(1).unwrap(),
-                    day: NonZero::new(1).unwrap()
-                }
-            }),
-            tag: "",
-        })
-    );
-}
-
-#[test]
-fn version_commit_info_no_channel() {
-    assert_eq!(
-        Version::parse("999.999.999 (000000000 1970-01-01)"),
-        Some(Version {
-            major: 999,
-            minor: 999,
-            patch: 999,
-            channel: Channel::Stable,
-            commit: Some(Commit {
-                short_sha: "000000000",
-                date: Date {
-                    year: 1970,
-                    month: NonZero::new(1).unwrap(),
-                    day: NonZero::new(1).unwrap()
-                }
-            }),
-            tag: "",
-        })
-    );
-}
-
-#[test]
-fn version_tag() {
-    assert_eq!(
-        Version::parse("0.0.0 (000000000 0000-01-01) (THIS IS A TAG)"),
-        Some(Version {
-            major: 0,
-            minor: 0,
-            patch: 0,
-            channel: Channel::Stable,
-            commit: Some(Commit {
-                short_sha: "000000000",
-                date: Date {
-                    year: 0,
-                    month: NonZero::new(1).unwrap(),
-                    day: NonZero::new(1).unwrap()
-                }
-            }),
-            tag: "THIS IS A TAG",
-        })
-    );
-}
-
-#[test]
-fn version_trailing_whitespace() {
-    assert_eq!(Version::parse(" "), None);
-    assert_eq!(Version::parse("0.0.0 "), None);
-    assert_eq!(Version::parse("0.0.0-dev "), None);
-    assert_eq!(Version::parse("0.0.0-dev (000000000 0000-01-01) "), None);
-    assert_eq!(Version::parse("0.0.0-dev (000000000 0000-01-01) (TAG) "), None);
-}
-
-#[test]
-fn version_double_whitespace() {
-    assert_eq!(Version::parse("0.0.0-dev  (000000000 0000-01-01)"), None);
-    assert_eq!(Version::parse("0.0.0-dev (000000000  0000-01-01)"), None);
-}
-
-// Nobody says the tag can't be multiline, right?
-// FIXME: Double-check bootstrap.
-#[test]
-fn version_multiline_tag() {
-    assert_eq!(
-        Version::parse("0.0.0 (abcdef 0000-01-01) (this\nis\nspanning\nacross\nlines)"),
-        Some(Version {
-            major: 0,
-            minor: 0,
-            patch: 0,
-            channel: Channel::Stable,
-            commit: Some(Commit {
-                short_sha: "abcdef",
-                date: Date {
-                    year: 0,
-                    month: NonZero::new(1).unwrap(),
-                    day: NonZero::new(1).unwrap()
-                }
-            }),
-            tag: "this\nis\nspanning\nacross\nlines"
-        })
-    );
 }

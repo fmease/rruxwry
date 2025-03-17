@@ -2,7 +2,7 @@
 
 use crate::{
     build::{BuildOptions, CompileOptions, DebugOptions, DocOptions},
-    data::{CrateName, CrateType, DocBackend, Edition, Identity},
+    data::{CrateName, CrateType, DocBackend, Edition, ExtEdition, Identity},
     directive::Flavor,
     operate::{Bless, CompileMode, DocMode, Open, Operation, Run, Test},
     utility::{Conjunction, ListingExt as _, default, parse},
@@ -369,7 +369,7 @@ pub(crate) fn arguments() -> Arguments {
             .map(|typ: String| CrateType::parse_cli_style(typ.leak())),
         edition: matches
             .remove_one(id::EDITION)
-            .map(|edition: String| Edition::parse_cli_style(edition.leak())),
+            .map(|edition: String| ExtEdition::parse_cli_style(edition.leak())),
         b_opts: BuildOptions {
             cfgs: matches.remove_many(id::CFGS).map(Iterator::collect).unwrap_or_default(),
             revision: matches.remove_one(id::REVISION),
@@ -404,25 +404,27 @@ pub(crate) struct Arguments {
     pub(crate) operation: Operation,
     pub(crate) crate_name: Option<CrateName<String>>,
     pub(crate) crate_type: Option<CrateType>,
-    pub(crate) edition: Option<Edition<'static>>,
+    pub(crate) edition: Option<ExtEdition<'static>>,
     pub(crate) b_opts: BuildOptions,
     pub(crate) dbg_opts: DebugOptions,
     pub(crate) color: clap::ColorChoice,
 }
 
-impl Edition<'static> {
-    // FIXME: Take <'a> &'a str string once clap is thrown out.
+impl ExtEdition<'static> {
+    // FIXME: Take `<'a> &'a str` once clap is thrown out.
     fn parse_cli_style(source: &'static str) -> Self {
-        match source {
-            "d" => Self::RUSTC_DEFAULT,
-            "s" => Self::LATEST_STABLE,
-            "e" => Self::BLEEDING_EDGE,
-            "15" | "2015" => Self::Rust2015,
-            "18" | "2018" => Self::Rust2018,
-            "21" | "2021" => Self::Rust2021,
-            "24" | "2024" => Self::Rust2024,
-            _ => Self::Unknown(source),
-        }
+        Self::Fixed(match source {
+            "d" => return Self::EngineDefault,
+            "s" => return Self::LatestStable,
+            "u" => return Self::LatestUnstable,
+            "l" => return Self::Latest,
+            "15" | "2015" => Edition::Rust2015,
+            "18" | "2018" => Edition::Rust2018,
+            "21" | "2021" => Edition::Rust2021,
+            "24" | "2024" => Edition::Rust2024,
+            "f" | "future" => Edition::Future,
+            _ => Edition::Unknown(source),
+        })
     }
 }
 

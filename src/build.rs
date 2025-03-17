@@ -12,8 +12,10 @@
 
 use crate::{
     context::Context,
-    data::{Crate, CrateName, CrateType, DocBackend, Identity, Version},
-    diagnostic::{self, Paint, debug},
+    data::{Channel, Crate, CrateName, CrateType, D, DocBackend, Identity, Version, map},
+    diagnostic::{self, Paint, debug, error},
+    error::Result,
+    fmt,
     source::Spanned,
     utility::paint::Painter,
 };
@@ -36,11 +38,11 @@ pub(crate) fn perform(
     opts: &Options<'_>,
     imply_u_opts: ImplyUnstableOptions,
     cx: Context<'_>,
-) -> io::Result<()> {
+) -> Result<()> {
     let engine = e_opts.kind();
 
     let mut cmd = Command::new(engine.name());
-    configure_early(&mut cmd, e_opts, krate, opts);
+    configure_early(&mut cmd, e_opts, krate, opts, cx)?;
     configure_late(&mut cmd, engine, extern_crates, opts);
 
     if let ImplyUnstableOptions::Yes = imply_u_opts
@@ -54,7 +56,9 @@ pub(crate) fn perform(
         cmd.arg("-Zunstable-options");
     }
 
-    execute(cmd, opts.dbg_opts)
+    execute(cmd, opts.dbg_opts)?;
+
+    Ok(())
 }
 
 pub(crate) fn query_engine_version(
@@ -104,10 +108,13 @@ pub(crate) fn query_engine_version(
             // FIXME: Admittedly, these checks could be stricter by comparing the "variables"
             // (toolchain, component, …). In practice however it shouldn't really matter.
 
-            if let Some(line) = line.strip_prefix("toolchain '")
-                && line.ends_with("' is not installable")
-            {
-                return Err(Error::UnknownToolchain);
+            if let Some(line) = line.strip_prefix("toolchain '") {
+                if line.ends_with("' is not installable") {
+                    return Err(Error::UnknownToolchain);
+                }
+                if line.ends_with("' is not installed") {
+                    return Err(Error::ToolchainNotInstalled);
+                }
             }
 
             if let Some((component, toolchain)) =
@@ -141,10 +148,10 @@ pub(crate) fn query_engine_version(
     }
 }
 
-#[derive(Clone)] // FIXME
-#[derive(Debug)]
+#[derive(Clone, Copy)]
 pub(crate) enum EngineVersionError {
     UnknownToolchain,
+    ToolchainNotInstalled,
     UnavailableComponent,
     Unknown,
     Malformed,
@@ -155,30 +162,32 @@ impl EngineVersionError {
     // FIXME: Figure out how much into detail we want go and how to best word these.
     //        E.g., do we want to dump underlying IO errors and parts of stderr output
     //        as emitted by `--version`?
-    pub(crate) fn paint(self, p: &mut Painter<impl io::Write>) -> io::Result<()> {
-        p.set(AnsiColor::Red)?;
-        write!(p, "{{ ")?;
+    fn short_desc(self) -> &'static str {
         match self {
-            Self::UnknownToolchain => write!(p, "unknown toolchain"),
-            Self::UnavailableComponent => write!(p, "component unavailable"),
-            Self::Unknown => write!(p, "unknown"),
-            Self::Malformed => write!(p, "malformed"),
-            Self::Other => write!(p, "error"),
-        }?;
-        write!(p, " }}")?;
-        p.unset()
+            Self::UnknownToolchain => "toolchain unknown",
+            Self::ToolchainNotInstalled => "toolchain not installed",
+            Self::UnavailableComponent => "component unavailable",
+            Self::Unknown => "unknown",
+            Self::Malformed => "malformed",
+            Self::Other => "error",
+        }
+    }
+
+    pub(crate) fn paint(self, p: &mut Painter<impl io::Write>) -> io::Result<()> {
+        p.with(AnsiColor::Red, |p| write!(p, "{{ {} }}", self.short_desc()))
     }
 }
 
 pub(crate) fn query_crate_name(
     krate: Crate<'_>,
     opts: &Options<'_>,
-) -> io::Result<CrateName<String>> {
+    cx: Context<'_>,
+) -> Result<CrateName<String>> {
     let engine = EngineOptions::Rustc(CompileOptions { check_only: false });
 
     let mut cmd = Command::new(engine.kind().name());
 
-    configure_early(&mut cmd, &engine, krate, opts);
+    configure_early(&mut cmd, &engine, krate, opts, cx)?;
 
     cmd.arg("--print=crate-name");
 
@@ -219,7 +228,8 @@ fn configure_early(
     e_opts: &EngineOptions<'_>,
     krate: Crate<'_>,
     opts: &Options<'_>,
-) {
+    cx: Context<'_>,
+) -> Result<()> {
     // Must come first!
     configure_toolchain(cmd, opts.toolchain);
 
@@ -230,6 +240,8 @@ fn configure_early(
         cmd.arg(name.as_str());
     }
 
+    // FIXME: IINM older versions of rustdoc don't support this flag. Do something smarter
+    //        in that case or at least emit a proper error diagnostic.
     if let Some(CrateType(typ)) = krate.typ {
         cmd.arg("--crate-type");
         cmd.arg(typ);
@@ -238,8 +250,68 @@ fn configure_early(
     // Regarding crate name querying, the edition is vital. After all,
     // rustc needs to parse the crate root to find `#![crate_name]`.
     if let Some(edition) = krate.edition {
-        cmd.arg("--edition");
-        cmd.arg(edition.to_str());
+        let version = cx.engine(e_opts.kind()).map_err(|error| {
+            let diag = self::error(fmt!(
+                "failed to retrieve the version of the underyling `{}`",
+                e_opts.kind().name()
+            ));
+            let diag = match error {
+                EngineVersionError::Other => diag,
+                // FIXME: Using the short description is a bit awkward imo.
+                _ => diag.note(fmt!("caused by: {}", error.short_desc())),
+            };
+            diag.note(fmt!(
+                "required in order to correctly forward the requested edition `{}`",
+                edition.to_str()
+            ))
+            .finish()
+        })?;
+
+        // FIXME: These dates and versions have been manually verified *with rustc*.
+        //        It's possible that there are differences to rustdoc. Audit!
+        let syntax = match version.channel {
+            // FIXME: Unimplemented!
+            Channel::Stable | Channel::Beta { prerelease: _ } => Some(Syntax::Edition),
+            Channel::Nightly | Channel::Dev => match version.commit {
+                Some(commit) => map! { D(commit.date)
+                    // <rust-lang/rust#50080> was merged on 2018-04-21T07:42Z.
+                    // Thus it would've likely made it into *nightly-2018-04-22(2018-04-21).
+                    // However, since some tools didn't build this nightly doesn't exist.
+                    // In fact, nightly-2018-04-{20..26} don't exist, nightly-2018-04-27 is
+                    // the first to feature `--edition`.
+                    // Regardless, I like this more precise date better.
+                    Syntax::Edition(2018-04-21)
+                    // <rust-lang/rust#49035>
+                    Syntax::ZeeEdition(2018-03-23)
+                    // <rust-lang/rust#48014>
+                    Syntax::ZeeEpoch(2018-02-07)
+                },
+                None => Some(Syntax::Edition), // FIXME: Unimplemented!
+            },
+        };
+
+        let syntax = syntax.ok_or_else(|| {
+            self::error(fmt!(
+                "the version of the underyling `{}` does not support editions",
+                e_opts.kind().name()
+            ))
+            .finish()
+        })?;
+
+        match syntax {
+            Syntax::Edition => {
+                cmd.arg("--edition");
+                cmd.arg(edition.to_str())
+            }
+            Syntax::ZeeEdition => cmd.arg(format!("-Zedition={}", edition.to_str())),
+            Syntax::ZeeEpoch => cmd.arg(format!("-Zepoch={}", edition.to_str())),
+        };
+
+        enum Syntax {
+            Edition,
+            ZeeEdition,
+            ZeeEpoch,
+        }
     }
 
     // Regarding crate name querying, let's better honor this option
@@ -247,7 +319,14 @@ fn configure_early(
     if let Some(identity) = opts.b_opts.identity {
         cmd.env("RUSTC_BOOTSTRAP", match identity {
             Identity::True => "0",
+            // FIXME: Bail out with an error if we know that
+            //        that engine version doesn't support this value.
+            //        And warn in cases where it's not deducible
             Identity::Stable => "-1",
+            // FIXME: In older versions, you had to set this env var
+            //        to a "secret key" that comprised of a hash of
+            //        several "bootstrap variables". Either support that
+            //        smh. or throw an "unsupported" error.
             Identity::Nightly => "1",
         });
     }
@@ -258,6 +337,8 @@ fn configure_early(
     if let Some(opts) = e_opts.kind().env_opts() {
         cmd.args(opts);
     }
+
+    Ok(())
 }
 
 fn configure_toolchain(cmd: &mut Command, toolchain: Option<&OsStr>) {
@@ -335,10 +416,12 @@ fn configure_late(
     }
 
     if opts.b_opts.next_solver {
+        // FIXME: (low prio) Lower to `-Ztrait-solver=next` in older versions.
         cmd.arg("-Znext-solver");
     }
 
     if opts.b_opts.internals {
+        // FIXME: Lower to `-Zverbose` in older versions.
         cmd.arg("-Zverbose-internals");
     }
 

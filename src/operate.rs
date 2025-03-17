@@ -13,7 +13,7 @@ use crate::{
         ImplyUnstableOptions, Options, VerbatimOptions,
     },
     context::Context,
-    data::{Crate, CrateName, CrateType, DocBackend, Edition},
+    data::{Crate, CrateName, CrateType, DocBackend, Edition, ExtEdition},
     diagnostic::{error, fmt, warn},
     directive,
     error::Result,
@@ -34,7 +34,7 @@ use std::{
 
 pub(crate) fn perform(
     op: Operation,
-    krate: Crate<'_>,
+    krate: Crate<'_, ExtEdition<'_>>,
     opts: Options<'_>,
     cx: Context<'_>,
 ) -> Result<()> {
@@ -88,7 +88,7 @@ pub(crate) fn perform(
 fn compile<'a>(
     mode: CompileMode,
     run: Run,
-    krate: Crate<'a>,
+    krate: Crate<'a, ExtEdition<'a>>,
     mut opts: Options<'a>,
     c_opts: CompileOptions,
     cx: Context<'a>,
@@ -105,14 +105,19 @@ fn compile<'a>(
         }
     };
     match run {
-        Run::Yes => self::run(krate, &opts, &run_v_opts),
+        Run::Yes => self::run(krate, &opts, &run_v_opts, cx),
         Run::No => Ok(()),
     }
 }
 
-fn run(krate: Crate<'_>, opts: &Options<'_>, run_v_opts: &VerbatimOptions<'_>) -> Result {
+fn run(
+    krate: Crate<'_>,
+    opts: &Options<'_>,
+    run_v_opts: &VerbatimOptions<'_>,
+    cx: Context<'_>,
+) -> Result {
     // FIXME: Explainer
-    let crate_name = build::query_crate_name(krate, opts)?;
+    let crate_name = build::query_crate_name(krate, opts, cx)?;
     let mut path: PathBuf = [".", crate_name.as_str()].into_iter().collect();
     path.set_extension(std::env::consts::EXE_EXTENSION);
 
@@ -127,7 +132,7 @@ fn run(krate: Crate<'_>, opts: &Options<'_>, run_v_opts: &VerbatimOptions<'_>) -
 fn document<'a>(
     mode: DocMode,
     open: Open,
-    krate: Crate<'a>,
+    krate: Crate<'a, ExtEdition<'a>>,
     mut opts: Options<'a>,
     d_opts: DocOptions<'a>,
     cx: Context<'a>,
@@ -151,13 +156,13 @@ fn document<'a>(
         }
     };
     match open {
-        Open::Yes => self::open(krate, &opts),
+        Open::Yes => self::open(krate, &opts, cx),
         Open::No => Ok(()),
     }
 }
 
-fn open(krate: Crate<'_>, opts: &Options<'_>) -> Result<()> {
-    let crate_name = build::query_crate_name(krate, opts)?;
+fn open(krate: Crate<'_>, opts: &Options<'_>, cx: Context<'_>) -> Result<()> {
+    let crate_name = build::query_crate_name(krate, opts, cx)?;
     let path = format!("./doc/{crate_name}/index.html");
 
     build::open(Path::new(&path), opts.dbg_opts).map_err(|error| {
@@ -169,7 +174,7 @@ fn open(krate: Crate<'_>, opts: &Options<'_>) -> Result<()> {
 }
 
 fn document_cross_crate(
-    krate: Crate<'_>,
+    krate: Crate<'_, ExtEdition<'_>>,
     opts: &Options<'_>,
     d_opts: DocOptions<'_>,
     open: Open,
@@ -219,25 +224,32 @@ fn document_cross_crate(
 
     // FIXME: Move this out of this function into the caller `document` to further simplify things
     match open {
-        Open::Yes => self::open(krate, opts),
+        Open::Yes => self::open(krate, opts, cx),
         Open::No => Ok(()),
     }
 }
 
 fn build_default<'a>(
     e_opts: &EngineOptions<'_>,
-    krate: Crate<'a>,
+    krate: Crate<'a, ExtEdition<'a>>,
     opts: &Options<'_>,
     cx: Context<'_>,
 ) -> Result<Crate<'a>> {
-    let krate = Crate { edition: krate.edition.or(Some(Edition::LATEST_STABLE)), ..krate };
+    // FIXME: Only querying the lastest stable edition of this (the primary) engine
+    //        might not be correct for engine==rustdoc since Op::Doc may invoke
+    //        rustc too and since here are nightly (& stable?) releases where rustc
+    //        and rustdoc differ wrt. to their stable edition IINM.
+    //
+    //        Figure out if there are such releases and if so how to best address it.
+    let edition = krate.edition.unwrap_or(ExtEdition::LatestStable).resolve(e_opts.kind(), cx);
+    let krate = Crate { edition, ..krate };
     build::perform(e_opts, krate, prelude(krate.typ), opts, ImplyUnstableOptions::Yes, cx)?;
     Ok(krate)
 }
 
 fn build_directive_driven<'a>(
     e_opts: &mut EngineOptions<'a>,
-    krate: Crate<'a>,
+    krate: Crate<'a, ExtEdition<'a>>,
     opts: &mut Options<'a>,
     flavor: directive::Flavor,
     cx: Context<'a>,
@@ -302,11 +314,16 @@ fn build_directive_driven<'a>(
         })
         .collect::<Result<_>>()?;
 
-    let krate = Crate {
-        path,
-        edition: krate.edition.or(directives.edition.map(|edition| Edition::Unknown(edition.bare))),
-        ..krate
+    let edition = match krate.edition {
+        // If the resolution of the CLI edition fails, we *don't*
+        // want to fall back to the directive edition.
+        // FIXME: Passing this (the primary) engine to resolve might not be correct
+        //        for engine==rustdoc see comment above the other invocation of
+        //        `resolve` in this module.
+        Some(edition) => edition.resolve(e_opts.kind(), cx),
+        None => directives.edition.map(|edition| Edition::Unknown(edition.bare)),
     };
+    let krate = Crate { path, edition, ..krate };
 
     opts.v_opts.extend(directives.v_opts);
     match e_opts {

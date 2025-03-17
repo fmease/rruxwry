@@ -77,8 +77,8 @@ fn try_main() -> error::Result {
         dbg_opts: args.dbg_opts,
     };
 
-    // FIXME: Move the creation of this to the CLI once interface can process
-    //        borrowed program args (i.e. once clap is thrown out).
+    // FIXME: Construction of *Crate<ExtEdition> should arguably happen inside
+    //        interface::arguments. Likely blocked on clap removal.
     let krate = data::Crate {
         path: &args.path,
         name: args.crate_name.as_ref().map(|name| name.as_ref()),
