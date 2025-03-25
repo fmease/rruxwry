@@ -137,7 +137,7 @@ Arguments:
   [VERBATIM]...  Flags passed to `rustc` verbatim
 
 Options:
-  -r, --run                   Run the built binary
+  -r, --run                   Also run the built binary
   -c, --check-only            Don't fully compile, only check the crate
   -@, --directives...         Enable compiletest-like directives
   -T, --compiletest           Check in a compiletest-esque manner
@@ -155,8 +155,8 @@ Options:
   -I, --identity <IDENTITY>   Force rust{,do}c's identity
       --log[=<FILTER>]        Enable rust{,do}c logging. FILTER defaults to `debug`
   -B, --no-backtrace          Override `RUST_BACKTRACE` to be `0`
-  -Q, --query                 Query the underlying rust{,do}c version and halt
-  -V, --verbose               Use verbose output
+  -V, --version               Print the underlying rust{,do}c version and halt
+  -v, --verbose               Use verbose output
   -0, --dry-run               Run through without making any changes
       --color <WHEN>          Control when to use color [default: auto] [possible values: auto, always, never]
   -h, --help                  Print help
@@ -175,7 +175,7 @@ Arguments:
   [VERBATIM]...  Flags passed to `rustc` and `rustdoc` verbatim
 
 Options:
-  -o, --open                     Open the generated docs in a browser
+  -o, --open                     Also open the generated docs in a browser
   -j, --json                     Output JSON instead of HTML
   -@, --directives...            Enable compiletest-like directives
   -T, --compiletest              Check in a compiletest-esque manner
@@ -183,7 +183,7 @@ Options:
   -X, --cross-crate              Enable the cross-crate re-export mode
   -n, --crate-name <NAME>        Set the name of the crate
   -t, --crate-type <TYPE>        Set the type of the crate
-  -v, --crate-version <VERSION>  Set the version of the (base) crate
+      --crate-version <VERSION>  Set the version of the (base) crate
   -e, --edition <EDITION>        Set the edition of the crate
       --cfg <NAME>               Enable a `cfg`
   -R, --revision <NAME>          Enable a compiletest revision
@@ -201,8 +201,8 @@ Options:
   -I, --identity <IDENTITY>      Force rust{,do}c's identity
       --log[=<FILTER>]           Enable rust{,do}c logging. FILTER defaults to `debug`
   -B, --no-backtrace             Override `RUST_BACKTRACE` to be `0`
-  -Q, --query                    Query the underlying rust{,do}c version and halt
-  -V, --verbose                  Use verbose output
+  -V, --version                  Print the underlying rust{,do}c version and halt
+  -v, --verbose                  Use verbose output
   -0, --dry-run                  Run through without making any changes
       --color <WHEN>             Control when to use color [default: auto] [possible values: auto, always, never]
   -h, --help                     Print help

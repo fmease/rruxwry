@@ -39,7 +39,7 @@ pub(crate) fn arguments() -> Arguments {
 
     fn path() -> clap::Arg {
         clap::Arg::new(id::PATH)
-            .required_unless_present(id::QUERY)
+            .required_unless_present(id::ENGINE_VERSION)
             .value_parser(clap::builder::ValueParser::path_buf())
             .help("Path to the source file")
     }
@@ -154,13 +154,13 @@ pub(crate) fn arguments() -> Arguments {
                 .long("no-backtrace")
                 .action(clap::ArgAction::SetTrue)
                 .help("Override `RUST_BACKTRACE` to be `0`"),
-            clap::Arg::new(id::QUERY)
-                .short('Q')
-                .long("query")
-                .action(clap::ArgAction::SetTrue)
-                .help("Query the underlying rust{,do}c version and halt"),
-            clap::Arg::new(id::VERBOSE)
+            clap::Arg::new(id::ENGINE_VERSION)
                 .short('V')
+                .long("version")
+                .action(clap::ArgAction::SetTrue)
+                .help("Print the underlying rust{,do}c version and halt"),
+            clap::Arg::new(id::VERBOSE)
+                .short('v')
                 .long("verbose")
                 .action(clap::ArgAction::SetTrue)
                 .help("Use verbose output"),
@@ -196,7 +196,7 @@ pub(crate) fn arguments() -> Arguments {
                                 .long("run")
                                 .action(clap::ArgAction::SetTrue)
                                 .conflicts_with(id::COMPILETEST)
-                                .help("Run the built binary"),
+                                .help("Also run the built binary"),
                         )
                         .arg(
                             clap::Arg::new(id::CHECK_ONLY)
@@ -225,7 +225,7 @@ pub(crate) fn arguments() -> Arguments {
                                 .long("open")
                                 .action(clap::ArgAction::SetTrue)
                                 .conflicts_with(id::COMPILETEST)
-                                .help("Open the generated docs in a browser"),
+                                .help("Also open the generated docs in a browser"),
                         )
                         .arg(
                             clap::Arg::new(id::JSON)
@@ -247,7 +247,6 @@ pub(crate) fn arguments() -> Arguments {
                         .args(crate_name_and_type())
                         .arg(
                             clap::Arg::new(id::CRATE_VERSION)
-                                .short('v')
                                 .long("crate-version")
                                 .value_name("VERSION")
                                 .help("Set the version of the (base) crate"),
@@ -306,7 +305,7 @@ pub(crate) fn arguments() -> Arguments {
         }),
     };
 
-    let query_engine_version: bool = matches.remove_one(id::QUERY).unwrap_or_default();
+    let query_engine_version: bool = matches.remove_one(id::ENGINE_VERSION).unwrap_or_default();
 
     let operation = match (operation.as_str(), query_engine_version) {
         (id::BUILD, false) => Operation::Compile {
@@ -493,7 +492,7 @@ mod id {
     pub(super) const OPEN: &str = "OPEN";
     pub(super) const PATH: &str = "PATH";
     pub(super) const PRIVATE: &str = "PRIVATE";
-    pub(super) const QUERY: &str = "QUERY";
+    pub(super) const ENGINE_VERSION: &str = "QUERY";
     pub(super) const REVISION: &str = "REVISION";
     pub(super) const RUN: &str = "RUN";
     pub(super) const RUSTC_FEATURES: &str = "RUSTC_FEATURES";
