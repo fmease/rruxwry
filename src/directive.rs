@@ -204,14 +204,14 @@ impl InstantiationError<'_, '_> {
                         .help(fmt!("remove `-R{revision}` from the invocation")),
                     _ => it.note(fmt!("available revisions are: {}", list(available))),
                 };
-                it.finish()
+                it.done()
             }
             // Avoid violating abstraction layers (this module shouldn't know about the CLI)!
             Self::MissingActiveRevision { available } => {
                 error(fmt!("no revision specified (on the command line)"))
                     .help(fmt!("specifiy a revision with `-R<NAME>` on the command line"))
                     .note(fmt!("available revisions are: {}", list(available)))
-                    .finish()
+                    .done()
             }
         }
     }
@@ -933,7 +933,7 @@ impl Error<'_> {
                     .note(fmt!("declared revisions are inherited from the principal file"))
             }
         }
-        .finish();
+        .done();
     }
 }
 

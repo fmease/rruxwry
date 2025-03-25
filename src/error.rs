@@ -11,7 +11,7 @@ pub(crate) enum Error {
 impl Error {
     pub(crate) fn emit(self) {
         match self {
-            Self::Io(error) => self::error(fmt!("{error}")).finish(),
+            Self::Io(error) => self::error(fmt!("{error}")).done(),
             Self::Emitted(error) => error,
         };
     }

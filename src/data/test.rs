@@ -77,7 +77,7 @@ fn version_commit_info() {
         Some(Version {
             triple: V!(0, 0, 0),
             channel: Channel::Dev,
-            commit: Some(Commit { short_sha: "123456789", date: D!(2000 - 1 - 1) }),
+            commit: Some(Commit { short_sha: "123456789", date: D!(2000, 01, 01) }),
             tag: "",
         })
     );
@@ -90,7 +90,7 @@ fn version_commit_info_no_channel() {
         Some(Version {
             triple: V!(999, 999, 999),
             channel: Channel::Stable,
-            commit: Some(Commit { short_sha: "000000000", date: D!(1970 - 1 - 1) }),
+            commit: Some(Commit { short_sha: "000000000", date: D!(1970, 01, 01) }),
             tag: "",
         })
     );
@@ -103,7 +103,7 @@ fn version_tag() {
         Some(Version {
             triple: V!(0, 0, 0),
             channel: Channel::Stable,
-            commit: Some(Commit { short_sha: "000000000", date: D!(0 - 1 - 1) }),
+            commit: Some(Commit { short_sha: "000000000", date: D!(0000, 01, 01) }),
             tag: "THIS IS A TAG",
         })
     );
@@ -133,7 +133,7 @@ fn version_multiline_tag() {
         Some(Version {
             triple: V!(0, 0, 0),
             channel: Channel::Stable,
-            commit: Some(Commit { short_sha: "abcdef", date: D!(0 - 1 - 1) }),
+            commit: Some(Commit { short_sha: "abcdef", date: D!(0000, 01, 01) }),
             tag: "this\nis\nspanning\nacross\nlines"
         })
     );

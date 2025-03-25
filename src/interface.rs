@@ -210,6 +210,14 @@ pub(crate) fn arguments() -> Arguments {
                         .args(crate_name_and_type())
                         .arg(edition())
                         .args(cfgs())
+                        .arg(
+                            clap::Arg::new(id::SHALLOW)
+                                .short('s')
+                                .long("shallow")
+                                .action(clap::ArgAction::SetTrue)
+                                .help("Halt after parsing the source file")
+                                .conflicts_with(id::RUN),
+                        )
                         .args(extra())
                 }),
             clap::Command::new(id::DOC)
@@ -319,6 +327,7 @@ pub(crate) fn arguments() -> Arguments {
             },
             options: CompileOptions {
                 check_only: matches.remove_one(id::CHECK_ONLY).unwrap_or_default(),
+                shallow: matches.remove_one(id::SHALLOW).unwrap_or_default(),
             },
         },
         (id::BUILD, true) => Operation::QueryRustcVersion,
@@ -479,6 +488,7 @@ mod id {
     pub(super) const DOC: &str = "doc";
     pub(super) const DRY_RUN: &str = "DRY_RUN";
     pub(super) const EDITION: &str = "EDITION";
+    pub(super) const ENGINE_VERSION: &str = "ENGINE_VERSION";
     pub(super) const HIDDEN: &str = "HIDDEN";
     pub(super) const IDENTITY: &str = "IDENTITY";
     pub(super) const INTERNALS: &str = "INTERNALS";
@@ -492,10 +502,10 @@ mod id {
     pub(super) const OPEN: &str = "OPEN";
     pub(super) const PATH: &str = "PATH";
     pub(super) const PRIVATE: &str = "PRIVATE";
-    pub(super) const ENGINE_VERSION: &str = "QUERY";
     pub(super) const REVISION: &str = "REVISION";
     pub(super) const RUN: &str = "RUN";
     pub(super) const RUSTC_FEATURES: &str = "RUSTC_FEATURES";
+    pub(super) const SHALLOW: &str = "SHALLOW";
     pub(super) const SUPPRESS_LINTS: &str = "SUPPRESS_LINTS";
     pub(super) const THEME: &str = "THEME";
     pub(super) const VERBATIM: &str = "VERBATIM";

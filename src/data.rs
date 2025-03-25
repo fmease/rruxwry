@@ -53,27 +53,29 @@ impl<'a> Edition<'a> {
         // FIXME: Should we warn on failure?
         let version = cx.engine(engine).ok()?;
         match version.channel {
-            Channel::Stable => map! { V(version.triple)
-                Self::Rust2024(1,85,0) // branched: 2025-01-03
-                Self::Rust2021(1,56,0) // branched: 2021-09-03
-                Self::Rust2018(1,31,0) // branched: 2018-10-19
+            Channel::Stable => match () {
+                _ if version.triple >= V!(1, 85, 0) => Some(Self::Rust2024), // branched: 2025-01-03
+                _ if version.triple >= V!(1, 56, 0) => Some(Self::Rust2021), // branched: 2021-09-03
+                _ if version.triple >= V!(1, 31, 0) => Some(Self::Rust2018), // branched: 2018-10-19
                 // <rust-lang/rust#50080>
                 // Before that, a stable edition flag didn't exist.
-                Self::Rust2015(1,27,0) // branched: 2018-05-04
+                _ if version.triple >= V!(1, 27, 0) => Some(Self::Rust2015), // branched: 2018-05-04
+                _ => None,
             },
             Channel::Beta { prerelease: _ } => None, // FIXME: Unimplemented.
             Channel::Nightly | Channel::Dev => match &version.commit {
                 Some(commit) => {
-                    map! { D(commit.date)
-                        Self::Rust2024(2024-11-24) // base: 1.85.0
-                        Self::Rust2021(2021-08-31) // base: 1.56.0
+                    match () {
+                        _ if commit.date >= D!(2024, 11, 24) => Some(Self::Rust2024), // base: 1.85.0
+                        _ if commit.date >= D!(2021, 08, 31) => Some(Self::Rust2021), // base: 1.56.0
                         // <rust-lang/rust#54057>
                         // Note: Back then, unstable editions didn't require you to pass
                         // `-Zunstable-options`. Being on the nightly was sufficient.
-                        Self::Rust2018(2018-09-09) // base: 1.30.0 (branched: 2018-09-07)
+                        _ if commit.date >= D!(2018, 09, 09) => Some(Self::Rust2018), // base: 1.30.0 (branched: 2018-09-07)
                         // <rust-lang/rust#50080> stabilized `-Zedition` as `--edition`,
                         // turn value `2015` stable and kept `2018` unstable.
-                        Self::Rust2015(2018-04-21) // base: 1.27.0
+                        _ if commit.date >= D!(2018, 04, 21) => Some(Self::Rust2015), // base: 1.27.0
+                        _ => None,
                     }
                 }
                 _ => {
@@ -82,11 +84,12 @@ impl<'a> Edition<'a> {
                     //        not since it could be a nightly from before the stabilization PR
                     //        so check against ONE_PATCH_LESS(stable_release)
                     // FIXME: Figure out if we can figure this out procedually from other data
-                    map! { V(version.triple)
-                        Self::Rust2024(1,86,0)
-                        Self::Rust2021(1,57,0)
-                        Self::Rust2018(1,31,0)
-                        Self::Rust2015(1,28,0)
+                    match () {
+                        _ if version.triple >= V!(1, 86, 0) => Some(Self::Rust2024),
+                        _ if version.triple >= V!(1, 57, 0) => Some(Self::Rust2021),
+                        _ if version.triple >= V!(1, 31, 0) => Some(Self::Rust2018),
+                        _ if version.triple >= V!(1, 28, 0) => Some(Self::Rust2015),
+                        _ => None,
                     }
                 }
             },
@@ -105,12 +108,12 @@ impl<'a> Edition<'a> {
     }
 }
 
-pub(crate) macro map($makro:ident($scrutinee:expr) $( $($result:ident)::+($( $data:tt )*) )*) {
-    match () {
-        $( _ if $scrutinee >= $makro!($( $data )*) => Some($( $result )::+), )*
-        _ => None,
-    }
-}
+// FIXME: Everywhere: Experiment with "inverting" this mapping for maintainability.
+//        I.e., have a map from ResultTy (e.g., Edition, Syntax) to a struct of the
+//        rough form { stable: Result<Triple, Unsupported>,
+//                       beta: Result<(Triple, Result<Pre, Unsupported>), Unsupported>,
+//                       nightly: Result<(Date, Result<Triple, Ambiguous>), Unsupported> }.
+//        And have a helper function for the performing the actual match
 
 // This is just a wrapper around a string. An enum listing all crate types which are
 // valid at the time of writing wouldn't be forward compatible with future versions
@@ -449,7 +452,7 @@ pub(crate) struct Date {
     pub(crate) day: NonZero<u8>,
 }
 
-pub(crate) macro D($year:literal-$month:literal-$day:literal) {
+pub(crate) macro D($year:literal, $month:literal, $day:literal) {
     const {
         #[allow(clippy::zero_prefixed_literal)]
         Date { year: $year, month: NonZero::new($month).unwrap(), day: NonZero::new($day).unwrap() }

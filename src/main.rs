@@ -124,6 +124,6 @@ fn set_panic_hook() {
             None => diag
                 .note(fmt!("rerun with environment variable `{ENV_VAR}=1` to display a backtrace")),
         };
-        diag.finish();
+        diag.done();
     }));
 }

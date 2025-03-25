@@ -133,7 +133,7 @@ impl Diagnostic {
         self
     }
 
-    pub(crate) fn finish(mut self) -> EmittedError {
+    pub(crate) fn done(mut self) -> EmittedError {
         writeln!(self.p).unwrap();
         EmittedError(())
     }

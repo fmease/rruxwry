@@ -149,6 +149,7 @@ Options:
   -R, --revision <NAME>       Enable a compiletest revision
   -f, --cargo-feature <NAME>  Enable a Cargo-like feature
   -F, --rustc-feature <NAME>  Enable an experimental rustc library or language feature
+  -s, --shallow               Halt after parsing the source file
   -/, --suppress-lints        Cap lints at allow level
   -#, --internals             Enable rust{,do}c's `-Zverbose-internals`
   -N, --next-solver           Enable the next-gen trait solver

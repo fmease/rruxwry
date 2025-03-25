@@ -79,7 +79,7 @@ fn parse_options(
 fn warn_env_contains_confusable_var(confusable: &OsStr, suggestion: &OsStr) {
     warn(fmt!("rruxwry does not read the environment variable `{}`", confusable.display()))
         .note(fmt!("you might have meant `{}`", suggestion.display()))
-        .finish();
+        .done();
 }
 
 fn warn_malformed_env_var(key: &OsStr, note: &'static str) {
@@ -87,5 +87,5 @@ fn warn_malformed_env_var(key: &OsStr, note: &'static str) {
     warn(fmt!("the environment variable `{}` is malformed", key.display()))
         .note(fmt!("{note}"))
         .note(fmt!("ignoring all flags potentially contained within it"))
-        .finish();
+        .done();
 }

@@ -12,12 +12,12 @@
 
 use crate::{
     context::Context,
-    data::{Channel, Crate, CrateName, CrateType, D, DocBackend, Identity, Version, map},
-    diagnostic::{self, Paint, debug, error},
+    data::{Channel, Crate, CrateName, CrateType, D, DocBackend, Identity, V, Version},
+    diagnostic::{self, Diagnostic, EmittedError, Paint, debug, error},
     error::Result,
     fmt,
     source::Spanned,
-    utility::paint::Painter,
+    utility::default,
 };
 use anstyle::{AnsiColor, Effects};
 use std::{
@@ -47,7 +47,7 @@ pub(crate) fn perform(
 
     if let ImplyUnstableOptions::Yes = imply_u_opts
         && match probe_identity(opts) {
-            Identity::True => engine.is(cx, |v| v.channel.allows_unstable()),
+            Identity::True => cx.engine(engine).is_ok_and(|v| v.channel.allows_unstable()),
             Identity::Stable => false,
             Identity::Nightly => true,
         }
@@ -162,7 +162,7 @@ impl EngineVersionError {
     // FIXME: Figure out how much into detail we want go and how to best word these.
     //        E.g., do we want to dump underlying IO errors and parts of stderr output
     //        as emitted by `--version`?
-    fn short_desc(self) -> &'static str {
+    pub(crate) fn short_desc(self) -> &'static str {
         match self {
             Self::UnknownToolchain => "toolchain unknown",
             Self::ToolchainNotInstalled => "toolchain not installed",
@@ -172,10 +172,6 @@ impl EngineVersionError {
             Self::Other => "error",
         }
     }
-
-    pub(crate) fn paint(self, p: &mut Painter<impl io::Write>) -> io::Result<()> {
-        p.with(AnsiColor::Red, |p| write!(p, "{{ {} }}", self.short_desc()))
-    }
 }
 
 pub(crate) fn query_crate_name(
@@ -183,7 +179,7 @@ pub(crate) fn query_crate_name(
     opts: &Options<'_>,
     cx: Context<'_>,
 ) -> Result<CrateName<String>> {
-    let engine = EngineOptions::Rustc(CompileOptions { check_only: false });
+    let engine = EngineOptions::Rustc(default());
 
     let mut cmd = Command::new(engine.kind().name());
 
@@ -251,20 +247,11 @@ fn configure_early(
     // rustc needs to parse the crate root to find `#![crate_name]`.
     if let Some(edition) = krate.edition {
         let version = cx.engine(e_opts.kind()).map_err(|error| {
-            let diag = self::error(fmt!(
-                "failed to retrieve the version of the underyling `{}`",
-                e_opts.kind().name()
-            ));
-            let diag = match error {
-                EngineVersionError::Other => diag,
-                // FIXME: Using the short description is a bit awkward imo.
-                _ => diag.note(fmt!("caused by: {}", error.short_desc())),
-            };
-            diag.note(fmt!(
-                "required in order to correctly forward the requested edition `{}`",
-                edition.to_str()
-            ))
-            .finish()
+            emit_failed_to_obtain_version_for_opt(
+                e_opts.kind(),
+                error,
+                fmt!("the requested edition `{}`", edition.to_str()),
+            )
         })?;
 
         // FIXME: These dates and versions have been manually verified *with rustc*.
@@ -273,18 +260,19 @@ fn configure_early(
             // FIXME: Unimplemented!
             Channel::Stable | Channel::Beta { prerelease: _ } => Some(Syntax::Edition),
             Channel::Nightly | Channel::Dev => match version.commit {
-                Some(commit) => map! { D(commit.date)
+                Some(commit) => match () {
                     // <rust-lang/rust#50080> was merged on 2018-04-21T07:42Z.
                     // Thus it would've likely made it into *nightly-2018-04-22(2018-04-21).
                     // However, since some tools didn't build this nightly doesn't exist.
                     // In fact, nightly-2018-04-{20..26} don't exist, nightly-2018-04-27 is
                     // the first to feature `--edition`.
                     // Regardless, I like this more precise date better.
-                    Syntax::Edition(2018-04-21)
+                    _ if commit.date >= D!(2018, 04, 21) => Some(Syntax::Edition),
                     // <rust-lang/rust#49035>
-                    Syntax::ZeeEdition(2018-03-23)
+                    _ if commit.date >= D!(2018, 03, 23) => Some(Syntax::ZeeEdition),
                     // <rust-lang/rust#48014>
-                    Syntax::ZeeEpoch(2018-02-07)
+                    _ if commit.date >= D!(2018, 02, 07) => Some(Syntax::ZeeEpoch),
+                    _ => None,
                 },
                 None => Some(Syntax::Edition), // FIXME: Unimplemented!
             },
@@ -295,7 +283,7 @@ fn configure_early(
                 "the version of the underyling `{}` does not support editions",
                 e_opts.kind().name()
             ))
-            .finish()
+            .done()
         })?;
 
         match syntax {
@@ -332,7 +320,7 @@ fn configure_early(
     }
 
     configure_v_opts(cmd, &opts.v_opts);
-    configure_e_opts(cmd, e_opts);
+    configure_e_opts(cmd, e_opts, cx)?;
 
     if let Some(opts) = e_opts.kind().env_opts() {
         cmd.args(opts);
@@ -449,12 +437,64 @@ fn configure_v_opts(cmd: &mut process::Command, v_opts: &VerbatimOptions<'_>) {
     cmd.args(&v_opts.arguments);
 }
 
-fn configure_e_opts(cmd: &mut Command, e_opts: &EngineOptions<'_>) {
+fn configure_e_opts(cmd: &mut Command, e_opts: &EngineOptions<'_>, cx: Context<'_>) -> Result<()> {
     match e_opts {
         EngineOptions::Rustc(c_opts) => {
             if c_opts.check_only {
                 // FIXME: Should we `-o $null`?
                 cmd.arg("--emit=metadata");
+            }
+
+            if c_opts.shallow {
+                let version = cx.engine(e_opts.kind()).map_err(|error| {
+                    emit_failed_to_obtain_version_for_opt(
+                        e_opts.kind(),
+                        error,
+                        fmt!("option `--shallow`"),
+                    )
+                })?;
+
+                let syntax = match version.channel {
+                    Channel::Stable => match () {
+                        _ if version.triple >= V!(1, 85, 0) => Syntax::ZeeParseCrateRootOnly,
+                        // FIXME: Find the *actual* lower bound.
+                        _ => Syntax::ZeeParseOnly,
+                    },
+                    // FIXME: Unimplemented!
+                    Channel::Beta { prerelease: _ } => Syntax::ZeeParseCrateRootOnly, // FIXME: Actually unimpl'ed!
+                    Channel::Nightly | Channel::Dev => match version.commit {
+                        Some(commit) => match () {
+                            _ if commit.date >= D!(2024, 11, 29) => Syntax::ZeeParseCrateRootOnly,
+                            // FIXME: Find the *actual* lower bound.
+                            _ => Syntax::ZeeParseOnly,
+                        },
+                        None => match () {
+                            _ if version.triple > V!(1, 85, 0) => Syntax::ZeeParseCrateRootOnly,
+                            _ if version.triple == V!(1, 85, 0) => {
+                                // FIXME: Improve wording. Actually print the version and print
+                                //        the two candidates!
+                                return Err(error(fmt!(
+                                    "could not determine how to forward option `--shallow` to the underyling `{}`",
+                                    e_opts.kind().name()
+                                ))
+                                .done()
+                                .into());
+                            }
+                            // FIXME: Find the *actual* lower bound.
+                            _ => Syntax::ZeeParseOnly,
+                        },
+                    },
+                };
+
+                enum Syntax {
+                    ZeeParseCrateRootOnly,
+                    ZeeParseOnly,
+                }
+
+                cmd.arg(match syntax {
+                    Syntax::ZeeParseCrateRootOnly => "-Zparse-crate-root-only",
+                    Syntax::ZeeParseOnly => "-Zparse-only",
+                });
             }
         }
         EngineOptions::Rustdoc(d_opts) => {
@@ -493,6 +533,33 @@ fn configure_e_opts(cmd: &mut Command, e_opts: &EngineOptions<'_>) {
             cmd.args(&d_opts.v_opts.arguments);
         }
     }
+
+    Ok(())
+}
+
+fn emit_failed_to_obtain_version_for_opt(
+    engine: EngineKind,
+    error: EngineVersionError,
+    opt: impl Paint,
+) -> EmittedError {
+    fn diag(engine: EngineKind, error: EngineVersionError) -> Diagnostic {
+        let diag = self::error(fmt!(
+            "failed to retrieve the version of the underyling `{}`",
+            engine.name()
+        ));
+        match error {
+            EngineVersionError::Other => diag,
+            // FIXME: Using the short description here is a bit awkward imo.
+            _ => diag.note(fmt!("caused by: {}", error.short_desc())),
+        }
+    }
+
+    diag(engine, error)
+        .note(|p| {
+            write!(p, "required in order to correctly forward ")?;
+            opt(p)
+        })
+        .done()
 }
 
 pub(crate) fn run(
@@ -525,7 +592,7 @@ fn gate(message: impl Paint, dbg_opts: DebugOptions) -> ControlFlow<()> {
             write!(p, "{verb} ")?;
             message(p)
         })
-        .finish();
+        .done();
     }
 
     match dbg_opts.dry_run {
@@ -597,10 +664,6 @@ pub(crate) enum EngineKind {
 }
 
 impl EngineKind {
-    fn is(self, cx: Context<'_>, pred: impl FnOnce(Version<String>) -> bool) -> bool {
-        cx.engine(self).is_ok_and(pred)
-    }
-
     const fn name(self) -> &'static str {
         match self {
             Self::Rustc => "rustc",
@@ -631,8 +694,15 @@ mod palette {
     pub(super) const ARGUMENT: AnsiColor = AnsiColor::Green;
 }
 
+#[derive(Default)]
 pub(crate) struct CompileOptions {
     pub(crate) check_only: bool,
+    pub(crate) shallow: bool,
+}
+
+// FIXME: Remove once we have const Default
+impl CompileOptions {
+    pub(crate) const DEFAULT: Self = Self { check_only: false, shallow: false };
 }
 
 #[allow(clippy::struct_excessive_bools)] // not worth to address

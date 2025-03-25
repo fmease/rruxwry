@@ -38,7 +38,7 @@ impl SourceMap {
             self::error(fmt!("failed to read `{}`", path.bare.display()))
                 .highlight(path.span, cx)
                 .note(fmt!("{error}"))
-                .finish()
+                .done()
         })?;
 
         let file = SourceFile::new(path.bare.to_owned(), contents, self.offset());

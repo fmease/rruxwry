@@ -9,8 +9,8 @@
 
 use crate::{
     build::{
-        self, CompileOptions, DocOptions, EngineKind, EngineOptions, ExternCrate,
-        ImplyUnstableOptions, Options, VerbatimOptions,
+        self, CompileOptions, DocOptions, EngineKind, EngineOptions, EngineVersionError,
+        ExternCrate, ImplyUnstableOptions, Options, VerbatimOptions,
     },
     context::Context,
     data::{Crate, CrateName, CrateType, DocBackend, Edition, ExtEdition},
@@ -20,6 +20,7 @@ use crate::{
     source::Spanned,
     utility::{OsStrExt as _, default, paint::Painter},
 };
+use anstyle::AnsiColor;
 use std::{
     ascii::Char,
     borrow::Cow,
@@ -38,6 +39,10 @@ pub(crate) fn perform(
     opts: Options<'_>,
     cx: Context<'_>,
 ) -> Result<()> {
+    let paint_err = |error: EngineVersionError, p: &mut Painter<_>| {
+        p.with(AnsiColor::Red, |p| write!(p, "{{ {} }}", error.short_desc()))
+    };
+
     match op {
         Operation::Compile { mode, run, options: c_opts } => {
             compile(mode, run, krate, opts, c_opts, cx)
@@ -51,7 +56,7 @@ pub(crate) fn perform(
             write!(p, "rustc: ")?;
             match cx.engine(EngineKind::Rustc) {
                 Ok(version) => version.paint(build::probe_identity(&opts), &mut p),
-                Err(error) => error.paint(&mut p),
+                Err(error) => paint_err(error, &mut p),
             }?;
 
             writeln!(p)?;
@@ -69,14 +74,14 @@ pub(crate) fn perform(
             write!(p, "rustdoc: ")?;
             match cx.engine(EngineKind::Rustdoc) {
                 Ok(version) => version.paint(build::probe_identity(&opts), &mut p),
-                Err(error) => error.paint(&mut p),
+                Err(error) => paint_err(error, &mut p),
             }?;
 
             writeln!(p)?;
             write!(p, "  rustc: ")?;
             match cx.engine(EngineKind::Rustc) {
                 Ok(version) => version.paint(build::probe_identity(&opts), &mut p),
-                Err(error) => error.paint(&mut p),
+                Err(error) => paint_err(error, &mut p),
             }?;
 
             writeln!(p)?;
@@ -124,7 +129,7 @@ fn run(
     build::run(&path, run_v_opts, opts.dbg_opts).map_err(|error| {
         self::error(fmt!("failed to run the built binary `{}`", path.display()))
             .note(fmt!("{error}"))
-            .finish()
+            .done()
     })?;
     Ok(())
 }
@@ -168,7 +173,7 @@ fn open(krate: Crate<'_>, opts: &Options<'_>, cx: Context<'_>) -> Result<()> {
     build::open(Path::new(&path), opts.dbg_opts).map_err(|error| {
         self::error(fmt!("failed to open the generated docs in a browser"))
             .note(fmt!("{error}"))
-            .finish()
+            .done()
     })?;
     Ok(())
 }
@@ -181,12 +186,7 @@ fn document_cross_crate(
     cx: Context<'_>,
 ) -> Result<()> {
     let krate = Crate { typ: krate.typ.or(Some(CrateType("lib"))), ..krate };
-    let krate = build_default(
-        &EngineOptions::Rustc(CompileOptions { check_only: false }),
-        krate,
-        opts,
-        cx,
-    )?;
+    let krate = build_default(&EngineOptions::Rustc(default()), krate, opts, cx)?;
 
     // FIXME: This `unwrap` is obviously reachable (e.g., on `rrc '%$?'`)
     let crate_name: CrateName<Cow<'_, _>> = krate.name.map_or_else(
@@ -261,7 +261,7 @@ fn build_directive_driven<'a>(
                     "active revision suffix `{}` is not valid UTF-8",
                     revision.display()
                 ))
-                .finish()
+                .done()
                 .into());
             };
             (Path::new(path), Some(revision))
@@ -273,13 +273,13 @@ fn build_directive_driven<'a>(
         (Some(rev0), Some(rev1)) if rev0 == rev1 => {
             warn(fmt!("the active revision `{rev0}` was passed twice"))
                 .note(fmt!("once as a path suffix, once via a flag"))
-                .finish();
+                .done();
             Some(rev0)
         }
         (Some(rev0), Some(rev1)) => {
             return Err(error(fmt!("two conflicting active revisions were passed"))
                 .note(fmt!("path suffix `{rev0}` and flag argument `{rev1}` do not match"))
-                .finish()
+                .done()
                 .into());
         }
         (rev @ Some(_), None) | (None, rev @ Some(_)) => rev,
@@ -392,9 +392,7 @@ fn compile_auxiliary<'a>(
             //        I suspect is doesn't because we need to s%/rlib/rmeta/
             EngineOptions::Rustc(..) => e_opts,
             // FIXME: Wait, would check_only=true also work and be better?
-            EngineOptions::Rustdoc(_) => {
-                const { &EngineOptions::Rustc(CompileOptions { check_only: false }) }
-            }
+            EngineOptions::Rustdoc(_) => const { &EngineOptions::Rustc(CompileOptions::DEFAULT) },
         },
         krate,
         deps,
