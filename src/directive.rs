@@ -72,7 +72,7 @@ fn parse<'cx>(
                 Ok(directive) => directives.add(directive),
                 Err(error) => errors.insert(error),
             }
-        };
+        }
 
         // FIXME: Is this really correct (empty lines, trailing line breaks, …)?
         index += u32::try_from(line.len()).unwrap() + 1;
@@ -513,7 +513,7 @@ impl<'src> Parser<'src> {
                             expected: Scope::HtmlDocCk.into(),
                         });
                     }
-                };
+                }
 
                 SimpleDirective::BuildAuxDocs
             }
@@ -532,7 +532,7 @@ impl<'src> Parser<'src> {
                             expected: Scope::HtmlDocCk.into(),
                         });
                     }
-                };
+                }
 
                 return self.parse_flags(Stage::CompileTime, FlagScope::Rustdoc).map(Some);
             }

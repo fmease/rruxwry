@@ -267,12 +267,12 @@ fn configure_early(
                     // In fact, nightly-2018-04-{20..26} don't exist, nightly-2018-04-27 is
                     // the first to feature `--edition`.
                     // Regardless, I like this more precise date better.
-                    _ if commit.date >= D!(2018, 04, 21) => Some(Syntax::Edition),
+                    () if commit.date >= D!(2018, 04, 21) => Some(Syntax::Edition),
                     // <rust-lang/rust#49035>
-                    _ if commit.date >= D!(2018, 03, 23) => Some(Syntax::ZeeEdition),
+                    () if commit.date >= D!(2018, 03, 23) => Some(Syntax::ZeeEdition),
                     // <rust-lang/rust#48014>
-                    _ if commit.date >= D!(2018, 02, 07) => Some(Syntax::ZeeEpoch),
-                    _ => None,
+                    () if commit.date >= D!(2018, 02, 07) => Some(Syntax::ZeeEpoch),
+                    () => None,
                 },
                 None => Some(Syntax::Edition), // FIXME: Unimplemented!
             },
@@ -305,18 +305,21 @@ fn configure_early(
     // Regarding crate name querying, let's better honor this option
     // since it may significantly affect rustc's behavior.
     if let Some(identity) = opts.b_opts.identity {
-        cmd.env("RUSTC_BOOTSTRAP", match identity {
-            Identity::True => "0",
-            // FIXME: Bail out with an error if we know that
-            //        that engine version doesn't support this value.
-            //        And warn in cases where it's not deducible
-            Identity::Stable => "-1",
-            // FIXME: In older versions, you had to set this env var
-            //        to a "secret key" that comprised of a hash of
-            //        several "bootstrap variables". Either support that
-            //        smh. or throw an "unsupported" error.
-            Identity::Nightly => "1",
-        });
+        cmd.env(
+            "RUSTC_BOOTSTRAP",
+            match identity {
+                Identity::True => "0",
+                // FIXME: Bail out with an error if we know that
+                //        that engine version doesn't support this value.
+                //        And warn in cases where it's not deducible
+                Identity::Stable => "-1",
+                // FIXME: In older versions, you had to set this env var
+                //        to a "secret key" that comprised of a hash of
+                //        several "bootstrap variables". Either support that
+                //        smh. or throw an "unsupported" error.
+                Identity::Nightly => "1",
+            },
+        );
     }
 
     configure_v_opts(cmd, &opts.v_opts);
@@ -456,21 +459,21 @@ fn configure_e_opts(cmd: &mut Command, e_opts: &EngineOptions<'_>, cx: Context<'
 
                 let syntax = match version.channel {
                     Channel::Stable => match () {
-                        _ if version.triple >= V!(1, 85, 0) => Syntax::ZeeParseCrateRootOnly,
+                        () if version.triple >= V!(1, 85, 0) => Syntax::ZeeParseCrateRootOnly,
                         // FIXME: Find the *actual* lower bound.
-                        _ => Syntax::ZeeParseOnly,
+                        () => Syntax::ZeeParseOnly,
                     },
                     // FIXME: Unimplemented!
                     Channel::Beta { prerelease: _ } => Syntax::ZeeParseCrateRootOnly, // FIXME: Actually unimpl'ed!
                     Channel::Nightly | Channel::Dev => match version.commit {
                         Some(commit) => match () {
-                            _ if commit.date >= D!(2024, 11, 29) => Syntax::ZeeParseCrateRootOnly,
+                            () if commit.date >= D!(2024, 11, 29) => Syntax::ZeeParseCrateRootOnly,
                             // FIXME: Find the *actual* lower bound.
-                            _ => Syntax::ZeeParseOnly,
+                            () => Syntax::ZeeParseOnly,
                         },
                         None => match () {
-                            _ if version.triple > V!(1, 85, 0) => Syntax::ZeeParseCrateRootOnly,
-                            _ if version.triple == V!(1, 85, 0) => {
+                            () if version.triple > V!(1, 85, 0) => Syntax::ZeeParseCrateRootOnly,
+                            () if version.triple == V!(1, 85, 0) => {
                                 // FIXME: Improve wording. Actually print the version and print
                                 //        the two candidates!
                                 return Err(error(fmt!(
@@ -481,7 +484,7 @@ fn configure_e_opts(cmd: &mut Command, e_opts: &EngineOptions<'_>, cx: Context<'
                                 .into());
                             }
                             // FIXME: Find the *actual* lower bound.
-                            _ => Syntax::ZeeParseOnly,
+                            () => Syntax::ZeeParseOnly,
                         },
                     },
                 };
@@ -584,7 +587,6 @@ pub(crate) fn open(path: &Path, dbg_opts: DebugOptions) -> io::Result<()> {
     }
 }
 
-#[must_use]
 fn gate(message: impl Paint, dbg_opts: DebugOptions) -> ControlFlow<()> {
     if dbg_opts.verbose {
         let verb = if !dbg_opts.dry_run { "running" } else { "skipping" };

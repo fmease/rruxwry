@@ -206,7 +206,7 @@ fn document_cross_crate(
             &root_crate_path,
             format!("extern crate {crate_name}; pub use {crate_name}::*;\n"),
         )?;
-    };
+    }
 
     let deps = &[ExternCrate::Named { name: crate_name.as_ref(), path: None, typ: None }];
 

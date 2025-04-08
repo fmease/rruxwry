@@ -268,18 +268,21 @@ fn compile_flags_directives() {
         Flavor::Vanilla,
         &mut errors,
     );
-    assert_eq!(directives, Directives {
-        revisions: default(),
-        instantiated: InstantiatedDirectives {
-            v_opts: VerbatimOptions {
-                arguments: vec!["--crate-type", "lib", "--edition=2021"],
+    assert_eq!(
+        directives,
+        Directives {
+            revisions: default(),
+            instantiated: InstantiatedDirectives {
+                v_opts: VerbatimOptions {
+                    arguments: vec!["--crate-type", "lib", "--edition=2021"],
+                    ..default()
+                },
                 ..default()
             },
-            ..default()
-        },
-        uninstantiated: default(),
-        role: Role::Principal,
-    });
+            uninstantiated: default(),
+            role: Role::Principal,
+        }
+    );
     assert_eq!(errors, default());
 }
 
@@ -295,25 +298,28 @@ fn conditional_directives() {
         Flavor::Vanilla,
         &mut errors,
     );
-    assert_eq!(directives, Directives {
-        revisions: ["one", "two"].into(),
-        instantiated: InstantiatedDirectives {
-            v_opts: VerbatimOptions { arguments: vec!["--crate-type=lib"], ..default() },
-            ..default()
-        },
-        uninstantiated: vec![
-            (spanned(27, 30, "one"), SimpleDirective::Edition(spanned(41, 45, "2018"))),
-            (
-                spanned(86, 89, "two"),
-                SimpleDirective::Flags(
-                    "-Zparse-crate-root-only",
-                    Stage::CompileTime,
-                    FlagScope::Base
+    assert_eq!(
+        directives,
+        Directives {
+            revisions: ["one", "two"].into(),
+            instantiated: InstantiatedDirectives {
+                v_opts: VerbatimOptions { arguments: vec!["--crate-type=lib"], ..default() },
+                ..default()
+            },
+            uninstantiated: vec![
+                (spanned(27, 30, "one"), SimpleDirective::Edition(spanned(41, 45, "2018"))),
+                (
+                    spanned(86, 89, "two"),
+                    SimpleDirective::Flags(
+                        "-Zparse-crate-root-only",
+                        Stage::CompileTime,
+                        FlagScope::Base
+                    )
                 )
-            )
-        ],
-        role: Role::Principal
-    });
+            ],
+            role: Role::Principal
+        }
+    );
     assert_eq!(errors, default());
 }
 
@@ -353,15 +359,18 @@ fn conditional_directives_revision_declared_after_use() {
         Flavor::Vanilla,
         &mut errors,
     );
-    assert_eq!(directives, Directives {
-        revisions: ["classic", "next"].into(),
-        instantiated: default(),
-        uninstantiated: vec![(
-            spanned(4, 8, "next"),
-            SimpleDirective::Flags("-Znext-solver", Stage::CompileTime, FlagScope::Base)
-        )],
-        role: Role::Principal
-    });
+    assert_eq!(
+        directives,
+        Directives {
+            revisions: ["classic", "next"].into(),
+            instantiated: default(),
+            uninstantiated: vec![(
+                spanned(4, 8, "next"),
+                SimpleDirective::Flags("-Znext-solver", Stage::CompileTime, FlagScope::Base)
+            )],
+            role: Role::Principal
+        }
+    );
     assert_eq!(errors, default());
 }
 
@@ -375,18 +384,21 @@ fn conditional_directives_undeclared_revisions() {
         Flavor::Vanilla,
         &mut errors,
     );
-    assert_eq!(directives, Directives {
-        revisions: default(),
-        instantiated: default(),
-        uninstantiated: vec![
-            (
-                spanned(4, 9, "block"),
-                SimpleDirective::Flags("--crate-type lib", Stage::CompileTime, FlagScope::Base)
-            ),
-            (spanned(47, 51, "wall"), SimpleDirective::Edition(spanned(62, 66, "2021"))),
-        ],
-        role: Role::Principal
-    });
+    assert_eq!(
+        directives,
+        Directives {
+            revisions: default(),
+            instantiated: default(),
+            uninstantiated: vec![
+                (
+                    spanned(4, 9, "block"),
+                    SimpleDirective::Flags("--crate-type lib", Stage::CompileTime, FlagScope::Base)
+                ),
+                (spanned(47, 51, "wall"), SimpleDirective::Edition(spanned(62, 66, "2021"))),
+            ],
+            role: Role::Principal
+        }
+    );
     assert_eq!(
         errors,
         Errors(vec![

@@ -1,5 +1,6 @@
-use super::{SmallVec, default};
+use super::default;
 use anstyle::{AnsiColor, Effects, Style};
+use smallvec::SmallVec;
 use std::io;
 
 pub(crate) struct Painter<W: io::Write> {

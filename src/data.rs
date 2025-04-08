@@ -54,28 +54,28 @@ impl<'a> Edition<'a> {
         let version = cx.engine(engine).ok()?;
         match version.channel {
             Channel::Stable => match () {
-                _ if version.triple >= V!(1, 85, 0) => Some(Self::Rust2024), // branched: 2025-01-03
-                _ if version.triple >= V!(1, 56, 0) => Some(Self::Rust2021), // branched: 2021-09-03
-                _ if version.triple >= V!(1, 31, 0) => Some(Self::Rust2018), // branched: 2018-10-19
+                () if version.triple >= V!(1, 85, 0) => Some(Self::Rust2024), // branched: 2025-01-03
+                () if version.triple >= V!(1, 56, 0) => Some(Self::Rust2021), // branched: 2021-09-03
+                () if version.triple >= V!(1, 31, 0) => Some(Self::Rust2018), // branched: 2018-10-19
                 // <rust-lang/rust#50080>
                 // Before that, a stable edition flag didn't exist.
-                _ if version.triple >= V!(1, 27, 0) => Some(Self::Rust2015), // branched: 2018-05-04
-                _ => None,
+                () if version.triple >= V!(1, 27, 0) => Some(Self::Rust2015), // branched: 2018-05-04
+                () => None,
             },
             Channel::Beta { prerelease: _ } => None, // FIXME: Unimplemented.
             Channel::Nightly | Channel::Dev => match &version.commit {
                 Some(commit) => {
                     match () {
-                        _ if commit.date >= D!(2024, 11, 24) => Some(Self::Rust2024), // base: 1.85.0
-                        _ if commit.date >= D!(2021, 08, 31) => Some(Self::Rust2021), // base: 1.56.0
+                        () if commit.date >= D!(2024, 11, 24) => Some(Self::Rust2024), // base: 1.85.0
+                        () if commit.date >= D!(2021, 08, 31) => Some(Self::Rust2021), // base: 1.56.0
                         // <rust-lang/rust#54057>
                         // Note: Back then, unstable editions didn't require you to pass
                         // `-Zunstable-options`. Being on the nightly was sufficient.
-                        _ if commit.date >= D!(2018, 09, 09) => Some(Self::Rust2018), // base: 1.30.0 (branched: 2018-09-07)
+                        () if commit.date >= D!(2018, 09, 09) => Some(Self::Rust2018), // base: 1.30.0 (branched: 2018-09-07)
                         // <rust-lang/rust#50080> stabilized `-Zedition` as `--edition`,
                         // turn value `2015` stable and kept `2018` unstable.
-                        _ if commit.date >= D!(2018, 04, 21) => Some(Self::Rust2015), // base: 1.27.0
-                        _ => None,
+                        () if commit.date >= D!(2018, 04, 21) => Some(Self::Rust2015), // base: 1.27.0
+                        () => None,
                     }
                 }
                 _ => {
@@ -85,11 +85,11 @@ impl<'a> Edition<'a> {
                     //        so check against ONE_PATCH_LESS(stable_release)
                     // FIXME: Figure out if we can figure this out procedually from other data
                     match () {
-                        _ if version.triple >= V!(1, 86, 0) => Some(Self::Rust2024),
-                        _ if version.triple >= V!(1, 57, 0) => Some(Self::Rust2021),
-                        _ if version.triple >= V!(1, 31, 0) => Some(Self::Rust2018),
-                        _ if version.triple >= V!(1, 28, 0) => Some(Self::Rust2015),
-                        _ => None,
+                        () if version.triple >= V!(1, 86, 0) => Some(Self::Rust2024),
+                        () if version.triple >= V!(1, 57, 0) => Some(Self::Rust2021),
+                        () if version.triple >= V!(1, 31, 0) => Some(Self::Rust2018),
+                        () if version.triple >= V!(1, 28, 0) => Some(Self::Rust2015),
+                        () => None,
                     }
                 }
             },

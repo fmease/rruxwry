@@ -7,8 +7,6 @@ pub(crate) fn default<T: Default>() -> T {
     T::default()
 }
 
-pub(crate) type SmallVec<T, const N: usize> = smallvec::SmallVec<[T; N]>;
-
 pub(crate) macro parse($( $( $key:literal )|+ => $value:expr ),+ $(,)?) {
     |source| Ok(match source {
         $( $( $key )|+ => $value, )+

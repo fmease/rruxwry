@@ -8,7 +8,6 @@
 #![feature(if_let_guard)]
 #![feature(iter_collect_into)]
 #![feature(let_chains)]
-#![feature(os_str_display)]
 #![feature(slice_split_once)]
 #![feature(str_split_remainder)]
 #![feature(substr_range)]
