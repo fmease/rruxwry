@@ -130,7 +130,7 @@ pub(crate) fn arguments() -> Arguments {
                 .short('#')
                 .long("internals")
                 .action(clap::ArgAction::SetTrue)
-                .help("Enable rust{,do}c's `-Zverbose-internals`"),
+                .help("Enable internal pretty-printing of data types"),
             clap::Arg::new(id::NEXT_SOLVER)
                 .short('N')
                 .long("next-solver")
@@ -142,6 +142,11 @@ pub(crate) fn arguments() -> Arguments {
                 .value_name("IDENTITY")
                 .value_parser(Identity::parse_cli_style)
                 .help("Force rust{,do}c's identity"),
+            clap::Arg::new(id::NO_DEDUPE)
+                .short('D')
+                .long("no-dedupe")
+                .action(clap::ArgAction::SetTrue)
+                .help("Don't deduplicate diagnostics"),
             clap::Arg::new(id::LOG)
                 .long("log")
                 .value_name("FILTER")
@@ -393,6 +398,7 @@ pub(crate) fn arguments() -> Arguments {
             internals: matches.remove_one(id::INTERNALS).unwrap_or_default(),
             next_solver: matches.remove_one(id::NEXT_SOLVER).unwrap_or_default(),
             identity: matches.remove_one(id::IDENTITY),
+            no_dedupe: matches.remove_one(id::NO_DEDUPE).unwrap_or_default(),
             log: matches.remove_one(id::LOG),
             no_backtrace: matches.remove_one(id::NO_BACKTRACE).unwrap_or_default(),
         },
@@ -420,6 +426,7 @@ pub(crate) struct Arguments {
 
 impl ExtEdition<'static> {
     // FIXME: Take `<'a> &'a str` once clap is thrown out.
+    // FIXME: Somehow support `h`/`help` printing out rrx's superset of options
     fn parse_cli_style(source: &'static str) -> Self {
         Self::Fixed(match source {
             "d" => return Self::EngineDefault,
@@ -498,6 +505,7 @@ mod id {
     pub(super) const LOG: &str = "LOG";
     pub(super) const NEXT_SOLVER: &str = "NEXT_SOLVER";
     pub(super) const NO_BACKTRACE: &str = "NO_BACKTRACE";
+    pub(super) const NO_DEDUPE: &str = "NO_DEDUPE";
     pub(super) const NORMALIZE: &str = "NORMALIZE";
     pub(super) const OPEN: &str = "OPEN";
     pub(super) const PATH: &str = "PATH";

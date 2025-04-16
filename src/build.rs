@@ -416,6 +416,10 @@ fn configure_late(
         cmd.arg("-Zverbose-internals");
     }
 
+    if opts.b_opts.no_dedupe {
+        cmd.arg("-Zdeduplicate-diagnostics=no");
+    }
+
     if opts.b_opts.no_backtrace {
         cmd.env("RUST_BACKTRACE", "0");
     }
@@ -732,6 +736,7 @@ pub(crate) struct BuildOptions {
     pub(crate) internals: bool,
     pub(crate) next_solver: bool,
     pub(crate) identity: Option<Identity>,
+    pub(crate) no_dedupe: bool,
     pub(crate) log: Option<String>,
     pub(crate) no_backtrace: bool,
 }

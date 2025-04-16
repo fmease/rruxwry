@@ -151,9 +151,10 @@ Options:
   -F, --rustc-feature <NAME>  Enable an experimental rustc library or language feature
   -s, --shallow               Halt after parsing the source file
   -/, --suppress-lints        Cap lints at allow level
-  -#, --internals             Enable rust{,do}c's `-Zverbose-internals`
+  -#, --internals             Enable internal pretty-printing of data types
   -N, --next-solver           Enable the next-gen trait solver
   -I, --identity <IDENTITY>   Force rust{,do}c's identity
+  -D, --no-dedupe             Don't deduplicate diagnostics
       --log[=<FILTER>]        Enable rust{,do}c logging. FILTER defaults to `debug`
   -B, --no-backtrace          Override `RUST_BACKTRACE` to be `0`
   -V, --version               Print the underlying rust{,do}c version and halt
@@ -197,9 +198,10 @@ Options:
       --normalize                Normalize types
       --theme <THEME>            Set the theme [default: ayu]
   -/, --suppress-lints           Cap lints at allow level
-  -#, --internals                Enable rust{,do}c's `-Zverbose-internals`
+  -#, --internals                Enable internal pretty-printing of data types
   -N, --next-solver              Enable the next-gen trait solver
   -I, --identity <IDENTITY>      Force rust{,do}c's identity
+  -D, --no-dedupe                Don't deduplicate diagnostics
       --log[=<FILTER>]           Enable rust{,do}c logging. FILTER defaults to `debug`
   -B, --no-backtrace             Override `RUST_BACKTRACE` to be `0`
   -V, --version                  Print the underlying rust{,do}c version and halt
