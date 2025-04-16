@@ -79,7 +79,7 @@ fn try_main() -> error::Result {
     // FIXME: Construction of *Crate<ExtEdition> should arguably happen inside
     //        interface::arguments. Likely blocked on clap removal.
     let krate = data::Crate {
-        path: &args.path,
+        path: args.path.as_deref(),
         name: args.crate_name.as_ref().map(|name| name.as_ref()),
         typ: args.crate_type,
         edition: args.edition,

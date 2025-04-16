@@ -38,8 +38,9 @@ pub(crate) fn arguments() -> Arguments {
     let args = bin.chain(subcommand).chain(args);
 
     fn path() -> clap::Arg {
+        // The path is intentionally optional to enable invocations like `rrc -V`, `rrc -- -h`,
+        // `rrc -- -Zhelp`, `rrc -- -Chelp`, etc.
         clap::Arg::new(id::PATH)
-            .required_unless_present(id::ENGINE_VERSION)
             .value_parser(clap::builder::ValueParser::path_buf())
             .help("Path to the source file")
     }
@@ -373,7 +374,7 @@ pub(crate) fn arguments() -> Arguments {
     //        Fix: Throw out clap and do it manually.
     Arguments {
         toolchain,
-        path: matches.remove_one(id::PATH).unwrap_or_default(),
+        path: matches.remove_one(id::PATH),
         verbatim: matches.remove_many(id::VERBATIM).map(Iterator::collect).unwrap_or_default(),
         operation,
         crate_name: matches.remove_one(id::CRATE_NAME),
@@ -413,7 +414,7 @@ pub(crate) fn arguments() -> Arguments {
 pub(crate) struct Arguments {
     /// The toolchain, prefixed with `+`.
     pub(crate) toolchain: Option<OsString>,
-    pub(crate) path: PathBuf,
+    pub(crate) path: Option<PathBuf>,
     pub(crate) verbatim: Vec<String>,
     pub(crate) operation: Operation,
     pub(crate) crate_name: Option<CrateName<String>>,

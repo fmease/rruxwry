@@ -229,7 +229,9 @@ fn configure_early(
     // Must come first!
     configure_toolchain(cmd, opts.toolchain);
 
-    cmd.arg(krate.path);
+    if let Some(path) = krate.path {
+        cmd.arg(path);
+    }
 
     if let Some(name) = krate.name {
         cmd.arg("--crate-name");

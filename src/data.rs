@@ -218,7 +218,7 @@ pub(crate) enum Identity {
 
 #[derive(Clone, Copy)]
 pub(crate) struct Crate<'a, E = Edition<'a>> {
-    pub(crate) path: &'a Path,
+    pub(crate) path: Option<&'a Path>,
     pub(crate) name: Option<CrateName<&'a str>>,
     pub(crate) typ: Option<CrateType>,
     pub(crate) edition: Option<E>,

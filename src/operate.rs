@@ -185,17 +185,23 @@ fn document_cross_crate(
     open: Open,
     cx: Context<'_>,
 ) -> Result<()> {
+    let path = krate.path.ok_or_else(|| {
+        error(fmt!(
+            "the `PATH` argument was not provided but it's required under `-X`, `--cross-crate`"
+        ))
+        .done()
+    })?;
+
     let krate = Crate { typ: krate.typ.or(Some(CrateType("lib"))), ..krate };
     let krate = build_default(&EngineOptions::Rustc(default()), krate, opts, cx)?;
 
     // FIXME: This `unwrap` is obviously reachable (e.g., on `rrc '%$?'`)
-    let crate_name: CrateName<Cow<'_, _>> = krate.name.map_or_else(
-        || CrateName::adjust_and_parse_file_path(krate.path).unwrap().into(),
-        Into::into,
-    );
+    let crate_name: CrateName<Cow<'_, _>> = krate
+        .name
+        .map_or_else(|| CrateName::adjust_and_parse_file_path(path).unwrap().into(), Into::into);
 
     let root_crate_name = CrateName::new_unchecked(format!("u_{crate_name}"));
-    let root_crate_path = krate.path.with_file_name(root_crate_name.as_str()).with_extension("rs");
+    let root_crate_path = path.with_file_name(root_crate_name.as_str()).with_extension("rs");
 
     if !opts.dbg_opts.dry_run && !root_crate_path.exists() {
         // While we could omit the `extern crate` declaration in `edition >= Edition::Edition2018`,
@@ -210,8 +216,12 @@ fn document_cross_crate(
 
     let deps = &[ExternCrate::Named { name: crate_name.as_ref(), path: None, typ: None }];
 
-    let krate =
-        Crate { path: &root_crate_path, name: Some(root_crate_name.as_ref()), typ: None, ..krate };
+    let krate = Crate {
+        path: Some(&root_crate_path),
+        name: Some(root_crate_name.as_ref()),
+        typ: None,
+        ..krate
+    };
 
     build::perform(
         &EngineOptions::Rustdoc(d_opts),
@@ -254,7 +264,14 @@ fn build_directive_driven<'a>(
     flavor: directive::Flavor,
     cx: Context<'a>,
 ) -> Result<(Crate<'a>, VerbatimOptions<'a>)> {
-    let (path, revision) = match krate.path.as_os_str().rsplit_once(Char::NumberSign) {
+    let path = krate.path.ok_or_else(|| {
+        error(fmt!(
+            "the `PATH` argument was not provided but it's required under `-@`, `--directives`"
+        ))
+        .done()
+    })?;
+
+    let (path, revision) = match path.as_os_str().rsplit_once(Char::NumberSign) {
         Some((path, revision)) => {
             let Some(revision) = revision.to_str() else {
                 return Err(error(fmt!(
@@ -266,7 +283,7 @@ fn build_directive_driven<'a>(
             };
             (Path::new(path), Some(revision))
         }
-        None => (krate.path, None),
+        None => (path, None),
     };
 
     let revision = match (revision, opts.b_opts.revision.as_deref()) {
@@ -323,7 +340,7 @@ fn build_directive_driven<'a>(
         Some(edition) => edition.resolve(e_opts.kind(), cx),
         None => directives.edition.map(|edition| Edition::Unknown(edition.bare)),
     };
-    let krate = Crate { path, edition, ..krate };
+    let krate = Crate { path: Some(path), edition, ..krate };
 
     opts.v_opts.extend(directives.v_opts);
     match e_opts {
@@ -375,7 +392,7 @@ fn compile_auxiliary<'a>(
     opts.v_opts.extend(directives.v_opts);
 
     let krate = Crate {
-        path: &path.bare,
+        path: Some(&path.bare),
         // FIXME: Does compiletest do something 'smarter'?
         name: None,
         typ,
