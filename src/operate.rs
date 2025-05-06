@@ -121,8 +121,14 @@ fn run(
     run_v_opts: &VerbatimOptions<'_>,
     cx: Context<'_>,
 ) -> Result {
-    // FIXME: Explainer
-    let crate_name = build::query_crate_name(krate, opts, cx)?;
+    // FIXME: Explain why we need to query the crate name.
+    let crate_name = build::query_crate_name(krate, opts, cx).map_err(|error| {
+        // FIXME: Actually create a 'parent' error diagnostic with a message akin to
+        //        "failed to run the built binary (requested …)" and smh.
+        //        'tuck' the QueryCrateNameError below it (i.e., more indented).
+        error.emit()
+    })?;
+
     let mut path: PathBuf = [".", crate_name.as_str()].into_iter().collect();
     path.set_extension(std::env::consts::EXE_EXTENSION);
 
@@ -167,7 +173,14 @@ fn document<'a>(
 }
 
 fn open(krate: Crate<'_>, opts: &Options<'_>, cx: Context<'_>) -> Result<()> {
-    let crate_name = build::query_crate_name(krate, opts, cx)?;
+    // FIXME: Explain why we need to query the crate name.
+    let crate_name = build::query_crate_name(krate, opts, cx).map_err(|error| {
+        // FIXME: Actually create a 'parent' error diagnostic with a message akin to
+        //        "failed to open the generated docs (requested …)" and smh.
+        //        'tuck' the QueryCrateNameError below it (i.e., more indented).
+        error.emit()
+    })?;
+
     let path = format!("./doc/{crate_name}/index.html");
 
     build::open(Path::new(&path), opts.dbg_opts).map_err(|error| {

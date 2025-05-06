@@ -133,7 +133,7 @@ impl<S: AsRef<str>> CrateName<S> {
         Self(name)
     }
 
-    pub(crate) fn parse(source: S) -> Result<Self, ()> {
+    pub(crate) fn parse(source: S) -> Result<Self, S> {
         // This does indeed follow rustc's rules:
         //
         // Crate names are considered to be non-empty Unicode-alphanumeric strings —
@@ -148,7 +148,7 @@ impl<S: AsRef<str>> CrateName<S> {
         {
             Ok(Self(source))
         } else {
-            Err(())
+            Err(source)
         }
     }
 

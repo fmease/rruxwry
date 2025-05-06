@@ -9,11 +9,11 @@ pub(crate) enum Error {
 }
 
 impl Error {
-    pub(crate) fn emit(self) {
+    pub(crate) fn emit(self) -> EmittedError {
         match self {
             Self::Io(error) => self::error(fmt!("{error}")).done(),
             Self::Emitted(error) => error,
-        };
+        }
     }
 }
 

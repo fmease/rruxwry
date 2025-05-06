@@ -27,6 +27,7 @@ use std::{
     ops::ControlFlow,
     path::Path,
     process::{self, Command},
+    string::FromUtf8Error,
 };
 
 mod environment;
@@ -174,16 +175,31 @@ impl EngineVersionError {
     }
 }
 
-pub(crate) fn query_crate_name(
-    krate: Crate<'_>,
+pub(crate) fn query_crate_name<'a>(
+    krate: Crate<'a>,
     opts: &Options<'_>,
     cx: Context<'_>,
-) -> Result<CrateName<String>> {
+) -> Result<CrateName<Cow<'a, str>>, QueryCrateNameError> {
+    use QueryCrateNameError as Error;
+
+    // If we've been explicitly given a crate name, just use it. It doesn't matter if it
+    // doesn't match the `#![crate_name]` since we assume that callers of this function
+    // have already tried executing rust{,do}c under the same configuration `(krate, opts)`
+    // meaning we should've already bailed out on a mismatch reported by the engine.
+    //
+    // This isn't just a fast path: Querying rustc can fail in practice if the user has
+    // provided us with an invalid configuration (1); this allows them to quickly suppress
+    // this query by manually providing an "overwrite".
+    if let Some(name) = krate.name {
+        return Ok(name.into());
+    }
+
     let engine = EngineOptions::Rustc(default());
 
     let mut cmd = Command::new(engine.kind().name());
 
-    configure_early(&mut cmd, &engine, krate, opts, cx)?;
+    // FIXME: Make this function return a more structured error and then get rid of `Error::Other`.
+    configure_early(&mut cmd, &engine, krate, opts, cx).map_err(Error::Other)?;
 
     cmd.arg("--print=crate-name");
 
@@ -196,25 +212,71 @@ pub(crate) fn query_crate_name(
     }
 
     // FIXME: Double check that `path`=`-` (STDIN) properly works with `output()` once we support that ourselves.
-    let output = cmd.output()?;
+    let mut output = cmd.output().map_err(Error::ProcessSpawningFailed)?;
     _ = output.stderr;
 
-    // If we trigger this likely means we passed incorrect flags to the rustc invocation.
-    // FIXME: Unfortunately, this can actually be triggered in practice under `d -@`
-    // since we pass along verbatim flags as obtained by `compile-flags` directives
-    // which may "erroneously" contain rustdoc-specific flags. See also
-    // <https://github.com/rust-lang/rust/issues/137442>.
-    // If the r-l/r doesn't go anywhere provide a mechanism(s) (via a flag) to
-    // somehow remedy this situation (e.g., filtering flags or skipping given
-    // directives).
-    assert!(output.status.success(), "failed to properly query rustc about the crate name");
+    if !output.status.success() {
+        // (1) This likely means we passed incorrect flags to the rustc invocation which
+        // can happen in practice if the user knowingly or unknowingly provided verbatim
+        // flags that don't make for `rustc --print=crate-name`.
+        //
+        // A common example at the time of writing would be rustdoc tests using
+        // `//@ compile-flags` for rustdoc-specific flags instead of `//@ doc-flags`.
+        // See also <https://github.com/rust-lang/rust/issues/137442>.
+        //
+        // We (obviously) have to pass along any rustc-specific verbatim flags because
+        // they could contain `--crate-name`, `--edition` (albeit master compiletest
+        // actually rejects this since recently and we now need to do so, too, sadly
+        // but we haven't yet) which influence the crate name.
 
-    let crate_name = String::from_utf8(output.stdout).map_err(drop).and_then(|mut output| {
-        output.truncate(output.trim_end().len());
-        CrateName::parse(output)
-    });
+        // // FIXME: Maybe forward rustc's stderr under `-vv` (`-vv` not allowed yet).
+        return Err(Error::RustcErrored);
+    }
 
-    Ok(crate_name.expect("rustc provided an invalid crate name"))
+    // Trim the trailing line break.
+    output.stdout.truncate(output.stdout.trim_ascii_end().len());
+
+    let name = String::from_utf8(output.stdout).map_err(Error::InvalidUtf8)?;
+
+    CrateName::parse(name).map(Into::into).map_err(Error::InvalidCrateName)
+}
+
+pub(crate) enum QueryCrateNameError {
+    ProcessSpawningFailed(io::Error),
+    RustcErrored,
+    InvalidUtf8(FromUtf8Error),
+    InvalidCrateName(String),
+    Other(crate::error::Error),
+}
+
+impl QueryCrateNameError {
+    pub(crate) fn emit(self) -> EmittedError {
+        let error = error(fmt!("failed to obtain the crate name from rustc"));
+
+        match self {
+            Self::ProcessSpawningFailed(cause) => {
+                error.note(fmt!("failed to execute `rustc`: {cause}"))
+            }
+            Self::RustcErrored => {
+                // FIXME: Attempt to better explain what's going on, see (1).
+                error
+                    .note(fmt!(
+                        "`rustc` returned an error likely due to invalid flags passed to it"
+                    ))
+                    .help(fmt!("try rerunning with `-n<NAME>` set to bypass this logic"))
+            }
+            Self::InvalidUtf8(cause) => error.note(|p| {
+                write!(p, "`rustc` provided `")?;
+                p.write_all(cause.as_bytes())?;
+                write!(p, "` which is not valid UTF-8")
+            }),
+            Self::InvalidCrateName(name) => {
+                error.note(fmt!("`rustc` provided `{name}` which is not a valid crate name"))
+            }
+            Self::Other(error) => return error.emit(),
+        }
+        .done()
+    }
 }
 
 /// Configure the engine invocation with options that it needs very early
