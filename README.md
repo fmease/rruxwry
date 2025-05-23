@@ -145,10 +145,9 @@ Options:
   -n, --crate-name <NAME>     Set the name of the crate
   -t, --crate-type <TYPE>     Set the type of the crate
   -e, --edition <EDITION>     Set the edition of the crate
-      --cfg <NAME>            Enable a `cfg`
+      --cfg <NAME[="VALUE"]>  Enable a `cfg`
   -R, --revision <NAME>       Enable a compiletest revision
-  -f, --cargo-feature <NAME>  Enable a Cargo-like feature
-  -F, --rustc-feature <NAME>  Enable an experimental rustc library or language feature
+  -F, --feature <NAME>        Enable an experimental library or language feature
   -s, --shallow               Halt after parsing the source file
   -/, --suppress-lints        Cap lints at allow level
   -#, --internals             Enable internal pretty-printing of data types
@@ -187,10 +186,9 @@ Options:
   -t, --crate-type <TYPE>        Set the type of the crate
       --crate-version <VERSION>  Set the version of the (base) crate
   -e, --edition <EDITION>        Set the edition of the crate
-      --cfg <NAME>               Enable a `cfg`
+      --cfg <NAME[="VALUE"]>     Enable a `cfg`
   -R, --revision <NAME>          Enable a compiletest revision
-  -f, --cargo-feature <NAME>     Enable a Cargo-like feature
-  -F, --rustc-feature <NAME>     Enable an experimental rustc library or language feature
+  -F, --feature <NAME>           Enable an experimental library or language feature
   -P, --private                  Document private items
   -H, --hidden                   Document hidden items
       --layout                   Document the memory layout of types

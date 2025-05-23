@@ -96,7 +96,7 @@ pub(crate) fn arguments() -> Arguments {
         [
             clap::Arg::new(id::CFGS)
                 .long("cfg")
-                .value_name("NAME")
+                .value_name(r#"NAME[="VALUE"]"#)
                 .action(clap::ArgAction::Append)
                 .help("Enable a `cfg`"),
             clap::Arg::new(id::REVISION)
@@ -105,19 +105,13 @@ pub(crate) fn arguments() -> Arguments {
                 .value_name("NAME")
                 .requires(id::DIRECTIVES)
                 .help("Enable a compiletest revision"),
-            clap::Arg::new(id::CARGO_FEATURES)
-                .short('f')
-                .long("cargo-feature")
-                .value_name("NAME")
-                .action(clap::ArgAction::Append)
-                .help("Enable a Cargo-like feature"),
             // FIXME: This doesn't really belong in this "group" (`cfgs`)
-            clap::Arg::new(id::RUSTC_FEATURES)
+            clap::Arg::new(id::UNSTABLE_FEATURES)
                 .short('F')
-                .long("rustc-feature")
+                .long("feature")
                 .value_name("NAME")
                 .action(clap::ArgAction::Append)
-                .help("Enable an experimental rustc library or language feature"),
+                .help("Enable an experimental library or language feature"),
         ]
     }
     fn extra() -> impl IntoIterator<Item = clap::Arg> {
@@ -387,12 +381,8 @@ pub(crate) fn arguments() -> Arguments {
         b_opts: BuildOptions {
             cfgs: matches.remove_many(id::CFGS).map(Iterator::collect).unwrap_or_default(),
             revision: matches.remove_one(id::REVISION),
-            cargo_features: matches
-                .remove_many(id::CARGO_FEATURES)
-                .map(Iterator::collect)
-                .unwrap_or_default(),
-            rustc_features: matches
-                .remove_many(id::RUSTC_FEATURES)
+            unstable_features: matches
+                .remove_many(id::UNSTABLE_FEATURES)
                 .map(Iterator::collect)
                 .unwrap_or_default(),
             suppress_lints: matches.remove_one(id::SUPPRESS_LINTS).unwrap_or_default(),
@@ -483,7 +473,6 @@ fn possible_values(values: impl Iterator<Item: std::fmt::Display> + Clone) -> St
 mod id {
     pub(super) const BLESS: &str = "BLESS";
     pub(super) const BUILD: &str = "build";
-    pub(super) const CARGO_FEATURES: &str = "CARGO_FEATURES";
     pub(super) const CFGS: &str = "CFGS";
     pub(super) const CHECK_ONLY: &str = "CHECK_ONLY";
     pub(super) const COLOR: &str = "COLOR";
@@ -513,10 +502,10 @@ mod id {
     pub(super) const PRIVATE: &str = "PRIVATE";
     pub(super) const REVISION: &str = "REVISION";
     pub(super) const RUN: &str = "RUN";
-    pub(super) const RUSTC_FEATURES: &str = "RUSTC_FEATURES";
     pub(super) const SHALLOW: &str = "SHALLOW";
     pub(super) const SUPPRESS_LINTS: &str = "SUPPRESS_LINTS";
     pub(super) const THEME: &str = "THEME";
+    pub(super) const UNSTABLE_FEATURES: &str = "UNSTABLE_FEATURES";
     pub(super) const VERBATIM: &str = "VERBATIM";
     pub(super) const VERBOSE: &str = "VERBOSE";
 }

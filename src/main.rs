@@ -59,9 +59,6 @@ fn try_main() -> error::Result {
         clap::ColorChoice::Auto => {}
     }
 
-    // FIXME: eagerly lower `-f`s to `--cfg`s here (or rather in `cli`?),
-    // so we properly support them in `compiletest`+command
-
     // FIXME: this is awkward ... can we do this inside cli smh (not the ref op ofc)
     // FIXME: Check if it's possible to make this a build::VerbatimOptions<()>.
     let v_opts = build::VerbatimOptions {

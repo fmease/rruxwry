@@ -2,14 +2,6 @@
 //!
 //! The high-level build operations are defined in [`crate::operate`].
 
-// FIXME: Stop doing that, it's unnecessary and wasted effort:
-// Note that we try to avoid generating unnecessary flags where possible even if that means
-// doing more work on our side. The main motivation for this is being able to just copy/paste
-// the commands printed by `--verbose` for use in GitHub discussions without requiring any
-// manual minimization.
-// FIXME: Also mention to reduce conflicts with compile flags passed via `compiletest`
-//        as well as those passed via the `RUST{,DOC}FLAGS` env vars.
-
 use crate::{
     context::Context,
     data::{Channel, Crate, CrateName, CrateType, D, DocBackend, Identity, V, Version},
@@ -449,20 +441,13 @@ fn configure_late(
             cmd.arg(cfg);
         }
         // FIXME: This shouldn't be done here.
-        for feature in &opts.b_opts.cargo_features {
-            // FIXME: Warn on conflicts with `cfgs` from `cmd.arguments.cfgs`.
-            // FIXME: collapse
-            cmd.arg("--cfg");
-            cmd.arg(format!("feature=\"{feature}\""));
-        }
-        // FIXME: This shouldn't be done here.
         if let Some(revision) = &opts.b_opts.revision {
             cmd.arg("--cfg");
             cmd.arg(revision);
         }
     }
 
-    for feature in &opts.b_opts.rustc_features {
+    for feature in &opts.b_opts.unstable_features {
         cmd.arg(format!("-Zcrate-attr=feature({feature})"));
     }
 
@@ -793,9 +778,7 @@ pub(crate) struct DocOptions<'a> {
 pub(crate) struct BuildOptions {
     pub(crate) cfgs: Vec<String>,
     pub(crate) revision: Option<String>,
-    // FIXME: This shouldn't be here:
-    pub(crate) cargo_features: Vec<String>,
-    pub(crate) rustc_features: Vec<String>,
+    pub(crate) unstable_features: Vec<String>,
     pub(crate) suppress_lints: bool,
     pub(crate) internals: bool,
     pub(crate) next_solver: bool,
