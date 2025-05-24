@@ -6,10 +6,10 @@ use crate::{
 };
 use std::{cell::RefCell, ffi::OsString};
 
-pub(crate) macro initialize($cx:ident, $opts:expr) {
-    let cx = ContextData::new($opts);
-    let $cx = Context::new(&cx);
-}
+pub(crate) macro new($opts:expr) {{
+    super let cx = ContextData::new($opts);
+    Context::new(&cx)
+}}
 
 // FIXME: Add a Painter to the context.
 
@@ -19,6 +19,7 @@ pub(crate) struct Context<'cx> {
 }
 
 impl<'cx> Context<'cx> {
+    #[doc(hidden)]
     pub(crate) fn new(data: &'cx ContextData) -> Self {
         Self { data }
     }
@@ -51,6 +52,8 @@ impl<'cx> Context<'cx> {
         }
     }
 }
+
+#[doc(hidden)]
 pub(crate) struct ContextData {
     map: SourceMap,
     rustc: RefCell<Option<Result<Version<String>, EngineVersionError>>>,
@@ -59,6 +62,7 @@ pub(crate) struct ContextData {
 }
 
 impl ContextData {
+    #[doc(hidden)]
     pub(crate) fn new(opts: &Options<'_>) -> Self {
         Self {
             map: default(),

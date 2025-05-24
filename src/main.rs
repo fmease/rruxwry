@@ -11,6 +11,7 @@
 #![feature(slice_split_once)]
 #![feature(str_split_remainder)]
 #![feature(substr_range)]
+#![feature(super_let)]
 #![feature(trait_alias)]
 #![feature(type_changing_struct_update)]
 // Lints //
@@ -82,7 +83,7 @@ fn try_main() -> error::Result {
         edition: args.edition,
     };
 
-    context::initialize!(cx, &opts);
+    let cx = context::new!(&opts);
 
     operate::perform(args.operation, krate, opts, cx)
 }

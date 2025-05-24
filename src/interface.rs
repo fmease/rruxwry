@@ -466,6 +466,7 @@ impl Identity {
 }
 
 // FIXME: clap requires the ret ty to be ~owned, ideally we'd just return `&'input str`.
+#[expect(clippy::unnecessary_wraps)] // not in our control
 fn parse_unstable_feature_cli_style(source: &str) -> Result<String, String> {
     Ok(match source {
         "ace" => "associated_const_equality",
