@@ -96,9 +96,10 @@ pub(crate) fn arguments() -> Arguments {
         [
             clap::Arg::new(id::CFGS)
                 .long("cfg")
+                // FIXME: This gets rendered as `<NAME[="VALUE"]>` by clap but ideally we'd print `<NAME>[="<VALUE>"]`.
                 .value_name(r#"NAME[="VALUE"]"#)
                 .action(clap::ArgAction::Append)
-                .help("Enable a `cfg`"),
+                .help("Enable a configuration"),
             clap::Arg::new(id::REVISION)
                 .short('R')
                 .long("revision")
@@ -110,6 +111,7 @@ pub(crate) fn arguments() -> Arguments {
                 .short('F')
                 .long("feature")
                 .value_name("NAME")
+                .value_parser(parse_unstable_feature_cli_style)
                 .action(clap::ArgAction::Append)
                 .help("Enable an experimental library or language feature"),
         ]
@@ -461,6 +463,32 @@ impl Identity {
         )(source)
         .map_err(possible_values)
     }
+}
+
+// FIXME: clap requires the ret ty to be ~owned, ideally we'd just return `&'input str`.
+fn parse_unstable_feature_cli_style(source: &str) -> Result<String, String> {
+    Ok(match source {
+        "ace" => "associated_const_equality",
+        "acp" => "adt_const_params",
+        "dm" | "m" => "decl_macro",
+        "gce" => "generic_const_exprs",
+        "gci" => "generic_const_items",
+        "gcpt" | "gcg" => "generic_const_parameter_types",
+        "iat" => "inherent_associated_types",
+        "itiat" | "atpit" => "impl_trait_in_assoc_type",
+        "itib" => "impl_trait_in_bindings",
+        "lta" => "lazy_type_alias",
+        "mgca" => "min_generic_const_args",
+        "nlb" => "non_lifetime_binders",
+        "rtn" => "return_type_notation",
+        "sea" => "stmt_expr_attributes",
+        "ta" => "trait_alias",
+        "tait" => "type_alias_impl_trait",
+        "tcsu" => "type_changing_struct_update",
+        "ucp" => "unsized_const_params",
+        _ => source,
+    }
+    .to_string())
 }
 
 fn possible_values(values: impl Iterator<Item: std::fmt::Display> + Clone) -> String {
