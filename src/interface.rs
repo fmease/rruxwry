@@ -118,6 +118,12 @@ pub(crate) fn arguments() -> Arguments {
     }
     fn extra() -> impl IntoIterator<Item = clap::Arg> {
         [
+            clap::Arg::new(id::EXTERN)
+                .short('x')
+                .long("extern")
+                .value_name("NAME")
+                .action(clap::ArgAction::Append)
+                .help("Register an external library"),
             clap::Arg::new(id::SUPPRESS_LINTS)
                 .short('/')
                 .long("suppress-lints")
@@ -372,7 +378,7 @@ pub(crate) fn arguments() -> Arguments {
     let crate_type = matches
         .remove_one(id::CRATE_TYPE)
         .map(|typ: String| CrateType::parse_cli_style(typ.leak()))
-        .or_else(|| match operation {
+        .or(match operation {
             Operation::Compile { run: Run::No, mode: CompileMode::Default, .. } => {
                 Some(CrateType::LIB)
             }
@@ -394,6 +400,10 @@ pub(crate) fn arguments() -> Arguments {
             revision: matches.remove_one(id::REVISION),
             unstable_features: matches
                 .remove_many(id::UNSTABLE_FEATURES)
+                .map(Iterator::collect)
+                .unwrap_or_default(),
+            extern_crates: matches
+                .remove_many(id::EXTERN)
                 .map(Iterator::collect)
                 .unwrap_or_default(),
             suppress_lints: matches.remove_one(id::SUPPRESS_LINTS).unwrap_or_default(),
@@ -524,6 +534,7 @@ mod id {
     pub(super) const DRY_RUN: &str = "DRY_RUN";
     pub(super) const EDITION: &str = "EDITION";
     pub(super) const ENGINE_VERSION: &str = "ENGINE_VERSION";
+    pub(super) const EXTERN: &str = "EXTERN";
     pub(super) const HIDDEN: &str = "HIDDEN";
     pub(super) const IDENTITY: &str = "IDENTITY";
     pub(super) const INTERNALS: &str = "INTERNALS";

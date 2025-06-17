@@ -165,11 +165,19 @@ impl<S: AsRef<str>> CrateName<S> {
     pub(crate) fn as_str(&self) -> &str {
         self.0.as_ref()
     }
+
+    pub(crate) fn into_inner(self) -> S {
+        self.0
+    }
 }
 
 impl CrateName<String> {
-    pub(crate) fn adjust_and_parse_file_path(path: &Path) -> Result<Self, ()> {
-        path.file_stem().and_then(|name| name.to_str()).ok_or(()).and_then(Self::adjust_and_parse)
+    pub(crate) fn adjust_and_parse_file_path(path: impl AsRef<Path>) -> Result<Self, ()> {
+        path.as_ref()
+            .file_stem()
+            .and_then(|name| name.to_str())
+            .ok_or(())
+            .and_then(Self::adjust_and_parse)
     }
 
     pub(crate) fn adjust_and_parse(source: &str) -> Result<Self, ()> {

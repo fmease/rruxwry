@@ -14,14 +14,14 @@
 //        want to provide a mechanism to circumvent that. E.g., `--force` or `-S <allow|warn>=...`.
 
 use crate::{
-    build::{ExternCrate, VerbatimOptions},
+    build::VerbatimOptions,
     context::Context,
     data::{CrateName, CrateType},
     diagnostic::{EmittedError, error, fmt, warn},
     source::{LocalSpan, SourceFileRef, Span, Spanned},
     utility::{Conjunction, ListingExt, default},
 };
-use std::{collections::BTreeSet, fmt, mem, path::Path, str::CharIndices};
+use std::{borrow::Cow, collections::BTreeSet, fmt, mem, path::Path, str::CharIndices};
 
 #[cfg(test)]
 mod test;
@@ -221,47 +221,37 @@ impl InstantiationError<'_, '_> {
 #[cfg_attr(test, derive(PartialEq, Eq, Debug))]
 pub(crate) struct InstantiatedDirectives<'src> {
     pub(crate) build_aux_docs: bool,
-    pub(crate) dependencies: Vec<ExternCrate<'src>>,
+    pub(crate) auxes: Vec<Auxiliary<'src>>,
     pub(crate) edition: Option<Spanned<&'src str>>,
     pub(crate) v_opts: VerbatimOptions<'src>,
     pub(crate) v_d_opts: VerbatimOptions<'src, ()>,
     pub(crate) run_v_opts: VerbatimOptions<'src>,
-    no_prefer_dynamic: bool,
+    pub(crate) prefer_dylib: PreferDylib,
 }
 
 impl<'src> InstantiatedDirectives<'src> {
     #[allow(clippy::needless_pass_by_value)]
     fn adjoin(&mut self, directive: SimpleDirective<'src>) {
-        // Compiletest defaults to `dylib` unless the target architecture
-        // doesn't support dynamic linking in which case it also uses `lib`.
-        // Since we don't have any "infrastructure" in place for checking
-        // target architectures, let's fall back to the "safer" option.
-        let typ = || match self.no_prefer_dynamic {
-            true => None,
-            false => Some(CrateType::LIB),
-        };
-
         match directive {
-            // FIXME: Audit this.
-            SimpleDirective::AuxBin { path } => {
-                self.dependencies.push(ExternCrate::Unnamed { path, typ: Some(CrateType::BIN) });
-            }
-            SimpleDirective::AuxBuild { path } => {
-                self.dependencies.push(ExternCrate::Unnamed { path, typ: typ() });
-            }
-            SimpleDirective::AuxCrate { name, path } => {
-                self.dependencies.push(ExternCrate::Named {
-                    name,
-                    path: path.map(|path| path.map(Into::into)),
-                    typ: typ(),
-                });
-            }
-            // FIXME: Audit this: Doesn't this need to be a named crate?
-            SimpleDirective::AuxProcMacro { path } => {
-                self.dependencies
-                    .push(ExternCrate::Unnamed { path, typ: Some(CrateType::PROC_MACRO) });
-            }
-
+            SimpleDirective::Aux(directive) => self.auxes.push(match directive {
+                // FIXME: Audit this!
+                AuxiliaryDirective::Bin { path } => {
+                    Auxiliary { prefix: None, path, typ: Some(CrateType::BIN) }
+                }
+                AuxiliaryDirective::Build { path } => Auxiliary { prefix: None, path, typ: None },
+                AuxiliaryDirective::Crate { prefix, path } => {
+                    Auxiliary { prefix: Some(prefix.into()), path, typ: None }
+                }
+                AuxiliaryDirective::ProcMacro { path } => {
+                    // FIXME: unwrap
+                    let prefix = CrateName::adjust_and_parse_file_path(path.bare).unwrap();
+                    Auxiliary {
+                        prefix: Some(prefix.into_inner().into()),
+                        path,
+                        typ: Some(CrateType::PROC_MACRO),
+                    }
+                }
+            }),
             SimpleDirective::BuildAuxDocs => self.build_aux_docs = true,
             // FIXME: Emit an error if multiple `edition` directives were specified just like `compiletest` does.
             // FIXME: When encountering unconditional+conditional, emit a warning.
@@ -286,7 +276,7 @@ impl<'src> InstantiatedDirectives<'src> {
                 stage.extend(flags.split_whitespace());
             }
             // FIXME: What does compiletest do on duplicates? We should at least warn.
-            SimpleDirective::NoPreferDynamic => self.no_prefer_dynamic = true,
+            SimpleDirective::NoPreferDynamic => self.prefer_dylib = PreferDylib::No,
             SimpleDirective::Revisions(_) => unreachable!(), // Already dealt with in `Directives::add`.
             // FIXME: Actually implement these directives.
             | SimpleDirective::HtmlDocCk(..)
@@ -294,6 +284,23 @@ impl<'src> InstantiatedDirectives<'src> {
             | SimpleDirective::Rruxwry(..) => {}
         }
     }
+}
+
+#[derive(Clone, Copy, Default)]
+#[cfg_attr(test, derive(PartialEq, Eq, Debug))]
+pub(crate) enum PreferDylib {
+    #[default]
+    Yes,
+    No,
+}
+
+#[derive(Clone)]
+#[cfg_attr(test, derive(PartialEq, Eq, Debug))]
+pub(crate) struct Auxiliary<'src> {
+    // FIXME: bad name
+    pub(crate) prefix: Option<Cow<'src, str>>,
+    pub(crate) path: Spanned<&'src str>,
+    pub(crate) typ: Option<CrateType>,
 }
 
 type UninstantiatedDirectives<'src> = Vec<(Spanned<&'src str>, SimpleDirective<'src>)>;
@@ -308,20 +315,7 @@ struct Directive<'src> {
 #[derive(Clone)]
 #[cfg_attr(test, derive(PartialEq, Eq, Debug))]
 enum SimpleDirective<'src> {
-    AuxBin {
-        path: Spanned<&'src str>,
-    },
-    AuxBuild {
-        path: Spanned<&'src str>,
-    },
-    // FIXME: compiletest doesn't consider the path to be optional (gate this behind Flavor::Rruxwry).
-    AuxCrate {
-        name: CrateName<&'src str>,
-        path: Option<Spanned<&'src str>>,
-    },
-    AuxProcMacro {
-        path: Spanned<&'src str>,
-    },
+    Aux(AuxiliaryDirective<'src>),
     BuildAuxDocs,
     Edition(Spanned<&'src str>),
     EnvVar(&'src str, Option<&'src str>, Stage),
@@ -336,6 +330,15 @@ enum SimpleDirective<'src> {
     JsonDocCk(JsonDocCkDirective, Polarity),
     #[allow(dead_code)]
     Rruxwry(RruxwryDirective),
+}
+
+#[derive(Clone)]
+#[cfg_attr(test, derive(PartialEq, Eq, Debug))]
+enum AuxiliaryDirective<'src> {
+    Bin { path: Spanned<&'src str> },
+    Build { path: Spanned<&'src str> },
+    Crate { prefix: &'src str, path: Spanned<&'src str> },
+    ProcMacro { path: Spanned<&'src str> },
 }
 
 #[derive(Clone, Copy)]
@@ -471,34 +474,28 @@ impl<'src> Parser<'src> {
         Ok(Some(match source.bare {
             "aux-bin" => {
                 self.parse_separator(Padding::Yes)?; // FIXME: Audit Padding::Yes.
-                SimpleDirective::AuxBin { path: self.parse_until_line_break() }
+                SimpleDirective::Aux(AuxiliaryDirective::Bin {
+                    path: self.parse_until_line_break(),
+                })
             }
             "aux-build" => {
                 self.parse_separator(Padding::Yes)?; // FIXME: Audit Padding::Yes.
-                SimpleDirective::AuxBuild { path: self.parse_until_line_break() }
+                SimpleDirective::Aux(AuxiliaryDirective::Build {
+                    path: self.parse_until_line_break(),
+                })
             }
-            // FIXME: `compiletest` automatically supports extern options like
-            //        `priv`, `noprelude`, `nounused` or `force` by virtue of passing
-            //        the RHS verbatim to rustc (I think).
-            //        Example: `//@ aux-crate:priv,noprelude:somedep=somedep.rs`.
-            //        Add support for extern options but actually perform *some*
-            //        validation without being too forward-incompatible.
-            // Compiletest doesn't support optional paths (`//@ aux-crate:name`)
-            // last time I checked.
-            // FIXME: Under Flavor::Rruxwry make the path optional (should we tho?).
             "aux-crate" => {
-                self.parse_separator(Padding::Yes)?; // FIXME: Audit Padding::Yes.
+                self.parse_separator(Padding::Yes)?;
 
-                // We're doing this two-step process — (greedy) lexing followed by validation —
-                // to be able to provide a better error message.
-                let name = self.expect_many(|char| char != '=' && !char.is_whitespace())?.bare;
-                // FIXME: Does compiletest also validate the crate name? I doubt it.
-                let Ok(name) = CrateName::parse(name) else {
-                    return Err(Error::InvalidValue(name));
-                };
+                // The prefix contains the crate name as well as extern options.
+                let prefix = self.expect_many(|char| char != '=')?.bare;
 
-                let path = self.consume(|char| char == '=').then(|| self.parse_until_line_break());
-                SimpleDirective::AuxCrate { name, path }
+                // FIXME: If Flavor::Rruxwry, support optional paths where the path is
+                //        deduced from the prefix (e.g., `priv:name` → path is `name.rs`).
+                self.expect('=')?;
+
+                let path = self.parse_until_line_break();
+                SimpleDirective::Aux(AuxiliaryDirective::Crate { prefix, path })
             }
             "build-aux-docs" => {
                 match self.scope {
@@ -553,7 +550,9 @@ impl<'src> Parser<'src> {
             "proc-macro" => {
                 self.parse_separator(Padding::Yes)?; // FIXME: Audit Padding::Yes
 
-                SimpleDirective::AuxProcMacro { path: self.parse_until_line_break() }
+                SimpleDirective::Aux(AuxiliaryDirective::ProcMacro {
+                    path: self.parse_until_line_break(),
+                })
             }
             // FIXME: Warn/error if we're inside of an auxiliary file.
             //        ->Warn: "directive gets ignored // revisions are inherited in aux"

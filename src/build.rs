@@ -8,7 +8,6 @@ use crate::{
     diagnostic::{self, Diagnostic, EmittedError, Paint, debug, error},
     error::Result,
     fmt,
-    source::Spanned,
     utility::default,
 };
 use anstyle::{AnsiColor, Effects};
@@ -27,7 +26,6 @@ mod environment;
 pub(crate) fn perform(
     e_opts: &EngineOptions<'_>,
     krate: Crate<'_>,
-    extern_crates: &[ExternCrate<'_>],
     opts: &Options<'_>,
     imply_u_opts: ImplyUnstableOptions,
     cx: Context<'_>,
@@ -36,7 +34,7 @@ pub(crate) fn perform(
 
     let mut cmd = Command::new(engine.name());
     configure_early(&mut cmd, e_opts, krate, opts, cx)?;
-    configure_late(&mut cmd, engine, extern_crates, opts);
+    configure_late(&mut cmd, engine, opts);
 
     if let ImplyUnstableOptions::Yes = imply_u_opts
         && match probe_identity(opts) {
@@ -398,12 +396,7 @@ fn configure_toolchain(cmd: &mut Command, toolchain: Option<&OsStr>) {
 
 /// Configure the engine invocation with options that it doesn't need early
 /// (i.e., during certain print requests).
-fn configure_late(
-    cmd: &mut Command,
-    engine: EngineKind,
-    extern_crates: &[ExternCrate<'_>],
-    opts: &Options<'_>,
-) {
+fn configure_late(cmd: &mut Command, engine: EngineKind, opts: &Options<'_>) {
     // The crate name can't depend on any dependency crates, it's fine to skip this.
     // The opposite used to be the case actually prior to rust-lang/rust#117584.
     // E.g., via `#![crate_name = dependency::generate!()]`.
@@ -412,39 +405,28 @@ fn configure_late(
     // and even if that were to change at some point, rustc will never expand macros
     // in order to find `#![crate_name]` (ruled by T-lang).
 
-    // What does `compiletest` do?
-    if !extern_crates.is_empty() {
-        // FIXME: Does this work with proc macro deps? I think so?
-        // FIXME: This is hacky, rework it.
-        cmd.arg("-Lcrate=.");
-    }
+    // FIXME: Only add this when requested by `operate`.
+    cmd.arg("-Lcrate=.");
 
-    for extern_crate in extern_crates {
-        let ExternCrate::Named { name, path, typ: _ } = extern_crate else {
-            continue;
-        };
-
-        cmd.arg("--extern");
-        match path {
-            Some(path) => cmd.arg(format!("{name}={}", path.bare)),
-            None => cmd.arg(name.as_str()),
-        };
+    if !opts.b_opts.extern_crates.is_empty() {
+        for ext in &opts.b_opts.extern_crates {
+            cmd.arg("--extern");
+            cmd.arg(ext);
+        }
     }
 
     // The crate name can't depend on any cfgs, it's fine to skip this.
     // In the past this wasn't really the case but since 1.83
     // `#[cfg_attr(…, crate_name = "…")]` is a hard error (if the spec holds).
     // See also rust-lang/rust#91632.
-    {
-        for cfg in &opts.b_opts.cfgs {
-            cmd.arg("--cfg");
-            cmd.arg(cfg);
-        }
-        // FIXME: This shouldn't be done here.
-        if let Some(revision) = &opts.b_opts.revision {
-            cmd.arg("--cfg");
-            cmd.arg(revision);
-        }
+    for cfg in &opts.b_opts.cfgs {
+        cmd.arg("--cfg");
+        cmd.arg(cfg);
+    }
+    // FIXME: This shouldn't be done here.
+    if let Some(revision) = &opts.b_opts.revision {
+        cmd.arg("--cfg");
+        cmd.arg(revision);
     }
 
     for feature in &opts.b_opts.unstable_features {
@@ -774,11 +756,13 @@ pub(crate) struct DocOptions<'a> {
     pub(crate) v_opts: VerbatimOptions<'a, ()>,
 }
 
+#[derive(Clone)] // FIXME: This is awful!
 #[allow(clippy::struct_excessive_bools)] // not worth to address
 pub(crate) struct BuildOptions {
     pub(crate) cfgs: Vec<String>,
     pub(crate) revision: Option<String>,
     pub(crate) unstable_features: Vec<String>,
+    pub(crate) extern_crates: Vec<String>,
     pub(crate) suppress_lints: bool,
     pub(crate) internals: bool,
     pub(crate) next_solver: bool,
@@ -794,27 +778,10 @@ pub(crate) struct DebugOptions {
     pub(crate) dry_run: bool,
 }
 
-// FIXME: This type leads to such awkward code; consider remodeling it.
-#[derive(Clone)]
-#[cfg_attr(test, derive(PartialEq, Eq, Debug))]
-pub(crate) enum ExternCrate<'src> {
-    Unnamed {
-        path: Spanned<&'src str>,
-        // FIXME: This field is only relevant for compiletest auxiliaries. Model this better.
-        typ: Option<CrateType>,
-    },
-    Named {
-        name: CrateName<&'src str>,
-        path: Option<Spanned<Cow<'src, str>>>,
-        // FIXME: This field is only relevant for compiletest auxiliaries. Model this better.
-        typ: Option<CrateType>,
-    },
-}
-
-#[derive(Clone)]
+#[derive(Clone)] // FIXME: This if awful!
 pub(crate) struct Options<'a> {
     pub(crate) toolchain: Option<&'a OsStr>,
-    pub(crate) b_opts: &'a BuildOptions,
+    pub(crate) b_opts: BuildOptions,
     pub(crate) v_opts: VerbatimOptions<'a>,
     pub(crate) dbg_opts: DebugOptions,
 }

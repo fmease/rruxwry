@@ -69,7 +69,7 @@ fn try_main() -> error::Result {
     // FIXME: this is awkward ... can we do this inside cli smh (not the ref op ofc)
     let opts = build::Options {
         toolchain: args.toolchain.as_deref(),
-        b_opts: &args.b_opts,
+        b_opts: args.b_opts,
         v_opts,
         dbg_opts: args.dbg_opts,
     };

@@ -10,7 +10,7 @@
 use crate::{
     build::{
         self, CompileOptions, DocOptions, EngineKind, EngineOptions, EngineVersionError,
-        ExternCrate, ImplyUnstableOptions, Options, VerbatimOptions,
+        ImplyUnstableOptions, Options, VerbatimOptions,
     },
     context::Context,
     data::{Crate, CrateName, CrateType, DocBackend, Edition, ExtEdition},
@@ -94,19 +94,19 @@ fn compile<'a>(
     mode: CompileMode,
     run: Run,
     krate: Crate<'a, ExtEdition<'a>>,
-    mut opts: Options<'a>,
+    opts: Options<'a>,
     c_opts: CompileOptions,
     cx: Context<'a>,
 ) -> Result {
     let mut engine = EngineOptions::Rustc(c_opts);
-    let (krate, run_v_opts) = match mode {
+    let (krate, opts, run_v_opts) = match mode {
         CompileMode::Default => {
-            let krate = build_default(&engine, krate, &opts, cx)?;
-            (krate, default())
+            let (krate, opts) = build_default(&engine, krate, opts, cx)?;
+            (krate, opts, default())
         }
         // FIXME: _test
         CompileMode::DirectiveDriven(flavor, _test) => {
-            build_directive_driven(&mut engine, krate, &mut opts, flavor, cx)?
+            build_directive_driven(&mut engine, krate, opts, flavor, cx)?
         }
     };
     match run {
@@ -144,22 +144,19 @@ fn document<'a>(
     mode: DocMode,
     open: Open,
     krate: Crate<'a, ExtEdition<'a>>,
-    mut opts: Options<'a>,
+    opts: Options<'a>,
     d_opts: DocOptions<'a>,
     cx: Context<'a>,
 ) -> Result<()> {
     let (krate, opts) = match mode {
-        DocMode::Default => {
-            let krate = build_default(&EngineOptions::Rustdoc(d_opts), krate, &opts, cx)?;
-            (krate, opts)
-        }
-        DocMode::CrossCrate => return document_cross_crate(krate, &opts, d_opts, open, cx),
+        DocMode::Default => build_default(&EngineOptions::Rustdoc(d_opts), krate, opts, cx)?,
+        DocMode::CrossCrate => return document_cross_crate(krate, opts, d_opts, open, cx),
         // FIXME: _test
         DocMode::DirectiveDriven(flavor, _test) => {
-            let (krate, _) = build_directive_driven(
+            let (krate, opts, _) = build_directive_driven(
                 &mut EngineOptions::Rustdoc(d_opts),
                 krate,
-                &mut opts,
+                opts,
                 flavor,
                 cx,
             )?;
@@ -193,7 +190,7 @@ fn open(krate: Crate<'_>, opts: &Options<'_>, cx: Context<'_>) -> Result<()> {
 
 fn document_cross_crate(
     krate: Crate<'_, ExtEdition<'_>>,
-    opts: &Options<'_>,
+    mut opts: Options<'_>,
     d_opts: DocOptions<'_>,
     open: Open,
     cx: Context<'_>,
@@ -206,7 +203,8 @@ fn document_cross_crate(
     })?;
 
     let krate = Crate { typ: krate.typ.or(Some(CrateType::LIB)), ..krate };
-    let krate = build_default(&EngineOptions::Rustc(default()), krate, opts, cx)?;
+    // FIXME: The clone is awful!
+    let (krate, _) = build_default(&EngineOptions::Rustc(default()), krate, opts.clone(), cx)?;
 
     // FIXME: This `unwrap` is obviously reachable (e.g., on `rrc '%$?'`)
     let crate_name: CrateName<Cow<'_, _>> = krate
@@ -227,7 +225,8 @@ fn document_cross_crate(
         )?;
     }
 
-    let deps = &[ExternCrate::Named { name: crate_name.as_ref(), path: None, typ: None }];
+    // FIXME: Don't to_owned, extern_crates should be a Cow
+    opts.b_opts.extern_crates.push(crate_name.as_str().to_owned());
 
     let krate = Crate {
         path: Some(&root_crate_path),
@@ -236,18 +235,11 @@ fn document_cross_crate(
         ..krate
     };
 
-    build::perform(
-        &EngineOptions::Rustdoc(d_opts),
-        krate,
-        deps,
-        opts,
-        ImplyUnstableOptions::Yes,
-        cx,
-    )?;
+    build::perform(&EngineOptions::Rustdoc(d_opts), krate, &opts, ImplyUnstableOptions::Yes, cx)?;
 
     // FIXME: Move this out of this function into the caller `document` to further simplify things
     match open {
-        Open::Yes => self::open(krate, opts, cx),
+        Open::Yes => self::open(krate, &opts, cx),
         Open::No => Ok(()),
     }
 }
@@ -255,9 +247,9 @@ fn document_cross_crate(
 fn build_default<'a>(
     e_opts: &EngineOptions<'_>,
     krate: Crate<'a, ExtEdition<'a>>,
-    opts: &Options<'_>,
+    mut opts: Options<'a>,
     cx: Context<'_>,
-) -> Result<Crate<'a>> {
+) -> Result<(Crate<'a>, Options<'a>)> {
     // FIXME: Only querying the lastest stable edition of this (the primary) engine
     //        might not be correct for engine==rustdoc since Op::Doc may invoke
     //        rustc too and since here are nightly (& stable?) releases where rustc
@@ -266,17 +258,18 @@ fn build_default<'a>(
     //        Figure out if there are such releases and if so how to best address it.
     let edition = krate.edition.unwrap_or(ExtEdition::LatestStable).resolve(e_opts.kind(), cx);
     let krate = Crate { edition, ..krate };
-    build::perform(e_opts, krate, prelude(krate.typ), opts, ImplyUnstableOptions::Yes, cx)?;
-    Ok(krate)
+    populate_extern_prelude(krate.typ, &mut opts.b_opts.extern_crates);
+    build::perform(e_opts, krate, &opts, ImplyUnstableOptions::Yes, cx)?;
+    Ok((krate, opts))
 }
 
 fn build_directive_driven<'a>(
     e_opts: &mut EngineOptions<'a>,
     krate: Crate<'a, ExtEdition<'a>>,
-    opts: &mut Options<'a>,
+    mut opts: Options<'a>,
     flavor: directive::Flavor,
     cx: Context<'a>,
-) -> Result<(Crate<'a>, VerbatimOptions<'a>)> {
+) -> Result<(Crate<'a>, Options<'a>, VerbatimOptions<'a>)> {
     let path = krate.path.ok_or_else(|| {
         error(fmt!(
             "the `PATH` argument was not provided but it's required under `-@`, `--directives`"
@@ -325,24 +318,35 @@ fn build_directive_driven<'a>(
         cx,
     )?;
 
+    let directive::InstantiatedDirectives {
+        build_aux_docs,
+        auxes,
+        edition,
+        v_opts,
+        v_d_opts,
+        run_v_opts,
+        prefer_dylib,
+    } = directives;
+
     // FIXME: unwrap
     let aux_base_path = LazyCell::new(|| path.parent().unwrap().join("auxiliary"));
+    let mut extern_crates = Vec::new();
 
-    let deps: Vec<_> = directives
-        .dependencies
-        .iter()
-        .map(|dep| {
-            compile_auxiliary(
-                dep,
-                &aux_base_path,
-                e_opts,
-                opts.clone(),
-                directives.build_aux_docs,
-                flavor,
-                cx,
-            )
-        })
-        .collect::<Result<_>>()?;
+    auxes.iter().try_for_each(|aux| {
+        compile_auxiliary(
+            aux,
+            &aux_base_path,
+            e_opts,
+            // FIXME: This awful!
+            opts.clone(),
+            build_aux_docs,
+            flavor,
+            cx,
+            &mut extern_crates,
+        )
+    })?;
+
+    opts.b_opts.extern_crates.append(&mut extern_crates);
 
     let edition = match krate.edition {
         // If the resolution of the CLI edition fails, we *don't*
@@ -351,24 +355,25 @@ fn build_directive_driven<'a>(
         //        for engine==rustdoc see comment above the other invocation of
         //        `resolve` in this module.
         Some(edition) => edition.resolve(e_opts.kind(), cx),
-        None => directives.edition.map(|edition| Edition::Unknown(edition.bare)),
+        None => edition.map(|edition| Edition::Unknown(edition.bare)),
     };
-    let krate = Crate { path: Some(path), edition, ..krate };
+    let krate =
+        Crate { path: Some(path), edition, name: krate.name, typ: prefer_dylib.apply(krate.typ) };
 
-    opts.v_opts.extend(directives.v_opts);
+    opts.v_opts.extend(v_opts);
     match e_opts {
         EngineOptions::Rustc(..) => {} // rustc-exclusive (verbatim) flags is not a thing.
-        EngineOptions::Rustdoc(d_opts) => d_opts.v_opts.extend(directives.v_d_opts),
+        EngineOptions::Rustdoc(d_opts) => d_opts.v_opts.extend(v_d_opts),
     }
 
-    build::perform(e_opts, krate, &deps, opts, ImplyUnstableOptions::No, cx)?;
-    Ok((krate, directives.run_v_opts))
+    build::perform(e_opts, krate, &opts, ImplyUnstableOptions::No, cx)?;
+    Ok((krate, opts, run_v_opts))
 }
 
 // FIXME: Support nested auxiliaries!
 // FIXME: Detect and reject circular/cyclic auxiliaries.
 fn compile_auxiliary<'a>(
-    extern_crate: &ExternCrate<'a>,
+    &directive::Auxiliary { ref prefix, path, typ }: &directive::Auxiliary<'a>,
     base_path: &Path,
     e_opts: &EngineOptions<'_>,
     // FIXME: Do we actually want to pass along *all* of these opts?
@@ -378,20 +383,12 @@ fn compile_auxiliary<'a>(
     //        Some options should however be inherited: toolchain, cfgs, rev,
     //        debug. Should subset vs. all be a CLI option?
     mut opts: Options<'a>,
-    build_aux_docs: bool,
+    doc: bool,
     flavor: directive::Flavor,
     cx: Context<'a>,
-) -> Result<ExternCrate<'a>> {
-    let (path, typ) = match *extern_crate {
-        ExternCrate::Unnamed { ref path, typ } => (path.map(|path| base_path.join(path)), typ),
-        ExternCrate::Named { name, ref path, typ } => (
-            match path {
-                Some(path) => path.as_deref().map(|path| base_path.join(path)),
-                None => Spanned::sham(base_path.join(name.as_str()).with_extension("rs")),
-            },
-            typ,
-        ),
-    };
+    parent_extern_crates: &mut Vec<String>,
+) -> Result<()> {
+    let path = path.map(|path| base_path.join(path));
 
     let directives = directive::gather(
         path.as_deref(),
@@ -402,17 +399,32 @@ fn compile_auxiliary<'a>(
         cx,
     )?;
 
-    opts.v_opts.extend(directives.v_opts);
+    let directive::InstantiatedDirectives {
+        edition,
+        v_opts,
+        prefer_dylib,
+        // FIXME
+        build_aux_docs: _,
+        auxes: _,
+        v_d_opts: _,
+        run_v_opts: _,
+    } = directives;
+
+    opts.v_opts.extend(v_opts);
 
     let krate = Crate {
         path: Some(&path.bare),
-        // FIXME: Does compiletest do something 'smarter'?
         name: None,
-        typ,
-        edition: directives.edition.map(|edition| Edition::Unknown(edition.bare)),
+        typ: prefer_dylib.apply(typ),
+        edition: edition.map(|edition| Edition::Unknown(edition.bare)),
     };
 
-    let deps = prelude(typ);
+    // FIXME: Also register library search paths properly
+    if let Some(prefix) = prefix {
+        parent_extern_crates.push(prefix.to_string());
+    }
+
+    populate_extern_prelude(krate.typ, &mut opts.b_opts.extern_crates);
 
     build::perform(
         match e_opts {
@@ -425,46 +437,23 @@ fn compile_auxiliary<'a>(
             EngineOptions::Rustdoc(_) => const { &EngineOptions::Rustc(CompileOptions::DEFAULT) },
         },
         krate,
-        deps,
         &opts,
         ImplyUnstableOptions::No,
         cx,
     )?;
 
-    // FIXME: Is this how `//@ build-aux-docs` is supposed to work?
-    if build_aux_docs && let EngineOptions::Rustdoc(d_opts) = e_opts {
+    if doc && let EngineOptions::Rustdoc(d_opts) = e_opts {
         build::perform(
             // FIXME: Do we actually want to forward these doc opts from the parent crate??
             &EngineOptions::Rustdoc(d_opts.clone()),
             krate,
-            deps,
             &opts,
             ImplyUnstableOptions::No,
             cx,
         )?;
     }
 
-    // FIXME: Clean up this junk!
-    // FIXME: Do we need to respect `compile-flags: --crate-name` and adjust `ExternCrate` accordingly?
-    Ok(match *extern_crate {
-        // FIXME: probably doesn't handle `//@ aux-build: ../file.rs` correctly since `-L.` wouldn't pick it up
-        ExternCrate::Unnamed { path, .. } => ExternCrate::Unnamed { path, typ: None },
-        // FIXME: For some reason `compiletest` doesn't support `//@ aux-crate: name=../`
-        ExternCrate::Named { name, .. } => {
-            // FIXME: unwrap
-            // FIXME: do we *need* to do this???
-            let crate_name = CrateName::adjust_and_parse_file_path(&path.bare).unwrap();
-
-            ExternCrate::Named {
-                name,
-                // FIXME: needs to be relative to the base_path
-                // FIXME: layer violation?? should this be the job of crate::build?
-                path: (name != crate_name.as_ref())
-                    .then(|| Spanned::sham(format!("lib{crate_name}.rlib").into())),
-                typ: None,
-            }
-        }
-    })
+    Ok(())
 }
 
 fn scope(e_opts: &EngineOptions<'_>) -> directive::Scope {
@@ -479,17 +468,29 @@ fn scope(e_opts: &EngineOptions<'_>) -> directive::Scope {
     }
 }
 
-fn prelude(typ: Option<CrateType>) -> &'static [ExternCrate<'static>] {
-    match typ {
-        // For convenience and just like Cargo we add `proc_macro` to the external prelude.
-        Some(CrateType::PROC_MACRO) => &[ExternCrate::Named {
-            name: const { CrateName::new_unchecked("proc_macro") },
-            path: None,
-            typ: None,
-        }],
-        _ => &[],
+impl directive::PreferDylib {
+    fn apply(self, typ: Option<CrateType>) -> Option<CrateType> {
+        match (self, typ) {
+            (_, typ @ Some(_)) => typ,
+            // Compiletest defaults to `dylib` unless the target architecture
+            // doesn't support dynamic linking in which case it also uses `lib`.
+            // Since we don't have any "infrastructure" in place for checking
+            // target architectures, let's fall back to the "safer" option.
+            (Self::Yes, None) => Some(CrateType::LIB),
+            (Self::No, None) => None,
+        }
     }
 }
+
+fn populate_extern_prelude(typ: Option<CrateType>, extern_crates: &mut Vec<String>) {
+    match typ {
+        // For convenience and just like Cargo we add `proc_macro` to the external prelude.
+        // FIXME: Don't to_string, use Cow
+        Some(CrateType::PROC_MACRO) => extern_crates.push("proc_macro".to_string()),
+        _ => {}
+    }
+}
+
 pub(crate) enum Operation {
     Compile { mode: CompileMode, run: Run, options: CompileOptions },
     QueryRustcVersion,

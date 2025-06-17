@@ -149,6 +149,7 @@ Options:
   -R, --revision <NAME>       Enable a compiletest revision
   -F, --feature <NAME>        Enable an experimental library or language feature
   -s, --shallow               Halt after parsing the source file
+  -x, --extern <NAME>         Register an external library
   -/, --suppress-lints        Cap lints at allow level
   -#, --internals             Enable internal pretty-printing of data types
   -N, --next-solver           Enable the next-gen trait solver
@@ -195,6 +196,7 @@ Options:
       --link-to-def              Generate links to definitions
       --normalize                Normalize types
       --theme <THEME>            Set the theme [default: ayu]
+  -x, --extern <NAME>            Register an external library
   -/, --suppress-lints           Cap lints at allow level
   -#, --internals                Enable internal pretty-printing of data types
   -N, --next-solver              Enable the next-gen trait solver
