@@ -368,15 +368,24 @@ pub(crate) fn arguments() -> Arguments {
     //        Sadly, clap doesn't support zero-copy deserialization /
     //        deserializing from borrowed program arguments and providing &strs.
     //        Fix: Throw out clap and do it manually.
+
+    let crate_type = matches
+        .remove_one(id::CRATE_TYPE)
+        .map(|typ: String| CrateType::parse_cli_style(typ.leak()))
+        .or_else(|| match operation {
+            Operation::Compile { run: Run::No, mode: CompileMode::Default, .. } => {
+                Some(CrateType::LIB)
+            }
+            _ => None,
+        });
+
     Arguments {
         toolchain,
         path: matches.remove_one(id::PATH),
         verbatim: matches.remove_many(id::VERBATIM).map(Iterator::collect).unwrap_or_default(),
         operation,
         crate_name: matches.remove_one(id::CRATE_NAME),
-        crate_type: matches
-            .remove_one(id::CRATE_TYPE)
-            .map(|typ: String| CrateType::parse_cli_style(typ.leak())),
+        crate_type,
         edition: matches
             .remove_one(id::EDITION)
             .map(|edition: String| ExtEdition::parse_cli_style(edition.leak())),

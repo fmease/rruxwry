@@ -124,6 +124,12 @@ impl<'a> Edition<'a> {
 // FIXME: Switch to <'a> &'a str once we've thrown out clap.
 pub(crate) struct CrateType(pub &'static str);
 
+impl CrateType {
+    pub(crate) const LIB: Self = Self("lib");
+    pub(crate) const BIN: Self = Self("bin");
+    pub(crate) const PROC_MACRO: Self = Self("proc-macro");
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(test, derive(Debug))]
 pub(crate) struct CrateName<S: AsRef<str>>(S);

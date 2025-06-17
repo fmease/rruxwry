@@ -238,13 +238,13 @@ impl<'src> InstantiatedDirectives<'src> {
         // target architectures, let's fall back to the "safer" option.
         let typ = || match self.no_prefer_dynamic {
             true => None,
-            false => Some(CrateType("lib")),
+            false => Some(CrateType::LIB),
         };
 
         match directive {
             // FIXME: Audit this.
             SimpleDirective::AuxBin { path } => {
-                self.dependencies.push(ExternCrate::Unnamed { path, typ: Some(CrateType("bin")) });
+                self.dependencies.push(ExternCrate::Unnamed { path, typ: Some(CrateType::BIN) });
             }
             SimpleDirective::AuxBuild { path } => {
                 self.dependencies.push(ExternCrate::Unnamed { path, typ: typ() });
@@ -259,7 +259,7 @@ impl<'src> InstantiatedDirectives<'src> {
             // FIXME: Audit this: Doesn't this need to be a named crate?
             SimpleDirective::AuxProcMacro { path } => {
                 self.dependencies
-                    .push(ExternCrate::Unnamed { path, typ: Some(CrateType("proc-macro")) });
+                    .push(ExternCrate::Unnamed { path, typ: Some(CrateType::PROC_MACRO) });
             }
 
             SimpleDirective::BuildAuxDocs => self.build_aux_docs = true,

@@ -205,7 +205,7 @@ fn document_cross_crate(
         .done()
     })?;
 
-    let krate = Crate { typ: krate.typ.or(Some(CrateType("lib"))), ..krate };
+    let krate = Crate { typ: krate.typ.or(Some(CrateType::LIB)), ..krate };
     let krate = build_default(&EngineOptions::Rustc(default()), krate, opts, cx)?;
 
     // FIXME: This `unwrap` is obviously reachable (e.g., on `rrc '%$?'`)
@@ -482,7 +482,7 @@ fn scope(e_opts: &EngineOptions<'_>) -> directive::Scope {
 fn prelude(typ: Option<CrateType>) -> &'static [ExternCrate<'static>] {
     match typ {
         // For convenience and just like Cargo we add `proc_macro` to the external prelude.
-        Some(CrateType("proc-macro")) => &[ExternCrate::Named {
+        Some(CrateType::PROC_MACRO) => &[ExternCrate::Named {
             name: const { CrateName::new_unchecked("proc_macro") },
             path: None,
             typ: None,
