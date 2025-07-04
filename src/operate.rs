@@ -9,8 +9,8 @@
 
 use crate::{
     build::{
-        self, CompileOptions, DocOptions, EngineKind, EngineOptions, EngineVersionError,
-        ImplyUnstableOptions, Options, VerbatimOptions,
+        self, CompileOptions, DocOptions, EngineKind, EngineOptions, ImplyUnstableOptions, Options,
+        QueryEngineVersionError, VerbatimOptions,
     },
     context::Context,
     data::{Crate, CrateName, CrateType, DocBackend, Edition, ExtEdition},
@@ -39,7 +39,7 @@ pub(crate) fn perform(
     opts: Options<'_>,
     cx: Context<'_>,
 ) -> Result<()> {
-    let paint_err = |error: EngineVersionError, p: &mut Painter<_>| {
+    let paint_err = |error: QueryEngineVersionError, p: &mut Painter<_>| {
         p.with(AnsiColor::Red, |p| write!(p, "{{ {} }}", error.short_desc()))
     };
 
@@ -54,7 +54,7 @@ pub(crate) fn perform(
             let mut p = Painter::new(io::BufWriter::new(stdout), colorize);
 
             write!(p, "rustc: ")?;
-            match cx.engine(EngineKind::Rustc) {
+            match EngineKind::Rustc.version(cx) {
                 Ok(version) => version.paint(build::probe_identity(&opts), &mut p),
                 Err(error) => paint_err(error, &mut p),
             }?;
@@ -72,14 +72,14 @@ pub(crate) fn perform(
             let mut p = Painter::new(io::BufWriter::new(stdout), colorize);
 
             write!(p, "rustdoc: ")?;
-            match cx.engine(EngineKind::Rustdoc) {
+            match EngineKind::Rustdoc.version(cx) {
                 Ok(version) => version.paint(build::probe_identity(&opts), &mut p),
                 Err(error) => paint_err(error, &mut p),
             }?;
 
             writeln!(p)?;
             write!(p, "  rustc: ")?;
-            match cx.engine(EngineKind::Rustc) {
+            match EngineKind::Rustc.version(cx) {
                 Ok(version) => version.paint(build::probe_identity(&opts), &mut p),
                 Err(error) => paint_err(error, &mut p),
             }?;
