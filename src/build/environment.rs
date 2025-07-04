@@ -7,9 +7,9 @@
 use crate::{
     data::Identity,
     diagnostic::{fmt, warn},
+    utility::HashMap,
 };
 use std::{
-    collections::HashMap,
     ffi::{OsStr, OsString},
     sync::LazyLock,
 };

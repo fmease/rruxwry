@@ -162,7 +162,7 @@ pub(crate) fn arguments() -> Arguments {
                 .long("no-backtrace")
                 .action(clap::ArgAction::SetTrue)
                 .help("Override `RUST_BACKTRACE` to be `0`"),
-            clap::Arg::new(id::ENGINE_VERSION)
+            clap::Arg::new(id::PRINT_ENGINE_VERSION)
                 .short('V')
                 .long("version")
                 .action(clap::ArgAction::SetTrue)
@@ -321,9 +321,10 @@ pub(crate) fn arguments() -> Arguments {
         }),
     };
 
-    let query_engine_version: bool = matches.remove_one(id::ENGINE_VERSION).unwrap_or_default();
+    let print_engine_version: bool =
+        matches.remove_one(id::PRINT_ENGINE_VERSION).unwrap_or_default();
 
-    let operation = match (operation.as_str(), query_engine_version) {
+    let operation = match (operation.as_str(), print_engine_version) {
         (id::BUILD, false) => Operation::Compile {
             run: match matches.remove_one::<bool>(id::RUN).unwrap_or_default() {
                 true => Run::Yes,
@@ -533,7 +534,7 @@ mod id {
     pub(super) const DOC: &str = "doc";
     pub(super) const DRY_RUN: &str = "DRY_RUN";
     pub(super) const EDITION: &str = "EDITION";
-    pub(super) const ENGINE_VERSION: &str = "ENGINE_VERSION";
+    pub(super) const PRINT_ENGINE_VERSION: &str = "PRINT_ENGINE_VERSION";
     pub(super) const EXTERN: &str = "EXTERN";
     pub(super) const HIDDEN: &str = "HIDDEN";
     pub(super) const IDENTITY: &str = "IDENTITY";

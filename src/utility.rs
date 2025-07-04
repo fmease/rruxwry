@@ -3,6 +3,8 @@ use std::{ascii::Char, ffi::OsStr};
 pub(crate) mod monotonic;
 pub(crate) mod paint;
 
+pub(crate) use rustc_hash::FxHashMap as HashMap;
+
 pub(crate) fn default<T: Default>() -> T {
     T::default()
 }

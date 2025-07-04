@@ -51,7 +51,7 @@ impl<'a> Edition<'a> {
     //        It's possible that there are differences to rustdoc. Audit!
     fn latest_stable(engine: EngineKind, cx: Context<'_>) -> Option<Self> {
         // FIXME: Should we warn on failure?
-        let version = cx.engine(engine).ok()?;
+        let version = engine.version(cx).ok()?;
         match version.channel {
             Channel::Stable => match () {
                 () if version.triple >= V!(1, 85, 0) => Some(Self::Rust2024), // branched: 2025-01-03

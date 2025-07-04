@@ -32,13 +32,13 @@ pub(crate) fn perform(
 ) -> Result<()> {
     let engine = e_opts.kind();
 
-    let mut cmd = Command::new(engine.name());
+    let mut cmd = Command::new(engine.path(cx).map_err(|error| error.emit())?);
     configure_early(&mut cmd, e_opts, krate, opts, cx)?;
     configure_late(&mut cmd, engine, opts);
 
     if let ImplyUnstableOptions::Yes = imply_u_opts
         && match probe_identity(opts) {
-            Identity::True => cx.engine(engine).is_ok_and(|v| v.channel.allows_unstable()),
+            Identity::True => engine.version(cx).is_ok_and(|v| v.channel.allows_unstable()),
             Identity::Stable => false,
             Identity::Nightly => true,
         }
@@ -52,39 +52,27 @@ pub(crate) fn perform(
     Ok(())
 }
 
-pub(crate) fn query_engine_version(
-    engine: EngineKind,
-    toolchain: Option<&OsStr>,
-    dbg_opts: DebugOptions,
-) -> Result<Version<String>, EngineVersionError> {
-    use EngineVersionError as Error;
+/// Don't call this directly! Use [`EngineKind::path`] instead.
+fn query_engine_path(engine: EngineKind, cx: Context<'_>) -> Result<String, QueryEnginePathError> {
+    use QueryEnginePathError as Error;
+    let min_opts = cx.opts();
 
-    let mut cmd = Command::new(engine.name());
+    // FIXME: Support non-rustup environments somehow (needs design work).
+    let mut cmd = Command::new("rustup");
+    if let Some(toolchain) = &min_opts.toolchain {
+        cmd.arg(toolchain);
+    }
+    cmd.arg("which");
+    cmd.arg(engine.name());
 
-    // Must come first!
-    configure_toolchain(&mut cmd, toolchain);
-
-    cmd.arg("-V");
-
-    // FIXME: Skip this execution if `-00`? (which doesn't exist yet).
     // FIXME: Setting dry_run explicitly is hacky.
-    _ = gate(|p| render(&cmd, p), DebugOptions { dry_run: false, ..dbg_opts });
+    _ = gate(|p| render(&cmd, p), DebugOptions { dry_run: false, ..min_opts.dbg_opts });
 
-    let output = cmd.output().map_err(|_| Error::Other)?;
+    let output = cmd.output().map_err(|_| Error::RustupSpawnFailure)?;
 
     if !output.status.success() {
-        // We failed to obtain version information.
-        // While that's very likely due to rustup complaining about some legitimate issues,
-        // strictly speaking we don't know for sure -- it could be rust{,do}c acting up.
-        //
-        // We don't support rust{,do}c *wrappers* (via `RUST{,DO}C_WRAPPER`) at the time
-        // of writing, so that's a source of problems we *don't* have!
-        //
-        // Ideally we would now try to query various programs that participated (mainly just
-        // rustup that is) to find the culprit / root cause for better error reporting.
         // Sadly, rustup doesn't offer any mechanism to make it output machine-readable and
         // stable data. See also <https://github.com/rust-lang/rustup/issues/450>.
-        //
         // So unfortunately we have no choice but to try and parse stderr output.
         //
         // FIXME: Avoid the need for `from_utf8`.
@@ -117,6 +105,78 @@ pub(crate) fn query_engine_version(
             }
         }
 
+        return Err(Error::RustupFailure);
+    }
+
+    // FIXME: Does `rustup` forward paths that aren't valid UTF-8 or does it error?
+    let mut path = String::from_utf8(output.stdout).map_err(Error::InvalidPath)?;
+    path.pop(); // drop trailing `\n`
+
+    Ok(path)
+}
+
+#[derive(Clone)]
+pub(crate) enum QueryEnginePathError {
+    RustupSpawnFailure,
+    UnknownToolchain,
+    ToolchainNotInstalled,
+    UnavailableComponent,
+    RustupFailure,
+    InvalidPath(FromUtf8Error),
+}
+
+impl QueryEnginePathError {
+    // FIXME: Figure out how much into detail we want go and how to best word these.
+    //        E.g., do we want to dump underlying IO errors and parts of stderr output?
+    pub(crate) fn short_desc(self) -> &'static str {
+        match self {
+            Self::RustupSpawnFailure => "rustup unavailable",
+            Self::RustupFailure | Self::InvalidPath(_) => "error",
+            Self::UnknownToolchain => "toolchain unknown",
+            Self::ToolchainNotInstalled => "toolchain not installed",
+            Self::UnavailableComponent => "component unavailable",
+        }
+    }
+
+    fn emit(self) -> EmittedError {
+        // FIMXE: Print actual name of the engine.
+        let error = error(fmt!("failed to obtain path to rust{{,do}}c"));
+
+        match self {
+            // FIMXE: Print underlying IO error cause (we can't thread it thru rn cuz io::Error doesn't impl `Clone`
+            //        but `Self` unfortunately requires `Clone` due to the "query system" impl needing it atm).
+            Self::RustupSpawnFailure => error.note(fmt!("failed to execute `rustup`")),
+            Self::UnknownToolchain | Self::ToolchainNotInstalled | Self::UnavailableComponent => {
+                error.note(fmt!("{}", self.short_desc()))
+            }
+            Self::RustupFailure => error.note(fmt!("`rustup` exited unsuccessfully")),
+            Self::InvalidPath(cause) => {
+                error.note(fmt!("`rustup` provided a non-UTF-8 path: {cause}"))
+            }
+        }
+        .done()
+    }
+}
+
+/// Don't call this directly! Use [`EngineKind::version`] instead.
+fn query_engine_version(
+    engine: EngineKind,
+    cx: Context<'_>,
+) -> Result<Version<String>, QueryEngineVersionError> {
+    use QueryEngineVersionError as Error;
+
+    let mut cmd = Command::new(engine.path(cx).map_err(Error::EnginePathError)?);
+
+    cmd.arg("-V");
+
+    // FIXME: Skip this execution if `-00`? (which doesn't exist yet).
+    // FIXME: Setting dry_run explicitly is hacky.
+    _ = gate(|p| render(&cmd, p), DebugOptions { dry_run: false, ..cx.opts().dbg_opts });
+
+    let output = cmd.output().map_err(|_| Error::Other)?;
+
+    if !output.status.success() {
+        // FIMXE: Better name for this error case.
         return Err(Error::Other);
     }
 
@@ -139,25 +199,21 @@ pub(crate) fn query_engine_version(
     }
 }
 
-#[derive(Clone, Copy)]
-pub(crate) enum EngineVersionError {
-    UnknownToolchain,
-    ToolchainNotInstalled,
-    UnavailableComponent,
+#[derive(Clone)]
+pub(crate) enum QueryEngineVersionError {
+    EnginePathError(QueryEnginePathError),
     Unknown,
     Malformed,
     Other,
 }
 
-impl EngineVersionError {
+impl QueryEngineVersionError {
     // FIXME: Figure out how much into detail we want go and how to best word these.
     //        E.g., do we want to dump underlying IO errors and parts of stderr output
     //        as emitted by `--version`?
     pub(crate) fn short_desc(self) -> &'static str {
         match self {
-            Self::UnknownToolchain => "toolchain unknown",
-            Self::ToolchainNotInstalled => "toolchain not installed",
-            Self::UnavailableComponent => "component unavailable",
+            Self::EnginePathError(error) => error.short_desc(),
             Self::Unknown => "unknown",
             Self::Malformed => "malformed",
             Self::Other => "error",
@@ -186,7 +242,7 @@ pub(crate) fn query_crate_name<'a>(
 
     let engine = EngineOptions::Rustc(default());
 
-    let mut cmd = Command::new(engine.kind().name());
+    let mut cmd = Command::new(engine.kind().path(cx).map_err(Error::EnginePathError)?);
 
     // FIXME: Make this function return a more structured error and then get rid of `Error::Other`.
     configure_early(&mut cmd, &engine, krate, opts, cx).map_err(Error::Other)?;
@@ -202,7 +258,7 @@ pub(crate) fn query_crate_name<'a>(
     }
 
     // FIXME: Double check that `path`=`-` (STDIN) properly works with `output()` once we support that ourselves.
-    let mut output = cmd.output().map_err(Error::ProcessSpawningFailed)?;
+    let mut output = cmd.output().map_err(Error::RustcSpawnFailure)?;
     _ = output.stderr;
 
     if !output.status.success() {
@@ -220,7 +276,7 @@ pub(crate) fn query_crate_name<'a>(
         // but we haven't yet) which influence the crate name.
 
         // // FIXME: Maybe forward rustc's stderr under `-vv` (`-vv` not allowed yet).
-        return Err(Error::RustcErrored);
+        return Err(Error::RustcFailure);
     }
 
     // Trim the trailing line break.
@@ -232,8 +288,9 @@ pub(crate) fn query_crate_name<'a>(
 }
 
 pub(crate) enum QueryCrateNameError {
-    ProcessSpawningFailed(io::Error),
-    RustcErrored,
+    EnginePathError(QueryEnginePathError),
+    RustcSpawnFailure(io::Error),
+    RustcFailure,
     InvalidUtf8(FromUtf8Error),
     InvalidCrateName(String),
     Other(crate::error::Error),
@@ -244,14 +301,16 @@ impl QueryCrateNameError {
         let error = error(fmt!("failed to obtain the crate name from rustc"));
 
         match self {
-            Self::ProcessSpawningFailed(cause) => {
+            // FIXME: embed inner error inside the one above (indented)
+            Self::EnginePathError(error) => return error.emit(),
+            Self::RustcSpawnFailure(cause) => {
                 error.note(fmt!("failed to execute `rustc`: {cause}"))
             }
-            Self::RustcErrored => {
+            Self::RustcFailure => {
                 // FIXME: Attempt to better explain what's going on, see (1).
                 error
                     .note(fmt!(
-                        "`rustc` returned an error likely due to invalid flags passed to it"
+                        "`rustc` exited unsuccessfully (likely due to invalid flags passed to it)"
                     ))
                     .help(fmt!("try rerunning with `-n<NAME>` set to bypass this logic"))
             }
@@ -278,9 +337,6 @@ fn configure_early(
     opts: &Options<'_>,
     cx: Context<'_>,
 ) -> Result<()> {
-    // Must come first!
-    configure_toolchain(cmd, opts.toolchain);
-
     if let Some(path) = krate.path {
         cmd.arg(path);
     }
@@ -300,7 +356,7 @@ fn configure_early(
     // Regarding crate name querying, the edition is vital. After all,
     // rustc needs to parse the crate root to find `#![crate_name]`.
     if let Some(edition) = krate.edition {
-        let version = cx.engine(e_opts.kind()).map_err(|error| {
+        let version = e_opts.kind().version(cx).map_err(|error| {
             emit_failed_to_obtain_version_for_opt(
                 e_opts.kind(),
                 error,
@@ -384,14 +440,6 @@ fn configure_early(
     }
 
     Ok(())
-}
-
-fn configure_toolchain(cmd: &mut Command, toolchain: Option<&OsStr>) {
-    // FIXME: Consider only setting the (rustup) toolchain if the env var `RUSTUP_HOME` exists.
-    //        And emitting a warning further up the stack of course.
-    if let Some(toolchain) = toolchain {
-        cmd.arg(toolchain);
-    }
 }
 
 /// Configure the engine invocation with options that it doesn't need early
@@ -484,7 +532,7 @@ fn configure_e_opts(cmd: &mut Command, e_opts: &EngineOptions<'_>, cx: Context<'
             }
 
             if c_opts.shallow {
-                let version = cx.engine(e_opts.kind()).map_err(|error| {
+                let version = e_opts.kind().version(cx).map_err(|error| {
                     emit_failed_to_obtain_version_for_opt(
                         e_opts.kind(),
                         error,
@@ -577,16 +625,16 @@ fn configure_e_opts(cmd: &mut Command, e_opts: &EngineOptions<'_>, cx: Context<'
 
 fn emit_failed_to_obtain_version_for_opt(
     engine: EngineKind,
-    error: EngineVersionError,
+    error: QueryEngineVersionError,
     opt: impl Paint,
 ) -> EmittedError {
-    fn diag(engine: EngineKind, error: EngineVersionError) -> Diagnostic {
+    fn diag(engine: EngineKind, error: QueryEngineVersionError) -> Diagnostic {
         let diag = self::error(fmt!(
             "failed to retrieve the version of the underyling `{}`",
             engine.name()
         ));
         match error {
-            EngineVersionError::Other => diag,
+            QueryEngineVersionError::Other => diag,
             // FIXME: Using the short description here is a bit awkward imo.
             _ => diag.note(fmt!("caused by: {}", error.short_desc())),
         }
@@ -697,7 +745,7 @@ impl EngineOptions<'_> {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) enum EngineKind {
     Rustc,
     Rustdoc,
@@ -711,6 +759,7 @@ impl EngineKind {
         }
     }
 
+    // FIXME: Investigate if we should also set RUSTC_LOG for rustdoc or if it doesn't make a difference.
     const fn logging_env_var(self) -> &'static str {
         match self {
             Self::Rustc => "RUSTC_LOG",
@@ -723,6 +772,19 @@ impl EngineKind {
             Self::Rustc => environment::rustc_options(),
             Self::Rustdoc => environment::rustdoc_options(),
         }
+    }
+
+    fn path(self, cx: Context<'_>) -> Result<String, QueryEnginePathError> {
+        crate::context::invoke!(cx.query_engine_path(self))
+    }
+
+    // Reminder: You can set the env var `RUSTC_OVERRIDE_VERSION_STRING` to
+    // overwrite the version output by rust{,do}c (for the purpose of testing).
+    pub(crate) fn version(
+        self,
+        cx: Context<'_>,
+    ) -> Result<Version<String>, QueryEngineVersionError> {
+        crate::context::invoke!(cx.query_engine_version(self))
     }
 }
 
