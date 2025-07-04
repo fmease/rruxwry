@@ -17,7 +17,7 @@ use std::{
     io::{self, Write as _},
     ops::ControlFlow,
     path::Path,
-    process::{self, Command},
+    process::{self, Command, ExitStatusError},
     string::FromUtf8Error,
 };
 
@@ -47,7 +47,7 @@ pub(crate) fn perform(
         cmd.arg("-Zunstable-options");
     }
 
-    execute(cmd, opts.dbg_opts)?;
+    execute(cmd, opts.dbg_opts).and_then(|res| res.map_err(io::Error::other))?;
 
     Ok(())
 }
@@ -604,7 +604,7 @@ pub(crate) fn run(
     program: impl AsRef<OsStr>,
     v_opts: &VerbatimOptions<'_>,
     dbg_opts: DebugOptions,
-) -> io::Result<()> {
+) -> io::Result<Result<(), ExitStatusError>> {
     let mut cmd = Command::new(program);
     configure_v_opts(&mut cmd, v_opts);
     execute(cmd, dbg_opts)
@@ -638,11 +638,14 @@ fn gate(message: impl Paint, dbg_opts: DebugOptions) -> ControlFlow<()> {
     }
 }
 
-fn execute(mut cmd: process::Command, dbg_opts: DebugOptions) -> io::Result<()> {
-    match gate(|p| render(&cmd, p), dbg_opts) {
-        ControlFlow::Continue(()) => cmd.status()?.exit_ok().map_err(io::Error::other),
+fn execute(
+    mut cmd: process::Command,
+    dbg_opts: DebugOptions,
+) -> io::Result<Result<(), ExitStatusError>> {
+    Ok(match gate(|p| render(&cmd, p), dbg_opts) {
+        ControlFlow::Continue(()) => cmd.status()?.exit_ok(),
         ControlFlow::Break(()) => Ok(()),
-    }
+    })
 }
 
 pub(crate) fn probe_identity(opts: &Options<'_>) -> Identity {

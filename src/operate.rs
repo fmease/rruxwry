@@ -132,11 +132,17 @@ fn run(
     let mut path: PathBuf = [".", crate_name.as_str()].into_iter().collect();
     path.set_extension(std::env::consts::EXE_EXTENSION);
 
-    build::run(&path, run_v_opts, opts.dbg_opts).map_err(|error| {
-        self::error(fmt!("failed to run the built binary `{}`", path.display()))
-            .note(fmt!("{error}"))
-            .done()
-    })?;
+    build::run(&path, run_v_opts, opts.dbg_opts)
+        .map_err(|error| {
+            self::error(fmt!("failed to run the built binary `{}`", path.display()))
+                .note(fmt!("{error}"))
+                .done()
+        })?
+        .map_err(|error| {
+            self::error(fmt!("process for `{}` exited unsuccessfully", path.display()))
+                .note(fmt!("{}", error.into_status()))
+                .done()
+        })?;
     Ok(())
 }
 
