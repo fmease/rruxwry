@@ -34,7 +34,7 @@ pub(crate) fn perform(
 
     let mut cmd = Command::new(engine.path(cx).map_err(|error| error.emit())?);
     configure_early(&mut cmd, e_opts, krate, opts, cx)?;
-    configure_late(&mut cmd, engine, opts);
+    configure_late(&mut cmd, engine, opts, cx)?;
 
     if let ImplyUnstableOptions::Yes = imply_u_opts
         && match probe_identity(opts) {
@@ -444,7 +444,12 @@ fn configure_early(
 
 /// Configure the engine invocation with options that it doesn't need early
 /// (i.e., during certain print requests).
-fn configure_late(cmd: &mut Command, engine: EngineKind, opts: &Options<'_>) {
+fn configure_late(
+    cmd: &mut Command,
+    engine: EngineKind,
+    opts: &Options<'_>,
+    cx: Context<'_>,
+) -> Result<()> {
     // The crate name can't depend on any dependency crates, it's fine to skip this.
     // The opposite used to be the case actually prior to rust-lang/rust#117584.
     // E.g., via `#![crate_name = dependency::generate!()]`.
@@ -478,6 +483,8 @@ fn configure_late(cmd: &mut Command, engine: EngineKind, opts: &Options<'_>) {
     }
 
     for feature in &opts.b_opts.unstable_features {
+        // NOTE: If <https://github.com/rust-lang/rfcs/pull/3791> gets accepted and implemented,
+        //       we need to start switching on the version and change the lowering.
         cmd.arg(format!("-Zcrate-attr=feature({feature})"));
     }
 
@@ -486,13 +493,55 @@ fn configure_late(cmd: &mut Command, engine: EngineKind, opts: &Options<'_>) {
     }
 
     if opts.b_opts.next_solver {
-        // FIXME: (low prio) Lower to `-Ztrait-solver=next` in older versions.
+        // NOTE: I won't bother with handling older syntaxes (like `-Ztrait-solver=next`)
+        //       because `rrx`'s `-N` won't stay around for long anyway (it's only temporary).
         cmd.arg("-Znext-solver");
     }
 
     if opts.b_opts.internals {
-        // FIXME: Lower to `-Zverbose` in older versions.
-        cmd.arg("-Zverbose-internals");
+        let version = engine.version(cx).map_err(|error| {
+            emit_failed_to_obtain_version_for_opt(engine, error, fmt!("option `--internals`"))
+        })?;
+
+        let syntax = match version.channel {
+            Channel::Stable => match () {
+                () if version.triple >= V!(1, 77, 0) => Syntax::ZeeVerboseInternals,
+                // FIXME Find the *actual* lower bound.
+                () => Syntax::ZeeVerbose,
+            },
+            Channel::Beta { prerelease: _ } => Syntax::ZeeVerboseInternals, // FIXME: actually unimpl'ed!
+            Channel::Nightly | Channel::Dev => match version.commit {
+                Some(commit) => match () {
+                    () if commit.date >= D!(2023, 12, 26) => Syntax::ZeeVerboseInternals,
+                    // FIXME: Find the *actual* lower bound.
+                    () => Syntax::ZeeVerbose,
+                },
+                None => match () {
+                    () if version.triple > V!(1, 77, 0) => Syntax::ZeeVerboseInternals,
+                    () if version.triple == V!(1, 77, 0) => {
+                        // FIXME: Improve wording (print the two candidates and the version).
+                        return Err(error(fmt!(
+                            "could not determine how to forward option `--internals` to the underlying `{}`",
+                            engine.name()
+                        ))
+                        .done()
+                        .into());
+                    }
+                    // FIXME: Find the *actual* lower bound
+                    () => Syntax::ZeeVerbose,
+                },
+            },
+        };
+
+        enum Syntax {
+            ZeeVerbose,
+            ZeeVerboseInternals,
+        }
+
+        cmd.arg(match syntax {
+            Syntax::ZeeVerbose => "-Zverbose",
+            Syntax::ZeeVerboseInternals => "-Zverbose-internals",
+        });
     }
 
     if opts.b_opts.no_dedupe {
@@ -507,6 +556,8 @@ fn configure_late(cmd: &mut Command, engine: EngineKind, opts: &Options<'_>) {
     if let Some(filter) = &opts.b_opts.log {
         cmd.env(engine.logging_env_var(), filter);
     }
+
+    Ok(())
 }
 
 fn configure_v_opts(cmd: &mut process::Command, v_opts: &VerbatimOptions<'_>) {
