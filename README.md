@@ -159,7 +159,6 @@ Options:
   -B, --no-backtrace          Override `RUST_BACKTRACE` to be `0`
   -V, --version               Print the underlying rust{,do}c version and halt
   -v, --verbose               Use verbose output
-  -0, --dry-run               Run through without making any changes
       --color <WHEN>          Control when to use color [default: auto] [possible values: auto, always, never]
   -h, --help                  Print help
 ```
@@ -206,7 +205,6 @@ Options:
   -B, --no-backtrace             Override `RUST_BACKTRACE` to be `0`
   -V, --version                  Print the underlying rust{,do}c version and halt
   -v, --verbose                  Use verbose output
-  -0, --dry-run                  Run through without making any changes
       --color <WHEN>             Control when to use color [default: auto] [possible values: auto, always, never]
   -h, --help                     Print help
 ```

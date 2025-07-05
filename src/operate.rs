@@ -132,7 +132,7 @@ fn run(
     let mut path: PathBuf = [".", crate_name.as_str()].into_iter().collect();
     path.set_extension(std::env::consts::EXE_EXTENSION);
 
-    build::run(&path, run_v_opts, opts.dbg_opts)
+    build::run(&path, run_v_opts, cx)
         .map_err(|error| {
             self::error(fmt!("failed to run the built binary `{}`", path.display()))
                 .note(fmt!("{error}"))
@@ -186,7 +186,7 @@ fn open(krate: Crate<'_>, opts: &Options<'_>, cx: Context<'_>) -> Result<()> {
 
     let path = format!("./doc/{crate_name}/index.html");
 
-    build::open(Path::new(&path), opts.dbg_opts).map_err(|error| {
+    build::open(Path::new(&path), cx).map_err(|error| {
         self::error(fmt!("failed to open the generated docs in a browser"))
             .note(fmt!("{error}"))
             .done()
@@ -220,11 +220,14 @@ fn document_cross_crate(
     let root_crate_name = CrateName::new_unchecked(format!("u_{crate_name}"));
     let root_crate_path = path.with_file_name(root_crate_name.as_str()).with_extension("rs");
 
-    if !opts.dbg_opts.dry_run && !root_crate_path.exists() {
+    if !root_crate_path.exists() {
         // While we could omit the `extern crate` declaration in `edition >= Edition::Edition2018`,
         // we would need to recreate the file on each rerun if the edition was 2015 instead of
         // skipping that step since we wouldn't know whether the existing file if applicable was
         // created for a newer edition or not.
+        //
+        // Moreover keeping this file enables users to modify it after the fact without the fear
+        // of it getting overwritten during the next run.
         std::fs::write(
             &root_crate_path,
             format!("extern crate {crate_name}; pub use {crate_name}::*;\n"),

@@ -1,5 +1,5 @@
 use crate::{
-    build::{DebugOptions, EngineKind, Options, QueryEnginePathError, QueryEngineVersionError},
+    build::{DebugOptions, EngineKind, QueryEnginePathError, QueryEngineVersionError},
     data::Version,
     source::SourceMap,
     utility::{HashMap, default},
@@ -28,7 +28,7 @@ impl<'cx> Context<'cx> {
         &self.data.map
     }
 
-    pub(crate) fn opts(self) -> &'cx MinOpts {
+    pub(crate) fn opts(self) -> &'cx Options {
         &self.data.opts
     }
 
@@ -41,27 +41,20 @@ impl<'cx> Context<'cx> {
 #[doc(hidden)] // used internally by macro `new`
 pub(crate) struct ContextData {
     map: SourceMap,
-    opts: MinOpts,
+    opts: Options,
     store: QueryStore,
 }
 
 impl ContextData {
     #[doc(hidden)] // used internally by macro `new`
-    pub(crate) fn new(opts: &Options<'_>) -> Self {
-        Self {
-            map: default(),
-            opts: MinOpts {
-                toolchain: opts.toolchain.map(ToOwned::to_owned),
-                dbg_opts: opts.dbg_opts,
-            },
-            store: default(),
-        }
+    pub(crate) fn new(opts: Options) -> Self {
+        Self { map: default(), opts, store: default() }
     }
 }
 
-// FIXME: Rename to ImmOpts, include other "immutable" opts and use it pervasively throughout the project!
 /// A subset of `Opts` of which we know it won't change over the program lifetime.
-pub(crate) struct MinOpts {
+// FIXME: Include other "immutable" opts and use it pervasively throughout the project!
+pub(crate) struct Options {
     pub(crate) toolchain: Option<OsString>,
     pub(crate) dbg_opts: DebugOptions,
 }

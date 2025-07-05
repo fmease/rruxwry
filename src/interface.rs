@@ -172,11 +172,6 @@ pub(crate) fn arguments() -> Arguments {
                 .long("verbose")
                 .action(clap::ArgAction::SetTrue)
                 .help("Use verbose output"),
-            clap::Arg::new(id::DRY_RUN)
-                .short('0')
-                .long("dry-run")
-                .action(clap::ArgAction::SetTrue)
-                .help("Run through without making any changes"),
             clap::Arg::new(id::COLOR)
                 .long("color")
                 .value_name("WHEN")
@@ -415,10 +410,7 @@ pub(crate) fn arguments() -> Arguments {
             log: matches.remove_one(id::LOG),
             no_backtrace: matches.remove_one(id::NO_BACKTRACE).unwrap_or_default(),
         },
-        dbg_opts: DebugOptions {
-            verbose: matches.remove_one(id::VERBOSE).unwrap(),
-            dry_run: matches.remove_one(id::DRY_RUN).unwrap(),
-        },
+        dbg_opts: DebugOptions { verbose: matches.remove_one(id::VERBOSE).unwrap() },
         color: matches.remove_one(id::COLOR).unwrap(),
     }
 }
@@ -532,7 +524,6 @@ mod id {
     pub(super) const CROSS_CRATE: &str = "CROSS_CRATE";
     pub(super) const DIRECTIVES: &str = "DIRECTIVES";
     pub(super) const DOC: &str = "doc";
-    pub(super) const DRY_RUN: &str = "DRY_RUN";
     pub(super) const EDITION: &str = "EDITION";
     pub(super) const PRINT_ENGINE_VERSION: &str = "PRINT_ENGINE_VERSION";
     pub(super) const EXTERN: &str = "EXTERN";

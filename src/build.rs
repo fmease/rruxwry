@@ -15,7 +15,6 @@ use std::{
     borrow::Cow,
     ffi::OsStr,
     io::{self, Write as _},
-    ops::ControlFlow,
     path::{Path, PathBuf},
     process::{self, Command, ExitStatusError},
     string::FromUtf8Error,
@@ -47,7 +46,7 @@ pub(crate) fn perform(
         cmd.arg("-Zunstable-options");
     }
 
-    execute(cmd, opts.dbg_opts).and_then(|res| res.map_err(io::Error::other))?;
+    execute(cmd, cx).and_then(|res| res.map_err(io::Error::other))?;
 
     Ok(())
 }
@@ -55,18 +54,16 @@ pub(crate) fn perform(
 /// Don't call this directly! Use [`EngineKind::path`] instead.
 fn query_engine_path(engine: EngineKind, cx: Context<'_>) -> Result<String, QueryEnginePathError> {
     use QueryEnginePathError as Error;
-    let min_opts = cx.opts();
 
     // FIXME: Support non-rustup environments somehow (needs design work).
     let mut cmd = Command::new("rustup");
-    if let Some(toolchain) = &min_opts.toolchain {
+    if let Some(toolchain) = &cx.opts().toolchain {
         cmd.arg(toolchain);
     }
     cmd.arg("which");
     cmd.arg(engine.name());
 
-    // FIXME: Setting dry_run explicitly is hacky.
-    _ = gate(|p| render(&cmd, p), DebugOptions { dry_run: false, ..min_opts.dbg_opts });
+    log_execution(|p| render(&cmd, p), cx);
 
     // FIXME: Forward underlying IO error (we can't rn, it doesn't impl `Clone`).
     let output = cmd.output().map_err(|_| Error::RustupSpawnFailure)?;
@@ -170,9 +167,7 @@ fn query_engine_version(
 
     cmd.arg("-V");
 
-    // FIXME: Skip this execution if `-00`? (which doesn't exist yet).
-    // FIXME: Setting dry_run explicitly is hacky.
-    _ = gate(|p| render(&cmd, p), DebugOptions { dry_run: false, ..cx.opts().dbg_opts });
+    log_execution(|p| render(&cmd, p), cx);
 
     let output = cmd.output().map_err(|_| Error::EngineSpawnFailure)?;
 
@@ -252,13 +247,7 @@ pub(crate) fn query_crate_name<'a>(
 
     cmd.arg("--print=crate-name");
 
-    // FIXME: Only skip this execution if `-00` (which doesn't exist yet).
-    match gate(|p| render(&cmd, p), opts.dbg_opts) {
-        ControlFlow::Continue(()) => {}
-        ControlFlow::Break(()) => {
-            return Ok(CrateName::new_unchecked("UNKNOWN_DUE_TO_DRY_RUN".into()));
-        }
-    }
+    log_execution(|p| render(&cmd, p), cx);
 
     // FIXME: Double check that `path`=`-` (STDIN) properly works with `output()` once we support that ourselves.
     let mut output = cmd.output().map_err(Error::RustcSpawnFailure)?;
@@ -694,49 +683,34 @@ fn emit_failed_to_obtain_version_for_opt(
 pub(crate) fn run(
     program: impl AsRef<OsStr>,
     v_opts: &VerbatimOptions<'_>,
-    dbg_opts: DebugOptions,
+    cx: Context<'_>,
 ) -> io::Result<Result<(), ExitStatusError>> {
     let mut cmd = Command::new(program);
     configure_v_opts(&mut cmd, v_opts);
-    execute(cmd, dbg_opts)
+    execute(cmd, cx)
 }
 
-pub(crate) fn open(path: &Path, dbg_opts: DebugOptions) -> io::Result<()> {
+pub(crate) fn open(path: &Path, cx: Context<'_>) -> io::Result<()> {
     let message = |p: &mut diagnostic::Painter| {
         p.with(palette::COMMAND.on_default().bold(), |p| write!(p, "⟨open⟩ "))?;
         p.with(AnsiColor::Green, |p| write!(p, "{}", path.display()))
     };
 
-    match gate(message, dbg_opts) {
-        ControlFlow::Continue(()) => open::that(path),
-        ControlFlow::Break(()) => Ok(()),
-    }
+    log_execution(message, cx);
+    open::that(path)
 }
 
-fn gate(message: impl Paint, dbg_opts: DebugOptions) -> ControlFlow<()> {
-    if dbg_opts.verbose {
-        let verb = if !dbg_opts.dry_run { "running" } else { "skipping" };
-        debug(|p| {
-            write!(p, "{verb} ")?;
-            message(p)
-        })
-        .done();
+fn log_execution(message: impl Paint, cx: Context<'_>) {
+    if !cx.opts().dbg_opts.verbose {
+        return;
     }
-
-    match dbg_opts.dry_run {
-        true => ControlFlow::Break(()),
-        false => ControlFlow::Continue(()),
-    }
+    #[rustfmt::skip]
+    debug(|p| { write!(p, "running ")?; message(p) }).done();
 }
 
-fn execute(
-    mut cmd: process::Command,
-    dbg_opts: DebugOptions,
-) -> io::Result<Result<(), ExitStatusError>> {
-    Ok(match gate(|p| render(&cmd, p), dbg_opts) {
-        ControlFlow::Continue(()) => cmd.status()?.exit_ok(),
-        ControlFlow::Break(()) => Ok(()),
-    })
+fn execute(mut cmd: process::Command, cx: Context<'_>) -> io::Result<Result<(), ExitStatusError>> {
+    log_execution(|p| render(&cmd, p), cx);
+    Ok(cmd.status()?.exit_ok())
 }
 
 pub(crate) fn probe_identity(opts: &Options<'_>) -> Identity {
@@ -899,15 +873,12 @@ pub(crate) struct BuildOptions {
 #[derive(Clone, Copy)]
 pub(crate) struct DebugOptions {
     pub(crate) verbose: bool,
-    pub(crate) dry_run: bool,
 }
 
 #[derive(Clone)] // FIXME: This if awful!
 pub(crate) struct Options<'a> {
-    pub(crate) toolchain: Option<&'a OsStr>,
     pub(crate) b_opts: BuildOptions,
     pub(crate) v_opts: VerbatimOptions<'a>,
-    pub(crate) dbg_opts: DebugOptions,
 }
 
 /// Program arguments and environment variables to be passed verbatim.

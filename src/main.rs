@@ -59,22 +59,6 @@ fn try_main() -> error::Result {
         clap::ColorChoice::Auto => {}
     }
 
-    // FIXME: this is awkward ... can we do this inside cli smh (not the ref op ofc)
-    // FIXME: Check if it's possible to make this a build::VerbatimOptions<()>.
-    let v_opts = build::VerbatimOptions {
-        arguments: args.verbatim.iter().map(String::as_str).collect(),
-        variables: Vec::new(),
-    };
-    // FIXME: this is awkward ... can we do this inside cli smh (not the ref op ofc)
-    let opts = build::Options {
-        toolchain: args.toolchain.as_deref(),
-        b_opts: args.b_opts,
-        v_opts,
-        dbg_opts: args.dbg_opts,
-    };
-
-    // FIXME: Construction of *Crate<ExtEdition> should arguably happen inside
-    //        interface::arguments. Likely blocked on clap removal.
     let krate = data::Crate {
         path: args.path.as_deref(),
         name: args.crate_name.as_ref().map(|name| name.as_ref()),
@@ -82,7 +66,15 @@ fn try_main() -> error::Result {
         edition: args.edition,
     };
 
-    let cx = context::new!(&opts);
+    let opts = build::Options {
+        b_opts: args.b_opts,
+        v_opts: build::VerbatimOptions {
+            arguments: args.verbatim.iter().map(String::as_str).collect(),
+            variables: Vec::new(),
+        },
+    };
+
+    let cx = context::new!(context::Options { toolchain: args.toolchain, dbg_opts: args.dbg_opts });
 
     operate::perform(args.operation, krate, opts, cx)
 }
