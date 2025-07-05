@@ -5,7 +5,7 @@
 use crate::{
     context::Context,
     data::{Channel, Crate, CrateName, CrateType, D, DocBackend, Identity, V, Version},
-    diagnostic::{self, Diagnostic, EmittedError, Paint, debug, error},
+    diagnostic::{self, EmittedError, Paint, debug, error},
     error::Result,
     fmt,
     utility::default,
@@ -16,7 +16,7 @@ use std::{
     ffi::OsStr,
     io::{self, Write as _},
     ops::ControlFlow,
-    path::Path,
+    path::{Path, PathBuf},
     process::{self, Command, ExitStatusError},
     string::FromUtf8Error,
 };
@@ -32,7 +32,7 @@ pub(crate) fn perform(
 ) -> Result<()> {
     let engine = e_opts.kind();
 
-    let mut cmd = Command::new(engine.path(cx).map_err(|error| error.emit())?);
+    let mut cmd = engine.command(cx).map_err(|error| error.emit())?;
     configure_early(&mut cmd, e_opts, krate, opts, cx)?;
     configure_late(&mut cmd, engine, opts, cx)?;
 
@@ -68,6 +68,7 @@ fn query_engine_path(engine: EngineKind, cx: Context<'_>) -> Result<String, Quer
     // FIXME: Setting dry_run explicitly is hacky.
     _ = gate(|p| render(&cmd, p), DebugOptions { dry_run: false, ..min_opts.dbg_opts });
 
+    // FIXME: Forward underlying IO error (we can't rn, it doesn't impl `Clone`).
     let output = cmd.output().map_err(|_| Error::RustupSpawnFailure)?;
 
     if !output.status.success() {
@@ -165,7 +166,7 @@ fn query_engine_version(
 ) -> Result<Version<String>, QueryEngineVersionError> {
     use QueryEngineVersionError as Error;
 
-    let mut cmd = Command::new(engine.path(cx).map_err(Error::EnginePathError)?);
+    let mut cmd = engine.command(cx).map_err(Error::EnginePathError)?;
 
     cmd.arg("-V");
 
@@ -173,11 +174,10 @@ fn query_engine_version(
     // FIXME: Setting dry_run explicitly is hacky.
     _ = gate(|p| render(&cmd, p), DebugOptions { dry_run: false, ..cx.opts().dbg_opts });
 
-    let output = cmd.output().map_err(|_| Error::Other)?;
+    let output = cmd.output().map_err(|_| Error::EngineSpawnFailure)?;
 
     if !output.status.success() {
-        // FIMXE: Better name for this error case.
-        return Err(Error::Other);
+        return Err(Error::EngineFailure);
     }
 
     let source = std::str::from_utf8(&output.stdout).map_err(|_| Error::Malformed)?;
@@ -201,10 +201,11 @@ fn query_engine_version(
 
 #[derive(Clone)]
 pub(crate) enum QueryEngineVersionError {
+    EngineFailure,
     EnginePathError(QueryEnginePathError),
-    Unknown,
+    EngineSpawnFailure,
     Malformed,
-    Other,
+    Unknown,
 }
 
 impl QueryEngineVersionError {
@@ -216,7 +217,9 @@ impl QueryEngineVersionError {
             Self::EnginePathError(error) => error.short_desc(),
             Self::Unknown => "unknown",
             Self::Malformed => "malformed",
-            Self::Other => "error",
+            // FIXME: Print actual engine name
+            Self::EngineFailure => "`rust{,do}c` exited unsuccessfully",
+            Self::EngineSpawnFailure => "failed to execute `rustdo{,do}c`",
         }
     }
 }
@@ -242,7 +245,7 @@ pub(crate) fn query_crate_name<'a>(
 
     let engine = EngineOptions::Rustc(default());
 
-    let mut cmd = Command::new(engine.kind().path(cx).map_err(Error::EnginePathError)?);
+    let mut cmd = engine.kind().command(cx).map_err(Error::EnginePathError)?;
 
     // FIXME: Make this function return a more structured error and then get rid of `Error::Other`.
     configure_early(&mut cmd, &engine, krate, opts, cx).map_err(Error::Other)?;
@@ -679,19 +682,8 @@ fn emit_failed_to_obtain_version_for_opt(
     error: QueryEngineVersionError,
     opt: impl Paint,
 ) -> EmittedError {
-    fn diag(engine: EngineKind, error: QueryEngineVersionError) -> Diagnostic {
-        let diag = self::error(fmt!(
-            "failed to retrieve the version of the underyling `{}`",
-            engine.name()
-        ));
-        match error {
-            QueryEngineVersionError::Other => diag,
-            // FIXME: Using the short description here is a bit awkward imo.
-            _ => diag.note(fmt!("caused by: {}", error.short_desc())),
-        }
-    }
-
-    diag(engine, error)
+    self::error(fmt!("failed to retrieve the version of the underyling `{}`", engine.name()))
+        .note(fmt!("caused by: {}", error.short_desc()))
         .note(|p| {
             write!(p, "required in order to correctly forward ")?;
             opt(p)
@@ -827,6 +819,22 @@ impl EngineKind {
 
     fn path(self, cx: Context<'_>) -> Result<String, QueryEnginePathError> {
         crate::context::invoke!(cx.query_engine_path(self))
+    }
+
+    fn command(self, cx: Context<'_>) -> Result<Command, QueryEnginePathError> {
+        let path = PathBuf::from(self.path(cx)?);
+        let mut cmd = Command::new(&path);
+        // Very old versions (e.g, 1.0 and 1.2) can't find some of their shared libraries if we don't do this.
+        // FIXME: We assume that the path is of the form "$PREFIX/bin/$FILE" and that the corresponding library
+        //        folder is "$PREFIX/lib/". This relies on the likely undocumented/unstable file structure of
+        //        rustup toolchains.
+        if let Some(path) = path.ancestors().nth(const { ["bin", "*"].len() }) {
+            // FIXME: This likely doesn't work on non-*nix OSes.
+            // NOTE: We should probably *append* onto the library path instead of overwriting it completely.
+            //       However, I've yet to find an issue with the current approach in our specific scenario.
+            cmd.env("LD_LIBRARY_PATH", path.join("lib"));
+        }
+        Ok(cmd)
     }
 
     // Reminder: You can set the env var `RUSTC_OVERRIDE_VERSION_STRING` to

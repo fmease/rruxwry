@@ -7,7 +7,6 @@
 #![feature(exit_status_error)]
 #![feature(if_let_guard)]
 #![feature(iter_collect_into)]
-#![feature(let_chains)]
 #![feature(slice_split_once)]
 #![feature(str_split_remainder)]
 #![feature(substr_range)]
