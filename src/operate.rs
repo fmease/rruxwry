@@ -9,7 +9,7 @@
 
 use crate::{
     build::{
-        self, CompileOptions, DocOptions, EngineKind, EngineOptions, ImplyUnstableOptions, Options,
+        self, CompileOptions, DocOptions, Engine, EngineOptions, ImplyUnstableOptions, Options,
         QueryEngineVersionError, VerbatimOptions,
     },
     context::Context,
@@ -54,7 +54,7 @@ pub(crate) fn perform(
             let mut p = Painter::new(io::BufWriter::new(stdout), colorize);
 
             write!(p, "rustc: ")?;
-            match EngineKind::Rustc.version(cx) {
+            match Engine::Rustc.version(cx) {
                 Ok(version) => version.paint(build::probe_identity(&opts), &mut p),
                 Err(error) => paint_err(error, &mut p),
             }?;
@@ -72,14 +72,14 @@ pub(crate) fn perform(
             let mut p = Painter::new(io::BufWriter::new(stdout), colorize);
 
             write!(p, "rustdoc: ")?;
-            match EngineKind::Rustdoc.version(cx) {
+            match Engine::Rustdoc.version(cx) {
                 Ok(version) => version.paint(build::probe_identity(&opts), &mut p),
                 Err(error) => paint_err(error, &mut p),
             }?;
 
             writeln!(p)?;
             write!(p, "  rustc: ")?;
-            match EngineKind::Rustc.version(cx) {
+            match Engine::Rustc.version(cx) {
                 Ok(version) => version.paint(build::probe_identity(&opts), &mut p),
                 Err(error) => paint_err(error, &mut p),
             }?;
@@ -98,15 +98,15 @@ fn compile<'a>(
     c_opts: CompileOptions,
     cx: Context<'a>,
 ) -> Result {
-    let mut engine = EngineOptions::Rustc(c_opts);
+    let mut e_opts = EngineOptions::Rustc(c_opts);
     let (krate, opts, run_v_opts) = match mode {
         CompileMode::Default => {
-            let (krate, opts) = build_default(&engine, krate, opts, cx)?;
+            let (krate, opts) = build_default(&e_opts, krate, opts, cx)?;
             (krate, opts, default())
         }
         // FIXME: _test
         CompileMode::DirectiveDriven(flavor, _test) => {
-            build_directive_driven(&mut engine, krate, opts, flavor, cx)?
+            build_directive_driven(&mut e_opts, krate, opts, flavor, cx)?
         }
     };
     match run {
@@ -265,7 +265,7 @@ fn build_default<'a>(
     //        and rustdoc differ wrt. to their stable edition IINM.
     //
     //        Figure out if there are such releases and if so how to best address it.
-    let edition = krate.edition.unwrap_or(ExtEdition::LatestStable).resolve(e_opts.kind(), cx);
+    let edition = krate.edition.unwrap_or(ExtEdition::LatestStable).resolve(e_opts.engine(), cx);
     let krate = Crate { edition, ..krate };
     populate_extern_prelude(krate.typ, &mut opts.b_opts.extern_crates);
     build::perform(e_opts, krate, &opts, ImplyUnstableOptions::Yes, cx)?;
@@ -363,7 +363,7 @@ fn build_directive_driven<'a>(
         // FIXME: Passing this (the primary) engine to resolve might not be correct
         //        for engine==rustdoc see comment above the other invocation of
         //        `resolve` in this module.
-        Some(edition) => edition.resolve(e_opts.kind(), cx),
+        Some(edition) => edition.resolve(e_opts.engine(), cx),
         None => edition.map(|edition| Edition::Unknown(edition.bare)),
     };
     let krate =

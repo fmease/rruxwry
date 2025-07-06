@@ -1,5 +1,5 @@
 use crate::{
-    build::{DebugOptions, EngineKind, QueryEnginePathError, QueryEngineVersionError},
+    build::{DebugOptions, Engine, QueryEnginePathError, QueryEngineVersionError},
     data::Version,
     source::SourceMap,
     utility::{HashMap, default},
@@ -75,9 +75,9 @@ macro_rules! store {
 // FIXME: Smh. provide these from within mod `build`.
 store! {
     // FIXME: Smh. return `&'cx str` instead of `String`.
-    query_engine_path(engine: EngineKind) -> Result<String, QueryEnginePathError>;
+    query_engine_path(engine: Engine) -> Result<String, QueryEnginePathError>;
     // FIXME: Smh. return `&'cx Version<String>` or better yet `Version<&'cx str>` instead of `Version<String>`.
-    query_engine_version(engine: EngineKind) -> Result<Version<String>, QueryEngineVersionError>;
+    query_engine_version(engine: Engine) -> Result<Version<String>, QueryEngineVersionError>;
 }
 
 pub(crate) macro invoke($cx:ident.$query:ident($input:expr)) {

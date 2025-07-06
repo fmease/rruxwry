@@ -29,7 +29,7 @@ pub(crate) fn perform(
     imply_u_opts: ImplyUnstableOptions,
     cx: Context<'_>,
 ) -> Result<()> {
-    let engine = e_opts.kind();
+    let engine = e_opts.engine();
 
     let mut cmd = engine.command(cx).map_err(|error| error.emit())?;
     configure_early(&mut cmd, e_opts, krate, opts, cx)?;
@@ -52,7 +52,7 @@ pub(crate) fn perform(
 }
 
 /// Don't call this directly! Use [`EngineKind::path`] instead.
-fn query_engine_path(engine: EngineKind, cx: Context<'_>) -> Result<String, QueryEnginePathError> {
+fn query_engine_path(engine: Engine, cx: Context<'_>) -> Result<String, QueryEnginePathError> {
     use QueryEnginePathError as Error;
 
     // FIXME: Support non-rustup environments somehow (needs design work).
@@ -158,7 +158,7 @@ impl QueryEnginePathError {
 
 /// Don't call this directly! Use [`EngineKind::version`] instead.
 fn query_engine_version(
-    engine: EngineKind,
+    engine: Engine,
     cx: Context<'_>,
 ) -> Result<Version<String>, QueryEngineVersionError> {
     use QueryEngineVersionError as Error;
@@ -238,12 +238,12 @@ pub(crate) fn query_crate_name<'a>(
         return Ok(name.into());
     }
 
-    let engine = EngineOptions::Rustc(default());
+    let e_opts = EngineOptions::Rustc(default());
 
-    let mut cmd = engine.kind().command(cx).map_err(Error::EnginePathError)?;
+    let mut cmd = e_opts.engine().command(cx).map_err(Error::EnginePathError)?;
 
     // FIXME: Make this function return a more structured error and then get rid of `Error::Other`.
-    configure_early(&mut cmd, &engine, krate, opts, cx).map_err(Error::Other)?;
+    configure_early(&mut cmd, &e_opts, krate, opts, cx).map_err(Error::Other)?;
 
     cmd.arg("--print=crate-name");
 
@@ -348,9 +348,9 @@ fn configure_early(
     // Regarding crate name querying, the edition is vital. After all,
     // rustc needs to parse the crate root to find `#![crate_name]`.
     if let Some(edition) = krate.edition {
-        let version = e_opts.kind().version(cx).map_err(|error| {
+        let version = e_opts.engine().version(cx).map_err(|error| {
             emit_failed_to_obtain_version_for_opt(
-                e_opts.kind(),
+                e_opts.engine(),
                 error,
                 fmt!("the requested edition `{}`", edition.to_str()),
             )
@@ -383,7 +383,7 @@ fn configure_early(
         let syntax = syntax.ok_or_else(|| {
             self::error(fmt!(
                 "the version of the underyling `{}` does not support editions",
-                e_opts.kind().name()
+                e_opts.engine().name()
             ))
             .done()
         })?;
@@ -427,7 +427,7 @@ fn configure_early(
     configure_v_opts(cmd, &opts.v_opts);
     configure_e_opts(cmd, e_opts, cx)?;
 
-    if let Some(opts) = e_opts.kind().env_opts() {
+    if let Some(opts) = e_opts.engine().env_opts() {
         cmd.args(opts);
     }
 
@@ -438,7 +438,7 @@ fn configure_early(
 /// (i.e., during certain print requests).
 fn configure_late(
     cmd: &mut Command,
-    engine: EngineKind,
+    engine: Engine,
     opts: &Options<'_>,
     cx: Context<'_>,
 ) -> Result<()> {
@@ -575,9 +575,9 @@ fn configure_e_opts(cmd: &mut Command, e_opts: &EngineOptions<'_>, cx: Context<'
             }
 
             if c_opts.shallow {
-                let version = e_opts.kind().version(cx).map_err(|error| {
+                let version = e_opts.engine().version(cx).map_err(|error| {
                     emit_failed_to_obtain_version_for_opt(
-                        e_opts.kind(),
+                        e_opts.engine(),
                         error,
                         fmt!("option `--shallow`"),
                     )
@@ -604,7 +604,7 @@ fn configure_e_opts(cmd: &mut Command, e_opts: &EngineOptions<'_>, cx: Context<'
                                 //        the two candidates!
                                 return Err(error(fmt!(
                                     "could not determine how to forward option `--shallow` to the underyling `{}`",
-                                    e_opts.kind().name()
+                                    e_opts.engine().name()
                                 ))
                                 .done()
                                 .into());
@@ -667,7 +667,7 @@ fn configure_e_opts(cmd: &mut Command, e_opts: &EngineOptions<'_>, cx: Context<'
 }
 
 fn emit_failed_to_obtain_version_for_opt(
-    engine: EngineKind,
+    engine: Engine,
     error: QueryEngineVersionError,
     opt: impl Paint,
 ) -> EmittedError {
@@ -754,21 +754,21 @@ pub(crate) enum EngineOptions<'a> {
 }
 
 impl EngineOptions<'_> {
-    pub(crate) fn kind(&self) -> EngineKind {
+    pub(crate) fn engine(&self) -> Engine {
         match self {
-            Self::Rustc(_) => EngineKind::Rustc,
-            Self::Rustdoc(_) => EngineKind::Rustdoc,
+            Self::Rustc(_) => Engine::Rustc,
+            Self::Rustdoc(_) => Engine::Rustdoc,
         }
     }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
-pub(crate) enum EngineKind {
+pub(crate) enum Engine {
     Rustc,
     Rustdoc,
 }
 
-impl EngineKind {
+impl Engine {
     const fn name(self) -> &'static str {
         match self {
             Self::Rustc => "rustc",

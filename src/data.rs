@@ -1,4 +1,4 @@
-use crate::{build::EngineKind, context::Context, diagnostic::fmt, utility::paint::Painter};
+use crate::{build::Engine, context::Context, diagnostic::fmt, utility::paint::Painter};
 use anstyle::{AnsiColor, Effects};
 use std::{
     borrow::Cow,
@@ -20,7 +20,7 @@ pub(crate) enum ExtEdition<'a> {
 }
 
 impl<'a> ExtEdition<'a> {
-    pub(crate) fn resolve(self, engine: EngineKind, cx: Context<'_>) -> Option<Edition<'a>> {
+    pub(crate) fn resolve(self, engine: Engine, cx: Context<'_>) -> Option<Edition<'a>> {
         match self {
             // FIXME: Return `None` for older engines where editions/epochs don't exist yet!
             Self::EngineDefault => Some(Edition::Rust2015),
@@ -49,7 +49,7 @@ pub(crate) enum Edition<'a> {
 impl<'a> Edition<'a> {
     // FIXME: These dates and versions have been manually verified *with rustc*.
     //        It's possible that there are differences to rustdoc. Audit!
-    fn latest_stable(engine: EngineKind, cx: Context<'_>) -> Option<Self> {
+    fn latest_stable(engine: Engine, cx: Context<'_>) -> Option<Self> {
         // FIXME: Should we warn on failure?
         let version = engine.version(cx).ok()?;
         match version.channel {
