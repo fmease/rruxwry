@@ -724,40 +724,40 @@ fn configure_forced_identity(
                     let secret = match env!("TARGET") {
                         "i686-apple-darwin" => match version.triple {
                             V!(1, 8, 0) => Some("20:35:17"),
-                            V!(1, 7, 0) => None, // FIXME
-                            V!(1, 6, 0) => None, // FIXME
-                            V!(1, 5, 0) => None, // FIXME
-                            V!(1, 4, 0) => None, // FIXME
-                            V!(1, 3, 0) => None, // FIXME
-                            V!(1, 2, 0) => None, // FIXME
-                            V!(1, 1, 0) => None, // FIXME
+                            V!(1, 7, 0) => Some("14:43:27"),
+                            V!(1, 6, 0) => Some("22:32:00"),
+                            V!(1, 5, 0) => Some("12:56:42"),
+                            V!(1, 4, 0) => Some("17:59:31"),
+                            V!(1, 3, 0) => Some("18:31:05"),
+                            V!(1, 2, 0) => Some("12:39:02"),
+                            V!(1, 1, 0) => Some("15:33:59"),
                             V!(1, 0, 0) => Some("23:48:08"),
                             _ => None,
                         },
                         "i686-pc-windows-gnu" => match version.triple {
                             V!(1, 8, 0) => Some("02:02:44"),
-                            V!(1, 7, 0) => None, // FIXME
-                            V!(1, 6, 0) => None, // FIXME
-                            V!(1, 5, 0) => None, // FIXME
-                            V!(1, 4, 0) => None, // FIXME
-                            V!(1, 3, 0) => None, // FIXME
-                            V!(1, 2, 0) => None, // FIXME
-                            V!(1, 1, 0) => None, // FIXME
+                            V!(1, 7, 0) => Some("20:51:13"),
+                            V!(1, 6, 0) => Some("05:09:34"),
+                            V!(1, 5, 0) => Some("20:19:25"),
+                            V!(1, 4, 0) => Some("01:10:16"),
+                            V!(1, 3, 0) => Some("23:02:03"),
+                            V!(1, 2, 0) => Some("19:30:08"),
+                            V!(1, 1, 0) => Some("22:37:00"),
                             V!(1, 0, 0) => Some("03:16:56"),
                             _ => None,
                         },
                         "i686-pc-windows-msvc" => match version.triple {
                             V!(1, 8, 0) => Some("02:41:27"),
-                            V!(1, 7, 0) => None, // FIXME
-                            V!(1, 6, 0) => None, // FIXME
-                            V!(1, 5, 0) => None, // FIXME
-                            V!(1, 4, 0) => None, // FIXME
-                            V!(1, 3, 0) => None, // FIXME
+                            V!(1, 7, 0) => Some("21:22:29"),
+                            V!(1, 6, 0) => Some("05:06:32"),
+                            V!(1, 5, 0) => Some("20:25:57"),
+                            V!(1, 4, 0) => Some("01:17:17"),
+                            V!(1, 3, 0) => Some("23:13:14"),
                             _ => None,
                         },
                         "i686-unknown-linux-gnu" => match version.triple {
                             V!(1, 8, 0) => Some("00:35:12"),
-                            V!(1, 7, 0) => None, // FIXME
+                            V!(1, 7, 0) => Some("19:18:56"),
                             V!(1, 6, 0) => None, // FIXME
                             V!(1, 5, 0) => None, // FIXME
                             V!(1, 4, 0) => None, // FIXME
@@ -769,7 +769,7 @@ fn configure_forced_identity(
                         },
                         "x86_64-apple-darwin" => match version.triple {
                             V!(1, 8, 0) => Some("20:35:17"),
-                            V!(1, 7, 0) => None, // FIXME
+                            V!(1, 7, 0) => Some("14:43:27"),
                             V!(1, 6, 0) => None, // FIXME
                             V!(1, 5, 0) => None, // FIXME
                             V!(1, 4, 0) => None, // FIXME
@@ -781,7 +781,7 @@ fn configure_forced_identity(
                         },
                         "x86_64-pc-windows-gnu" => match version.triple {
                             V!(1, 8, 0) => Some("01:24:47"),
-                            V!(1, 7, 0) => None, // FIXME
+                            V!(1, 7, 0) => Some("20:14:14"),
                             V!(1, 6, 0) => None, // FIXME
                             V!(1, 5, 0) => None, // FIXME
                             V!(1, 4, 0) => None, // FIXME
@@ -793,12 +793,12 @@ fn configure_forced_identity(
                         },
                         "x86_64-pc-windows-msvc" => match version.triple {
                             V!(1, 8, 0) => Some("00:40:16"),
-                            V!(1, 7, 0) => None, // FIXME
-                            V!(1, 6, 0) => None, // FIXME
-                            V!(1, 5, 0) => None, // FIXME
-                            V!(1, 4, 0) => None, // FIXME
-                            V!(1, 3, 0) => None, // FIXME
-                            V!(1, 2, 0) => None, // FIXME
+                            V!(1, 7, 0) => Some("20:07:20"),
+                            V!(1, 6, 0) => Some("04:33:40"),
+                            V!(1, 5, 0) => Some("20:05:26"),
+                            V!(1, 4, 0) => Some("00:55:28"),
+                            V!(1, 3, 0) => Some("22:37:41"),
+                            V!(1, 2, 0) => Some("19:22:25"),
                             _ => None,
                         },
                         "x86_64-unknown-linux-gnu" => match version.triple {
