@@ -348,13 +348,7 @@ fn configure_early(
     // Regarding crate name querying, the edition is vital. After all,
     // rustc needs to parse the crate root to find `#![crate_name]`.
     if let Some(edition) = krate.edition {
-        let version = engine.version(cx).map_err(|error| {
-            emit_failed_to_obtain_version_for_opt(
-                engine,
-                error,
-                fmt!("the requested edition `{}`", edition.to_str()),
-            )
-        })?;
+        let version = version_for_opt(engine, "--edition", cx)?;
 
         // FIXME: These dates and versions have been manually verified *with rustc*.
         //        It's possible that there are differences to rustdoc. Audit!
@@ -408,145 +402,7 @@ fn configure_early(
     // Regarding crate name querying, let's better honor this option
     // since it may significantly affect rustc's behavior.
     if let Some(identity) = opts.b_opts.identity {
-        const KEY: &str = "RUSTC_BOOTSTRAP";
-        const KEY_LEGACY: &str = "RUSTC_BOOTSTRAP_KEY";
-
-        match identity {
-            // Forcing the true identity isn't a no-op, we want to overwrite any previously set value.
-            Identity::True => cmd.env(KEY, "0"),
-            Identity::Stable => {
-                let version = engine.version(cx).map_err(|error| {
-                    emit_failed_to_obtain_version_for_opt(
-                        engine,
-                        error,
-                        fmt!("option `--identity`"),
-                    )
-                })?;
-                let supported = match version.channel {
-                    Channel::Stable => match () {
-                        () if version.triple >= V!(1, 84, 0) => true,
-                        () => false,
-                    },
-                    Channel::Beta { prerelease: _ } => true, // FIXME
-                    Channel::Nightly | Channel::Dev => match version.commit {
-                        Some(commit) => match () {
-                            // <https://github.com/rust-lang/rust/pull/132993>, base: 1.84.0
-                            () if commit.date >= D!(2024, 11, 18) => true,
-                            () => false,
-                        },
-                        None => match () {
-                            () if version.triple > V!(1, 84, 0) => true,
-                            () if version.triple == V!(1, 84, 0) => {
-                                // FIXME: print candidates and version
-                                return Err(error(fmt!(
-                                    "could not determine how to forward option \
-                                         `--identity` to the underlying `{}`",
-                                    engine.name()
-                                ))
-                                .done()
-                                .into());
-                            }
-                            () => false,
-                        },
-                    },
-                };
-                if !supported {
-                    // FIMXE: print the actual version
-                    return Err(error(fmt!(
-                        "the version of the underlying `{}` does not \
-                             support faking a stable identity",
-                        engine.name()
-                    ))
-                    .done()
-                    .into());
-                }
-                cmd.env(KEY, "-1")
-            }
-            Identity::Nightly => {
-                const TARGET: &str = env!("TARGET");
-                let version = engine.version(cx).map_err(|error| {
-                    emit_failed_to_obtain_version_for_opt(
-                        engine,
-                        error,
-                        fmt!("option `--identity`"),
-                    )
-                })?;
-                let (key, value) = match version.channel {
-                    Channel::Stable => match () {
-                        () if version.triple >= V!(1, 13, 0) => (KEY, "1"),
-                        () if version.triple == V!(1, 12, 1) => (KEY_LEGACY, "5c6cf767"),
-                        () if version.triple == V!(1, 12, 0) => (KEY_LEGACY, "40393716"),
-                        () if version.triple == V!(1, 11, 0) => (KEY_LEGACY, "39b92f95"),
-                        () if version.triple == V!(1, 10, 0) => (KEY_LEGACY, "e8edd0fd"),
-                        () if version.triple == V!(1, 9, 0) => (KEY_LEGACY, "d16b8f0e"),
-                        () if version.triple == V!(1, 8, 0) => (
-                            KEY_LEGACY,
-                            match TARGET {
-                                "i686-apple-darwin" => "20:35:17",
-                                "i686-pc-windows-gnu" => "02:02:44",
-                                "i686-pc-windows-msvc" => "02:41:27",
-                                "i686-unknown-linux-gnu" => "00:35:12",
-                                "x86_64-apple-darwin" => "20:35:17",
-                                "x86_64-pc-windows-gnu" => "01:24:47",
-                                "x86_64-pc-windows-msvc" => "00:40:16",
-                                "x86_64-unknown-linux-gnu" => "00:35:12",
-                                // FIXME: proper error message
-                                _ => {
-                                    return Err(error(fmt!(
-                                        "`--identity` not supported for this engine version"
-                                    ))
-                                    .done()
-                                    .into());
-                                }
-                            },
-                        ),
-                        //  FIXME: 1.7
-                        //  FIXME: 1.6
-                        //  FIXME: 1.5
-                        //  FIXME: 1.4
-                        //  FIXME: 1.3
-                        //  FIXME: 1.2
-                        //  FIXME: 1.1
-                        () if version.triple == V!(1, 0, 0) => (
-                            KEY_LEGACY,
-                            match TARGET {
-                                "i686-apple-darwin" => "23:48:08",
-                                "i686-pc-windows-gnu" => "03:16:56",
-                                "i686-unknown-linux-gnu" => "23:11:01",
-                                "x86_64-apple-darwin" => "23:48:08",
-                                "x86_64-pc-windows-gnu" => "03:14:30",
-                                "x86_64-unknown-linux-gnu" => "23:11:01",
-                                // FIXME: proper error message
-                                _ => {
-                                    return Err(error(fmt!(
-                                        "`--identity` not supported for this engine version"
-                                    ))
-                                    .done()
-                                    .into());
-                                }
-                            },
-                        ),
-                        () if version.triple < V!(1, 0, 0) => {
-                            // FIXME: proper error message
-                            return Err(error(fmt!("`--identity` not supported for engine<1.0"))
-                                .done()
-                                .into());
-                        }
-                        () => {
-                            // FIXME: proper error message
-                            return Err(error(fmt!(
-                                "`--identity` not supported for this engine version"
-                            ))
-                            .done()
-                            .into());
-                        }
-                    },
-                    Channel::Beta { prerelease: _ } => (KEY, "1"), // FIXME
-                    Channel::Nightly | Channel::Dev => (KEY, "1"), // FIXME
-                };
-                cmd.env(key, value)
-            }
-        };
+        configure_forced_identity(cmd, identity, e_opts, cx)?;
     }
 
     configure_v_opts(cmd, &opts.v_opts);
@@ -616,9 +472,7 @@ fn configure_late(
     }
 
     if opts.b_opts.internals {
-        let version = engine.version(cx).map_err(|error| {
-            emit_failed_to_obtain_version_for_opt(engine, error, fmt!("option `--internals`"))
-        })?;
+        let version = version_for_opt(engine, "--internals", cx)?;
 
         let syntax = match version.channel {
             Channel::Stable => match () {
@@ -701,13 +555,7 @@ fn configure_e_opts(cmd: &mut Command, e_opts: &EngineOptions<'_>, cx: Context<'
             }
 
             if c_opts.shallow {
-                let version = e_opts.engine().version(cx).map_err(|error| {
-                    emit_failed_to_obtain_version_for_opt(
-                        e_opts.engine(),
-                        error,
-                        fmt!("option `--shallow`"),
-                    )
-                })?;
+                let version = version_for_opt(e_opts.engine(), "--shallow", cx)?;
 
                 let syntax = match version.channel {
                     Channel::Stable => match () {
@@ -792,18 +640,213 @@ fn configure_e_opts(cmd: &mut Command, e_opts: &EngineOptions<'_>, cx: Context<'
     Ok(())
 }
 
-fn emit_failed_to_obtain_version_for_opt(
-    engine: Engine,
-    error: QueryEngineVersionError,
-    opt: impl Paint,
-) -> EmittedError {
-    self::error(fmt!("failed to retrieve the version of the underyling `{}`", engine.name()))
-        .note(fmt!("caused by: {}", error.short_desc()))
-        .note(|p| {
-            write!(p, "required in order to correctly forward ")?;
-            opt(p)
-        })
-        .done()
+fn configure_forced_identity(
+    cmd: &mut Command,
+    identity: Identity,
+    e_opts: &EngineOptions<'_>,
+    cx: Context<'_>,
+) -> Result<()> {
+    let engine = e_opts.engine();
+
+    const ENV_VAR: &str = "RUSTC_BOOTSTRAP";
+    const LEGACY_ENV_VAR: &str = "RUSTC_BOOTSTRAP_KEY";
+
+    let (key, value) = match identity {
+        Identity::True => {
+            // Forcing the true identity isn't a no-op, we want to overwrite any previously set value.
+            (ENV_VAR, "0")
+        }
+        Identity::Stable => {
+            let version = version_for_opt(engine, "--identity", cx)?;
+
+            // FIXME: Simplify once we support `beta` properly.
+            let supported = match version.channel {
+                Channel::Stable => match () {
+                    () if version.triple >= V!(1, 84, 0) => true,
+                    () => false,
+                },
+                Channel::Beta { prerelease: _ } => true, // FIXME
+                Channel::Nightly | Channel::Dev => match version.commit {
+                    Some(commit) => match () {
+                        // <https://github.com/rust-lang/rust/pull/132993>, base: 1.84.0
+                        () if commit.date >= D!(2024, 11, 18) => true,
+                        () => false,
+                    },
+                    None => match () {
+                        () if version.triple > V!(1, 84, 0) => true,
+                        () if version.triple == V!(1, 84, 0) => {
+                            // FIXME: print candidates and version
+                            return Err(error(fmt!(
+                                "could not determine how to forward option `--identity` to the underlying `{}`",
+                                engine.name()
+                            ))
+                            .done()
+                            .into());
+                        }
+                        () => false,
+                    },
+                },
+            };
+            if !supported {
+                // FIMXE: print the actual version
+                return Err(error(fmt!(
+                    "the version of the underlying `{}` does not support faking a stable identity",
+                    engine.name()
+                ))
+                .done()
+                .into());
+            }
+            (ENV_VAR, "-1")
+        }
+        Identity::Nightly => {
+            let version = version_for_opt(engine, "--identity", cx)?;
+
+            match version.channel {
+                Channel::Stable => {
+                    if version.triple >= V!(1, 13, 0) {
+                        cmd.env(ENV_VAR, "1");
+                        return Ok(());
+                    }
+
+                    let secret = match version.triple {
+                        V!(1, 12, 1) => Some("5c6cf767"),
+                        V!(1, 12, 0) => Some("40393716"),
+                        V!(1, 11, 0) => Some("39b92f95"),
+                        V!(1, 10, 0) => Some("e8edd0fd"),
+                        V!(1, 9, 0) => Some("d16b8f0e"),
+                        _ => None,
+                    };
+                    if let Some(secret) = secret {
+                        cmd.env(LEGACY_ENV_VAR, secret);
+                        return Ok(());
+                    }
+
+                    let secret = match env!("TARGET") {
+                        "i686-apple-darwin" => match version.triple {
+                            V!(1, 8, 0) => Some("20:35:17"),
+                            V!(1, 7, 0) => None, // FIXME
+                            V!(1, 6, 0) => None, // FIXME
+                            V!(1, 5, 0) => None, // FIXME
+                            V!(1, 4, 0) => None, // FIXME
+                            V!(1, 3, 0) => None, // FIXME
+                            V!(1, 2, 0) => None, // FIXME
+                            V!(1, 1, 0) => None, // FIXME
+                            V!(1, 0, 0) => Some("23:48:08"),
+                            _ => None,
+                        },
+                        "i686-pc-windows-gnu" => match version.triple {
+                            V!(1, 8, 0) => Some("02:02:44"),
+                            V!(1, 7, 0) => None, // FIXME
+                            V!(1, 6, 0) => None, // FIXME
+                            V!(1, 5, 0) => None, // FIXME
+                            V!(1, 4, 0) => None, // FIXME
+                            V!(1, 3, 0) => None, // FIXME
+                            V!(1, 2, 0) => None, // FIXME
+                            V!(1, 1, 0) => None, // FIXME
+                            V!(1, 0, 0) => Some("03:16:56"),
+                            _ => None,
+                        },
+                        "i686-pc-windows-msvc" => match version.triple {
+                            V!(1, 8, 0) => Some("02:41:27"),
+                            V!(1, 7, 0) => None, // FIXME
+                            V!(1, 6, 0) => None, // FIXME
+                            V!(1, 5, 0) => None, // FIXME
+                            V!(1, 4, 0) => None, // FIXME
+                            V!(1, 3, 0) => None, // FIXME
+                            _ => None,
+                        },
+                        "i686-unknown-linux-gnu" => match version.triple {
+                            V!(1, 8, 0) => Some("00:35:12"),
+                            V!(1, 7, 0) => None, // FIXME
+                            V!(1, 6, 0) => None, // FIXME
+                            V!(1, 5, 0) => None, // FIXME
+                            V!(1, 4, 0) => None, // FIXME
+                            V!(1, 3, 0) => None, // FIXME
+                            V!(1, 2, 0) => None, // FIXME
+                            V!(1, 1, 0) => None, // FIXME
+                            V!(1, 0, 0) => Some("23:11:01"),
+                            _ => None,
+                        },
+                        "x86_64-apple-darwin" => match version.triple {
+                            V!(1, 8, 0) => Some("20:35:17"),
+                            V!(1, 7, 0) => None, // FIXME
+                            V!(1, 6, 0) => None, // FIXME
+                            V!(1, 5, 0) => None, // FIXME
+                            V!(1, 4, 0) => None, // FIXME
+                            V!(1, 3, 0) => None, // FIXME
+                            V!(1, 2, 0) => None, // FIXME
+                            V!(1, 1, 0) => None, // FIXME
+                            V!(1, 0, 0) => Some("23:48:08"),
+                            _ => None,
+                        },
+                        "x86_64-pc-windows-gnu" => match version.triple {
+                            V!(1, 8, 0) => Some("01:24:47"),
+                            V!(1, 7, 0) => None, // FIXME
+                            V!(1, 6, 0) => None, // FIXME
+                            V!(1, 5, 0) => None, // FIXME
+                            V!(1, 4, 0) => None, // FIXME
+                            V!(1, 3, 0) => None, // FIXME
+                            V!(1, 2, 0) => None, // FIXME
+                            V!(1, 1, 0) => None, // FIXME
+                            V!(1, 0, 0) => Some("03:14:30"),
+                            _ => None,
+                        },
+                        "x86_64-pc-windows-msvc" => match version.triple {
+                            V!(1, 8, 0) => Some("00:40:16"),
+                            V!(1, 7, 0) => None, // FIXME
+                            V!(1, 6, 0) => None, // FIXME
+                            V!(1, 5, 0) => None, // FIXME
+                            V!(1, 4, 0) => None, // FIXME
+                            V!(1, 3, 0) => None, // FIXME
+                            V!(1, 2, 0) => None, // FIXME
+                            _ => None,
+                        },
+                        "x86_64-unknown-linux-gnu" => match version.triple {
+                            V!(1, 8, 0) => Some("00:35:12"),
+                            V!(1, 7, 0) => Some("19:18:56"),
+                            V!(1, 6, 0) => Some("03:37:53"),
+                            V!(1, 5, 0) => Some("20:19:00"),
+                            V!(1, 4, 0) => Some("01:09:53"),
+                            V!(1, 3, 0) => Some("17:28:44"),
+                            V!(1, 2, 0) => Some("15:28:50"),
+                            V!(1, 1, 0) => Some("18:30:38"),
+                            V!(1, 0, 0) => Some("23:11:01"),
+                            _ => None,
+                        },
+                        _ => None,
+                    };
+
+                    if let Some(secret) = secret {
+                        (LEGACY_ENV_VAR, secret)
+                    } else {
+                        // FIXME: proper error message
+                        // FIXME: customize diagnostic for "<1.0" case.
+                        return Err(error(fmt!(
+                            "`--identity` not supported for this engine version"
+                        ))
+                        .done()
+                        .into());
+                    }
+                }
+                // FIXME: not yet implemented
+                Channel::Beta { prerelease: _ } => (ENV_VAR, "1"),
+                Channel::Nightly | Channel::Dev => {
+                    // I'm not sure if there's an observable difference between nightly/dev and
+                    // nightly/dev with a forced nightly identity – I highly doubt it.
+                    //
+                    // Therefore let's not look for the actual bootstrap keys which would be a
+                    // lot of work. Still, we can't just do nothing since we still need to
+                    // overwrite any previously set forced stable identity (here we can ignore
+                    // the legacy env var which doesn't support that).
+                    (ENV_VAR, "0")
+                }
+            }
+        }
+    };
+
+    cmd.env(key, value);
+
+    Ok(())
 }
 
 pub(crate) fn run(
@@ -871,6 +914,20 @@ fn render(cmd: &process::Command, p: &mut diagnostic::Painter) -> io::Result<()>
     }
 
     Ok(())
+}
+
+fn version_for_opt(engine: Engine, opt: &str, cx: Context<'_>) -> Result<Version<String>> {
+    let error = match engine.version(cx) {
+        Ok(version) => return Ok(version),
+        Err(error) => error,
+    };
+
+    Err(self::error(fmt!("failed to retrieve the version of the underyling `{}`", engine.name()))
+        // FIXME: Don't use the short description, use the proper one once we have one
+        .note(fmt!("caused by: {}", error.short_desc()))
+        .note(fmt!("required in order to correctly forward the option `{opt}`"))
+        .done()
+        .into())
 }
 
 /// Engine-specific build options.
