@@ -66,7 +66,7 @@ fn query_engine_path(engine: Engine, cx: Context<'_>) -> Result<String, QueryEng
     log_execution(|p| render(&cmd, p), cx);
 
     // FIXME: Forward underlying IO error (we can't rn, it doesn't impl `Clone`).
-    let output = cmd.output().map_err(|_| Error::RustupSpawnFailure)?;
+    let mut output = cmd.output().map_err(|_| Error::RustupSpawnFailure)?;
 
     if !output.status.success() {
         // Sadly, rustup doesn't offer any mechanism to make it output machine-readable and
@@ -106,9 +106,9 @@ fn query_engine_path(engine: Engine, cx: Context<'_>) -> Result<String, QueryEng
         return Err(Error::RustupFailure);
     }
 
+    output.stdout.truncate_ascii_end();
     // FIXME: Does `rustup` forward paths that aren't valid UTF-8 or does it error?
-    let mut path = String::from_utf8(output.stdout).map_err(Error::InvalidPath)?;
-    path.pop(); // drop trailing `\n`
+    let path = String::from_utf8(output.stdout).map_err(Error::InvalidPath)?;
 
     Ok(path)
 }
@@ -169,14 +169,14 @@ fn query_engine_version(
 
     log_execution(|p| render(&cmd, p), cx);
 
-    let output = cmd.output().map_err(|_| Error::EngineSpawnFailure)?;
+    let mut output = cmd.output().map_err(|_| Error::EngineSpawnFailure)?;
 
     if !output.status.success() {
         return Err(Error::EngineFailure);
     }
 
-    let source = std::str::from_utf8(&output.stdout).map_err(|_| Error::Malformed)?;
-    let source = source.strip_suffix('\n').ok_or(Error::Malformed)?;
+    output.stdout.truncate_ascii_end();
+    let source = String::from_utf8(output.stdout).map_err(|_| Error::Malformed)?;
 
     // The name of the binary *has* to exist for the version string to be considered valid!
     let (binary_name, source) = source.split_once(' ').ok_or(Error::Malformed)?;
@@ -271,9 +271,7 @@ pub(crate) fn query_crate_name<'a>(
         return Err(Error::RustcFailure);
     }
 
-    // Trim the trailing line break.
-    output.stdout.truncate(output.stdout.trim_ascii_end().len());
-
+    output.stdout.truncate_ascii_end();
     let name = String::from_utf8(output.stdout).map_err(Error::InvalidUtf8)?;
 
     CrateName::parse(name).map(Into::into).map_err(Error::InvalidCrateName)
@@ -329,6 +327,8 @@ fn configure_early(
     opts: &Options<'_>,
     cx: Context<'_>,
 ) -> Result<()> {
+    let engine = e_opts.engine();
+
     if let Some(path) = krate.path {
         cmd.arg(path);
     }
@@ -348,9 +348,9 @@ fn configure_early(
     // Regarding crate name querying, the edition is vital. After all,
     // rustc needs to parse the crate root to find `#![crate_name]`.
     if let Some(edition) = krate.edition {
-        let version = e_opts.engine().version(cx).map_err(|error| {
+        let version = engine.version(cx).map_err(|error| {
             emit_failed_to_obtain_version_for_opt(
-                e_opts.engine(),
+                engine,
                 error,
                 fmt!("the requested edition `{}`", edition.to_str()),
             )
@@ -381,9 +381,10 @@ fn configure_early(
         };
 
         let syntax = syntax.ok_or_else(|| {
+            // FIXME: Print the actual version.
             self::error(fmt!(
                 "the version of the underyling `{}` does not support editions",
-                e_opts.engine().name()
+                engine.name()
             ))
             .done()
         })?;
@@ -407,21 +408,145 @@ fn configure_early(
     // Regarding crate name querying, let's better honor this option
     // since it may significantly affect rustc's behavior.
     if let Some(identity) = opts.b_opts.identity {
-        cmd.env(
-            "RUSTC_BOOTSTRAP",
-            match identity {
-                Identity::True => "0",
-                // FIXME: Bail out with an error if we know that
-                //        that engine version doesn't support this value.
-                //        And warn in cases where it's not deducible
-                Identity::Stable => "-1",
-                // FIXME: In older versions, you had to set this env var
-                //        to a "secret key" that comprised of a hash of
-                //        several "bootstrap variables". Either support that
-                //        smh. or throw an "unsupported" error.
-                Identity::Nightly => "1",
-            },
-        );
+        const KEY: &str = "RUSTC_BOOTSTRAP";
+        const KEY_LEGACY: &str = "RUSTC_BOOTSTRAP_KEY";
+
+        match identity {
+            // Forcing the true identity isn't a no-op, we want to overwrite any previously set value.
+            Identity::True => cmd.env(KEY, "0"),
+            Identity::Stable => {
+                let version = engine.version(cx).map_err(|error| {
+                    emit_failed_to_obtain_version_for_opt(
+                        engine,
+                        error,
+                        fmt!("option `--identity`"),
+                    )
+                })?;
+                let supported = match version.channel {
+                    Channel::Stable => match () {
+                        () if version.triple >= V!(1, 84, 0) => true,
+                        () => false,
+                    },
+                    Channel::Beta { prerelease: _ } => true, // FIXME
+                    Channel::Nightly | Channel::Dev => match version.commit {
+                        Some(commit) => match () {
+                            // <https://github.com/rust-lang/rust/pull/132993>, base: 1.84.0
+                            () if commit.date >= D!(2024, 11, 18) => true,
+                            () => false,
+                        },
+                        None => match () {
+                            () if version.triple > V!(1, 84, 0) => true,
+                            () if version.triple == V!(1, 84, 0) => {
+                                // FIXME: print candidates and version
+                                return Err(error(fmt!(
+                                    "could not determine how to forward option \
+                                         `--identity` to the underlying `{}`",
+                                    engine.name()
+                                ))
+                                .done()
+                                .into());
+                            }
+                            () => false,
+                        },
+                    },
+                };
+                if !supported {
+                    // FIMXE: print the actual version
+                    return Err(error(fmt!(
+                        "the version of the underlying `{}` does not \
+                             support faking a stable identity",
+                        engine.name()
+                    ))
+                    .done()
+                    .into());
+                }
+                cmd.env(KEY, "-1")
+            }
+            Identity::Nightly => {
+                const TARGET: &str = env!("TARGET");
+                let version = engine.version(cx).map_err(|error| {
+                    emit_failed_to_obtain_version_for_opt(
+                        engine,
+                        error,
+                        fmt!("option `--identity`"),
+                    )
+                })?;
+                let (key, value) = match version.channel {
+                    Channel::Stable => match () {
+                        () if version.triple >= V!(1, 13, 0) => (KEY, "1"),
+                        () if version.triple == V!(1, 12, 1) => (KEY_LEGACY, "5c6cf767"),
+                        () if version.triple == V!(1, 12, 0) => (KEY_LEGACY, "40393716"),
+                        () if version.triple == V!(1, 11, 0) => (KEY_LEGACY, "39b92f95"),
+                        () if version.triple == V!(1, 10, 0) => (KEY_LEGACY, "e8edd0fd"),
+                        () if version.triple == V!(1, 9, 0) => (KEY_LEGACY, "d16b8f0e"),
+                        () if version.triple == V!(1, 8, 0) => (
+                            KEY_LEGACY,
+                            match TARGET {
+                                "i686-apple-darwin" => "20:35:17",
+                                "i686-pc-windows-gnu" => "02:02:44",
+                                "i686-pc-windows-msvc" => "02:41:27",
+                                "i686-unknown-linux-gnu" => "00:35:12",
+                                "x86_64-apple-darwin" => "20:35:17",
+                                "x86_64-pc-windows-gnu" => "01:24:47",
+                                "x86_64-pc-windows-msvc" => "00:40:16",
+                                "x86_64-unknown-linux-gnu" => "00:35:12",
+                                // FIXME: proper error message
+                                _ => {
+                                    return Err(error(fmt!(
+                                        "`--identity` not supported for this engine version"
+                                    ))
+                                    .done()
+                                    .into());
+                                }
+                            },
+                        ),
+                        //  FIXME: 1.7
+                        //  FIXME: 1.6
+                        //  FIXME: 1.5
+                        //  FIXME: 1.4
+                        //  FIXME: 1.3
+                        //  FIXME: 1.2
+                        //  FIXME: 1.1
+                        () if version.triple == V!(1, 0, 0) => (
+                            KEY_LEGACY,
+                            match TARGET {
+                                "i686-apple-darwin" => "23:48:08",
+                                "i686-pc-windows-gnu" => "03:16:56",
+                                "i686-unknown-linux-gnu" => "23:11:01",
+                                "x86_64-apple-darwin" => "23:48:08",
+                                "x86_64-pc-windows-gnu" => "03:14:30",
+                                "x86_64-unknown-linux-gnu" => "23:11:01",
+                                // FIXME: proper error message
+                                _ => {
+                                    return Err(error(fmt!(
+                                        "`--identity` not supported for this engine version"
+                                    ))
+                                    .done()
+                                    .into());
+                                }
+                            },
+                        ),
+                        () if version.triple < V!(1, 0, 0) => {
+                            // FIXME: proper error message
+                            return Err(error(fmt!("`--identity` not supported for engine<1.0"))
+                                .done()
+                                .into());
+                        }
+                        () => {
+                            // FIXME: proper error message
+                            return Err(error(fmt!(
+                                "`--identity` not supported for this engine version"
+                            ))
+                            .done()
+                            .into());
+                        }
+                    },
+                    Channel::Beta { prerelease: _ } => (KEY, "1"), // FIXME
+                    Channel::Nightly | Channel::Dev => (KEY, "1"), // FIXME
+                };
+                cmd.env(key, value)
+            }
+        };
     }
 
     configure_v_opts(cmd, &opts.v_opts);
@@ -504,6 +629,7 @@ fn configure_late(
             Channel::Beta { prerelease: _ } => Syntax::ZeeVerboseInternals, // FIXME: actually unimpl'ed!
             Channel::Nightly | Channel::Dev => match version.commit {
                 Some(commit) => match () {
+                    // <https://github.com/rust-lang/rust/pull/119129>, base: 1.77
                     () if commit.date >= D!(2023, 12, 26) => Syntax::ZeeVerboseInternals,
                     // FIXME: Find the *actual* lower bound.
                     () => Syntax::ZeeVerbose,
@@ -918,3 +1044,17 @@ pub(crate) enum ImplyUnstableOptions {
     Yes,
     No,
 }
+
+trait TruncateExt {
+    fn truncate_ascii_end(&mut self);
+}
+
+impl TruncateExt for Vec<u8> {
+    fn truncate_ascii_end(&mut self) {
+        self.truncate(self.trim_ascii_end().len());
+    }
+}
+
+// Helpful resources for working with older versions:
+// * <https://static.rust-lang.org/manifests.txt>
+// * <https://forge.rust-lang.org/infra/archive-stable-version-installers.html>
