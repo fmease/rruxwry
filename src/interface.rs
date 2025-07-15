@@ -49,21 +49,20 @@ pub(crate) fn arguments() -> Arguments {
     }
     fn compiletest() -> impl IntoIterator<Item = clap::Arg> {
         [
-            // FIXME: Ideally the long form for Flavor::Rruxwry wasn't
-            //        `--directives --directives` (yuck!) but sth. like
-            //        `--directives=rruxwry` while the short form remains `-@@`!
             clap::Arg::new(id::DIRECTIVES)
                 .short('@')
                 .long("directives")
-                // FIXME: Limit number of occurrences to 0..=2 (`max_occurences` no longer exists).
-                .action(clap::ArgAction::Count)
+                .value_name("FLAVOR")
+                .require_equals(true)
+                .num_args(..=1)
+                .default_missing_value("vanilla")
+                .value_parser(Flavor::parse_cli_style)
                 .help("Enable compiletest-like directives"),
-            // FIXME: (Reminder) Warn on `--bless`+`--dry-run` (outside of clap)
             clap::Arg::new(id::COMPILETEST)
                 .short('T')
                 .long("compiletest")
                 .action(clap::ArgAction::SetTrue)
-                // FIXME: Requires -@ but incompatible with -@@ etc!
+                // FIXME: Maybe reject if flavor isn't vanilla (`-@=x`)?
                 .requires(id::DIRECTIVES)
                 .help("Check in a compiletest-esque manner"),
             clap::Arg::new(id::BLESS)
@@ -301,12 +300,7 @@ pub(crate) fn arguments() -> Arguments {
     // unwrap: handled by `clap`.
     let (operation, mut matches) = matches.remove_subcommand().unwrap();
 
-    let directives = match matches.remove_one::<u8>(id::DIRECTIVES).unwrap_or_default() {
-        0 => None,
-        1 => Some(Flavor::Vanilla),
-        // FIXME: Reject count > 2.
-        _ => Some(Flavor::Rruxwry),
-    };
+    let directives = matches.remove_one(id::DIRECTIVES);
 
     let test = match matches.remove_one(id::COMPILETEST).unwrap_or_default() {
         false => Test::No,
@@ -434,10 +428,10 @@ impl ExtEdition<'static> {
     // FIXME: Somehow support `h`/`help` printing out rrx's superset of options
     fn parse_cli_style(source: &'static str) -> Self {
         Self::Fixed(match source {
-            "d" => return Self::EngineDefault,
-            "s" => return Self::LatestStable,
-            "u" => return Self::LatestUnstable,
-            "l" => return Self::Latest,
+            "d" | "default" => return Self::EngineDefault,
+            "s" | "stable" => return Self::LatestStable,
+            "u" | "unstable" => return Self::LatestUnstable,
+            "l" | "latest" => return Self::Latest,
             "15" | "2015" => Edition::Rust2015,
             "18" | "2018" => Edition::Rust2018,
             "21" | "2021" => Edition::Rust2021,
@@ -469,9 +463,19 @@ impl CrateType {
 impl Identity {
     fn parse_cli_style(source: &str) -> Result<Self, String> {
         parse!(
-            "t" => Self::True,
-            "s" => Self::Stable,
-            "n" => Self::Nightly,
+            "t" | "true" => Self::True,
+            "s" | "stable" => Self::Stable,
+            "n" | "nightly" => Self::Nightly,
+        )(source)
+        .map_err(possible_values)
+    }
+}
+
+impl Flavor {
+    fn parse_cli_style(source: &str) -> Result<Flavor, String> {
+        parse!(
+            "v" | "vanilla" => Self::Vanilla,
+            "x" | "rruxwry" => Self::Rruxwry,
         )(source)
         .map_err(possible_values)
     }
@@ -483,6 +487,8 @@ fn parse_unstable_feature_cli_style(source: &str) -> Result<String, String> {
     Ok(match source {
         "ace" => "associated_const_equality",
         "acp" => "adt_const_params",
+        "cia" => "custom_inner_attributes",
+        "cti" => "const_trait_impl",
         "dm" | "m" => "decl_macro",
         "gce" => "generic_const_exprs",
         "gci" => "generic_const_items",
@@ -493,9 +499,12 @@ fn parse_unstable_feature_cli_style(source: &str) -> Result<String, String> {
         "lta" => "lazy_type_alias",
         "mgca" => "min_generic_const_args",
         "nlb" => "non_lifetime_binders",
+        "ra" | "a" => "rustc_attrs",
         "rtn" => "return_type_notation",
         "sea" => "stmt_expr_attributes",
+        "sh" => "sized_hierarchy",
         "ta" => "trait_alias",
+        "tb" => "trivial_bounds",
         "tait" => "type_alias_impl_trait",
         "tcsu" => "type_changing_struct_update",
         "ucp" => "unsized_const_params",

@@ -137,30 +137,30 @@ Arguments:
   [VERBATIM]...  Flags passed to `rustc` verbatim
 
 Options:
-  -r, --run                   Also run the built binary
-  -c, --check-only            Don't fully compile, only check the crate
-  -@, --directives...         Enable compiletest-like directives
-  -T, --compiletest           Check in a compiletest-esque manner
-  -., --bless                 Update the test expectations
-  -n, --crate-name <NAME>     Set the name of the crate
-  -t, --crate-type <TYPE>     Set the type of the crate
-  -e, --edition <EDITION>     Set the edition of the crate
-      --cfg <NAME[="VALUE"]>  Enable a configuration
-  -R, --revision <NAME>       Enable a compiletest revision
-  -F, --feature <NAME>        Enable an experimental library or language feature
-  -s, --shallow               Halt after parsing the source file
-  -x, --extern <NAME>         Register an external library
-  -/, --suppress-lints        Cap lints at allow level
-  -#, --internals             Enable internal pretty-printing of data types
-  -N, --next-solver           Enable the next-gen trait solver
-  -I, --identity <IDENTITY>   Force rust{,do}c's identity
-  -D, --no-dedupe             Don't deduplicate diagnostics
-      --log[=<FILTER>]        Enable rust{,do}c logging. FILTER defaults to `debug`
-  -B, --no-backtrace          Override `RUST_BACKTRACE` to be `0`
-  -V, --version               Print the underlying rust{,do}c version and halt
-  -v, --verbose               Use verbose output
-      --color <WHEN>          Control when to use color [default: auto] [possible values: auto, always, never]
-  -h, --help                  Print help
+  -r, --run                    Also run the built binary
+  -c, --check-only             Don't fully compile, only check the crate
+  -@, --directives[=<FLAVOR>]  Enable compiletest-like directives
+  -T, --compiletest            Check in a compiletest-esque manner
+  -., --bless                  Update the test expectations
+  -n, --crate-name <NAME>      Set the name of the crate
+  -t, --crate-type <TYPE>      Set the type of the crate
+  -e, --edition <EDITION>      Set the edition of the crate
+      --cfg <NAME[="VALUE"]>   Enable a configuration
+  -R, --revision <NAME>        Enable a compiletest revision
+  -F, --feature <NAME>         Enable an experimental library or language feature
+  -s, --shallow                Halt after parsing the source file
+  -x, --extern <NAME>          Register an external library
+  -/, --suppress-lints         Cap lints at allow level
+  -#, --internals              Enable internal pretty-printing of data types
+  -N, --next-solver            Enable the next-gen trait solver
+  -I, --identity <IDENTITY>    Force rust{,do}c's identity
+  -D, --no-dedupe              Don't deduplicate diagnostics
+      --log[=<FILTER>]         Enable rust{,do}c logging. FILTER defaults to `debug`
+  -B, --no-backtrace           Override `RUST_BACKTRACE` to be `0`
+  -V, --version                Print the underlying rust{,do}c version and halt
+  -v, --verbose                Use verbose output
+      --color <WHEN>           Control when to use color [default: auto] [possible values: auto, always, never]
+  -h, --help                   Print help
 ```
 <!--COMMAND}-->
 
@@ -178,7 +178,7 @@ Arguments:
 Options:
   -o, --open                     Also open the generated docs in a browser
   -j, --json                     Output JSON instead of HTML
-  -@, --directives...            Enable compiletest-like directives
+  -@, --directives[=<FLAVOR>]    Enable compiletest-like directives
   -T, --compiletest              Check in a compiletest-esque manner
   -., --bless                    Update the test expectations
   -X, --cross-crate              Enable the cross-crate re-export mode
