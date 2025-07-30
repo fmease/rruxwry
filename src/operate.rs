@@ -2,11 +2,6 @@
 //!
 //! The low-level build routines are defined in [`crate::build`].
 
-// FIXME: Add explainer about why we use `--print=crate-name` over `-o` (crate type nuisance; rustdoc no likey).
-
-// FIXME: Create test for `//@ compile-flags: --extern name` + aux-build
-// FIXME: Create test for `//@ compile-flags: --test`.
-
 use crate::{
     build::{
         self, CompileOptions, DocOptions, Engine, EngineOptions, ImplyUnstableOptions, Options,
@@ -20,7 +15,7 @@ use crate::{
     source::{SourcePath, Spanned},
     utility::{OsStrExt as _, default, paint::Painter},
 };
-use anstyle::AnsiColor;
+use anstyle::{AnsiColor, Effects};
 use std::{
     ascii::Char,
     borrow::Cow,
@@ -29,9 +24,11 @@ use std::{
     path::{Path, PathBuf},
 };
 
-// FIXME: `-@Q` may fail to report fake identities as set via `//@ rustc-env: RUST_BOOTSTRAP=…`.
+// FIXME: Add explainer about why we use `--print=crate-name` over `-o` (crate type nuisance; rustdoc no likey).
+
+// FIXME: `-@V` may fail to report fake identities as set via `//@ rustc-env: RUST_BOOTSTRAP=…`.
 //        Should we consider that a bug or "out of scope"? We could theoretically gather directives
-//        under `-@Q` to obtain this piece of information.
+//        under `-@V` to obtain this piece of information.
 
 pub(crate) fn perform(
     op: Operation,
@@ -106,9 +103,8 @@ fn compile<'a>(
             let (krate, opts) = build_default(&e_opts, krate, opts, cx)?;
             (krate, opts, default())
         }
-        // FIXME: _test
-        CompileMode::DirectiveDriven(flavor, _test) => {
-            build_directive_driven(&mut e_opts, krate, opts, flavor, cx)?
+        CompileMode::DirectiveDriven(flavor, test) => {
+            build_directive_driven(&mut e_opts, krate, opts, flavor, test, cx)?
         }
     };
     match run {
@@ -131,7 +127,7 @@ fn run(
         error.emit()
     })?;
 
-    let mut path: PathBuf = [".", crate_name.as_str()].into_iter().collect();
+    let mut path = PathBuf::from_iter([".", crate_name.as_str()]);
     path.set_extension(std::env::consts::EXE_EXTENSION);
 
     build::run(&path, run_v_opts, cx)
@@ -159,13 +155,13 @@ fn document<'a>(
     let (krate, opts) = match mode {
         DocMode::Default => build_default(&EngineOptions::Rustdoc(d_opts), krate, opts, cx)?,
         DocMode::CrossCrate => return document_cross_crate(krate, opts, d_opts, open, cx),
-        // FIXME: _test
-        DocMode::DirectiveDriven(flavor, _test) => {
+        DocMode::DirectiveDriven(flavor, test) => {
             let (krate, opts, _) = build_directive_driven(
                 &mut EngineOptions::Rustdoc(d_opts),
                 krate,
                 opts,
                 flavor,
+                test,
                 cx,
             )?;
             (krate, opts)
@@ -284,6 +280,7 @@ fn build_directive_driven<'a>(
     krate: Crate<'a, ExtEdition<'a>>,
     mut opts: Options<'a>,
     flavor: directive::Flavor,
+    test: Test,
     cx: Context<'a>,
 ) -> Result<(Crate<'a>, Options<'a>, VerbatimOptions<'a>)> {
     let path = krate.path.ok_or_else(|| {
@@ -335,16 +332,6 @@ fn build_directive_driven<'a>(
         cx,
     )?;
 
-    let directive::InstantiatedDirectives {
-        build_aux_docs,
-        auxes,
-        edition,
-        v_opts,
-        v_d_opts,
-        run_v_opts,
-        prefer_dylib,
-    } = directives;
-
     let aux_base_path = LazyCell::new(|| {
         match path {
             // FIXME: unwrap
@@ -355,14 +342,14 @@ fn build_directive_driven<'a>(
     });
     let mut extern_crates = Vec::new();
 
-    auxes.iter().try_for_each(|aux| {
+    directives.auxes.iter().try_for_each(|aux| {
         compile_auxiliary(
             aux,
             &aux_base_path,
             e_opts,
             // FIXME: This awful!
             opts.clone(),
-            build_aux_docs,
+            directives.build_aux_docs,
             flavor,
             cx,
             &mut extern_crates,
@@ -375,7 +362,7 @@ fn build_directive_driven<'a>(
     // if this was `Engine::Rustc`. We might need to do that to at some point, tho I'm
     // honestly not sure about all the consequences. Also note that we currently use a
     // crate type of lib instead of dylib for auxiliaries by default.
-    _ = prefer_dylib;
+    _ = directives.prefer_dylib;
 
     let edition = match krate.edition {
         // If the resolution of the CLI edition fails, we *don't*
@@ -384,19 +371,31 @@ fn build_directive_driven<'a>(
         //        for engine==rustdoc see comment above the other invocation of
         //        `resolve` in this module.
         Some(edition) => edition.resolve(e_opts.engine(), cx),
-        None => edition.map(|edition| Edition::Unknown(edition.bare)),
+        None => directives.edition.map(|edition| Edition::Unknown(edition.bare)),
     };
-
     let krate = Crate { path: Some(path), edition, ..krate };
 
-    opts.v_opts.extend(v_opts);
+    opts.v_opts.extend(directives.v_opts);
     match e_opts {
         EngineOptions::Rustc(..) => {} // rustc-exclusive (verbatim) flags is not a thing.
-        EngineOptions::Rustdoc(d_opts) => d_opts.v_opts.extend(v_d_opts),
+        EngineOptions::Rustdoc(d_opts) => d_opts.v_opts.extend(directives.v_d_opts),
+    }
+    match test {
+        Test::Yes(_) => opts.v_opts.arguments.push("-Zui-testing"),
+        Test::No => {}
     }
 
-    build::perform(e_opts, krate, &opts, ImplyUnstableOptions::No, cx)?;
-    Ok((krate, opts, run_v_opts))
+    let cmd = build::prepare(e_opts, krate, &opts, ImplyUnstableOptions::No, cx)?;
+
+    match test {
+        Test::Yes(bless) => {
+            let output = cmd.execute_capturing_output()?;
+            compare(path, output, bless)?;
+        }
+        Test::No => cmd.execute()?.exit_ok().map_err(io::Error::other)?,
+    }
+
+    Ok((krate, opts, directives.run_v_opts))
 }
 
 // FIXME: Support nested auxiliaries!
@@ -483,6 +482,65 @@ fn compile_auxiliary<'a>(
             cx,
         )?;
     }
+
+    Ok(())
+}
+
+// FIXME: temporary name
+fn compare(path: SourcePath<'_>, output: std::process::Output, bless: Bless) -> io::Result<()> {
+    let SourcePath::Regular(path) = path else { todo!() }; // FIXME
+
+    let stdout_expect_path = path.with_extension("stdout");
+    let stderr_expect_path = path.with_extension("stderr");
+
+    let compare_stream = |actual: Vec<u8>, expect_path| {
+        match bless {
+            Bless::No => {
+                let expected = match std::fs::read_to_string(expect_path) {
+                    Ok(contents) => contents,
+                    Err(err) => match err.kind() {
+                        io::ErrorKind::NotFound => String::new(),
+                        _ => return Err(err),
+                    },
+                };
+                let actual = String::from_utf8(actual).unwrap(); // FIXME
+                let dir_path = path.parent().unwrap().to_str().unwrap(); // FIXME
+                let actual =
+                    if !dir_path.is_empty() { actual.replace(dir_path, "$DIR") } else { actual };
+
+                let diff = similar::TextDiff::from_lines(&expected, &actual);
+
+                // Don't create a fresh painter that's expensive! Use the one from the Context!
+                let stdout = io::stdout().lock();
+                let colorize =
+                    anstream::AutoStream::choice(&stdout) != anstream::ColorChoice::Never;
+                let mut p = Painter::new(io::BufWriter::new(stdout), colorize);
+
+                // FIXME: Highlight more fine grained inside lines, too!
+                for change in diff.iter_all_changes() {
+                    let (tag, color) = match change.tag() {
+                        similar::ChangeTag::Delete => ("-", AnsiColor::Red),
+                        similar::ChangeTag::Insert => ("+", AnsiColor::Green),
+                        similar::ChangeTag::Equal => (" ", AnsiColor::White),
+                    };
+                    p.set(color)?;
+                    p.with(Effects::INVERT, fmt!("{tag}"))?;
+                    write!(p, " {change}")?;
+                    p.unset()?;
+                }
+                writeln!(p)?;
+            }
+            Bless::Yes => {
+                if !actual.is_empty() {
+                    std::fs::File::create(expect_path)?.write_all(&actual)?;
+                }
+            }
+        }
+        Ok(())
+    };
+
+    compare_stream(output.stdout, stdout_expect_path)?;
+    compare_stream(output.stderr, stderr_expect_path)?;
 
     Ok(())
 }

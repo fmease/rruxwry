@@ -3,12 +3,8 @@
 // FIXME: We should warn on `//@ compile-flags:`, `//@ compile-flags`, etc.
 // FIXME: Warn on `//@ revisions: single` cuz it's useless.
 
-// FIXME: Mirror compiletest regarding `mod …`/`fn …` (sth. like that):
-//        Under Flavor::Vanilla, ignore all directives below a line starts with `mod …`/`fn …`(…)
-//                               and issue warnings.
-//        Under Flavor::Rruxwry, don't bail out early.
-
 // FIXME: Warn on "unused"/extraneous arguments (e.g., "//@ build-aux-docs some extra garbage").
+//        However, there are exceptions (e.g, `//@ ignore-test`).
 
 // FIXME: Under Flavor::Rruxwry consider upgrading some(!) warnings to hard errors. If so, we might still
 //        want to provide a mechanism to circumvent that. E.g., `--force` or `-S <allow|warn>=...`.
@@ -606,6 +602,7 @@ impl<'src> Parser<'src> {
             | "dont-check-compiler-stderr"
             | "dont-check-compiler-stdout"
             | "dont-check-failure-status"
+            | "dont-require-annotations"
             | "error-pattern"
             | "exact-llvm-major-version"
             | "failure-status"
@@ -632,7 +629,9 @@ impl<'src> Parser<'src> {
             | "reference"
             | "regex-error-pattern"
             | "remap-src-base"
+            | "run-crash"
             | "run-fail"
+            | "run-fail-or-crash"
             | "run-pass"
             | "run-rustfix"
             | "rustfix-only-machine-applicable"

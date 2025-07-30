@@ -32,6 +32,18 @@ pub(crate) fn perform(
     imply_u_opts: ImplyUnstableOptions,
     cx: Context<'_>,
 ) -> Result<()> {
+    let cmd = prepare(e_opts, krate, opts, imply_u_opts, cx)?;
+    cmd.execute()?.exit_ok().map_err(io::Error::other)?;
+    Ok(())
+}
+
+pub(crate) fn prepare<'cx>(
+    e_opts: &EngineOptions<'_>,
+    krate: Crate<'_>,
+    opts: &Options<'_>,
+    imply_u_opts: ImplyUnstableOptions,
+    cx: Context<'cx>,
+) -> Result<Command<'cx>> {
     let engine = e_opts.engine();
 
     let mut cmd = engine.command(cx).map_err(|error| error.emit())?;
@@ -48,8 +60,7 @@ pub(crate) fn perform(
         cmd.arg("-Zunstable-options");
     }
 
-    cmd.execute()?.exit_ok().map_err(io::Error::other)?;
-    Ok(())
+    Ok(cmd)
 }
 
 /// Don't call this directly! Use [`EngineKind::path`] instead.

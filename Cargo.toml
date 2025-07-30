@@ -22,6 +22,7 @@ smallvec = "2.0.0-alpha.11"
 unicode-width = "0.2.0"
 unicode-segmentation = "1.12.0"
 rustc-hash = "2.1.1"
+similar = "2.7.0"
 
 [patch.crates-io]
 # To eliminate the crate dependency `once_cell`.
