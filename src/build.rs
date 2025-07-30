@@ -945,7 +945,7 @@ impl EngineOptions<'_> {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy)]
 pub(crate) enum Engine {
     Rustc,
     Rustdoc,

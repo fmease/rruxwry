@@ -2,6 +2,7 @@ use std::{ascii::Char, ffi::OsStr};
 
 pub(crate) mod monotonic;
 pub(crate) mod paint;
+pub(crate) mod small_fixed_map;
 
 pub(crate) use rustc_hash::FxHashMap as HashMap;
 

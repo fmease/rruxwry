@@ -5,6 +5,13 @@
 #![feature(decl_macro)]
 #![feature(exact_size_is_empty)]
 #![feature(exit_status_error)]
+// FIXME: Switch to feature `min_generic_const_args` as soon as it no longer ICEs with:
+//            thread 'rustc' panicked at compiler/rustc_trait_selection/src/traits/normalize.rs:465:21:
+//            internal error: entered unreachable code: unexpected `DefKind` for const alias to resolve to: Ctor(Variant, Const)
+//        Tracked in: <https://github.com/rust-lang/rust/issues/141738>.
+#![feature(generic_const_exprs)]
+// FIXME: Only used for a GCE workaround. Remove once we use mGCA.
+#![feature(generic_const_items)]
 #![feature(if_let_guard)]
 #![feature(iter_collect_into)]
 #![feature(slice_split_once)]
@@ -14,6 +21,7 @@
 #![feature(trait_alias)]
 #![feature(type_changing_struct_update)]
 // Lints //
+#![expect(incomplete_features, reason = "generic_const_exprs")]
 #![deny(rust_2018_idioms, unused_must_use, unused_crate_dependencies)]
 #![deny(clippy::all, clippy::pedantic)]
 #![allow(clippy::if_not_else)] // I disagree

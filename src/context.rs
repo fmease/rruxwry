@@ -2,7 +2,10 @@ use crate::{
     build::{DebugOptions, Engine, QueryEnginePathError, QueryEngineVersionError},
     data::Version,
     source::SourceMap,
-    utility::{HashMap, default},
+    utility::{
+        default,
+        small_fixed_map::{SmallFixedKey, SmallFixedMap, WellFormedKey},
+    },
 };
 use std::{cell::RefCell, ffi::OsString};
 
@@ -80,34 +83,47 @@ store! {
     query_engine_version(engine: Engine) -> Result<Version<String>, QueryEngineVersionError>;
 }
 
+impl SmallFixedKey for Engine {
+    const LEN: usize = 2;
+
+    fn index(self) -> usize {
+        self as _
+    }
+}
+
 pub(crate) macro invoke($cx:ident.$query:ident($input:expr)) {
     invoke(&$cx.store().$query, $query, $input, $cx)
 }
 
 #[doc(hidden)] // used internally by macro `invoke`
-pub(crate) fn invoke<I, O>(
+pub(crate) fn invoke<I: SmallFixedKey, O: Clone>(
     query: &Query<I, O>,
     compute: fn(I, Context<'_>) -> O,
     input: I,
     cx: Context<'_>,
 ) -> O
 where
-    I: Copy + Eq + std::hash::Hash,
-    O: Clone,
+    WellFormedKey<I>:,
 {
-    if let Some(result) = query.cache.borrow().get(&input) {
+    if let Some(result) = query.cache.borrow().get(input) {
         return result.clone();
     }
 
-    query.cache.borrow_mut().entry(input).or_insert(compute(input, cx)).clone()
+    query.cache.borrow_mut().get_or_insert(input, compute(input, cx)).clone()
 }
 
 #[doc(hidden)] // used internally by macro `invoke`
-pub(crate) struct Query<I, O> {
-    cache: RefCell<HashMap<I, O>>,
+pub(crate) struct Query<I: SmallFixedKey, O>
+where
+    WellFormedKey<I>:,
+{
+    cache: RefCell<SmallFixedMap<I, O>>,
 }
 
-impl<I, O> Default for Query<I, O> {
+impl<I: SmallFixedKey, O> Default for Query<I, O>
+where
+    WellFormedKey<I>:,
+{
     fn default() -> Self {
         Self { cache: default() }
     }
