@@ -56,14 +56,18 @@ pub(crate) fn arguments() -> Arguments {
                 .require_equals(true)
                 .num_args(..=1)
                 .default_missing_value("vanilla")
+                .default_value_if(
+                    id::COMPILETEST,
+                    clap::builder::ArgPredicate::IsPresent,
+                    "vanilla",
+                )
                 .value_parser(Flavor::parse_cli_style)
                 .help("Enable compiletest-like directives"),
+            // FIXME: Maybe reject if directive flavor isn't vanilla (i.e., `-@=x`)?
             clap::Arg::new(id::COMPILETEST)
                 .short('T')
                 .long("compiletest")
                 .action(clap::ArgAction::SetTrue)
-                // FIXME: Maybe reject if flavor isn't vanilla (`-@=x`)?
-                .requires(id::DIRECTIVES)
                 .help("Check in a compiletest-esque manner"),
             clap::Arg::new(id::BLESS)
                 .short('.')
