@@ -3,7 +3,7 @@ use crate::{
     data::Version,
     source::SourceMap,
     utility::{
-        default,
+        Stream, default,
         small_fixed_map::{SmallFixedKey, SmallFixedMap, WellFormedKey},
     },
 };
@@ -75,15 +75,26 @@ macro_rules! store {
     };
 }
 
-// FIXME: Smh. provide these from within mod `build`.
 store! {
+    // FIXME: Smh. provide these two from within mod `build`.
+
     // FIXME: Smh. return `&'cx str` instead of `String`.
     query_engine_path(engine: Engine) -> Result<String, QueryEnginePathError>;
     // FIXME: Smh. return `&'cx Version<String>` or better yet `Version<&'cx str>` instead of `Version<String>`.
     query_engine_version(engine: Engine) -> Result<Version<String>, QueryEngineVersionError>;
+
+    colorize(stream: Stream) -> bool;
 }
 
 impl SmallFixedKey for Engine {
+    const LEN: usize = 2;
+
+    fn index(self) -> usize {
+        self as _
+    }
+}
+
+impl SmallFixedKey for Stream {
     const LEN: usize = 2;
 
     fn index(self) -> usize {

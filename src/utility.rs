@@ -4,6 +4,7 @@ pub(crate) mod monotonic;
 pub(crate) mod paint;
 pub(crate) mod small_fixed_map;
 
+use crate::context::Context;
 pub(crate) use rustc_hash::FxHashMap as HashMap;
 
 pub(crate) fn default<T: Default>() -> T {
@@ -73,4 +74,25 @@ impl OsStrExt for OsStr {
         let b = unsafe { OsStr::from_encoded_bytes_unchecked(b) };
         Some((a, b))
     }
+}
+
+#[derive(Clone, Copy)]
+pub(crate) enum Stream {
+    Stdout,
+    Stderr,
+}
+
+impl Stream {
+    pub(crate) fn colorize(self, cx: Context<'_>) -> bool {
+        crate::context::invoke!(cx.colorize(self))
+    }
+}
+
+fn colorize(stream: Stream, _: Context<'_>) -> bool {
+    // FIXME: Awkward workaround.
+    let choice = match stream {
+        Stream::Stdout => anstream::AutoStream::choice(&std::io::stdout()),
+        Stream::Stderr => anstream::AutoStream::choice(&std::io::stderr()),
+    };
+    choice != anstream::ColorChoice::Never
 }
