@@ -357,6 +357,12 @@ fn build_directive_driven<'a>(
 
     opts.b_opts.extern_crates.append(&mut extern_crates);
 
+    // Note that if `prefer_dylib` was `Yes` compiletest would now add `-Cprefer-dynamic`
+    // if this was `Engine::Rustc`. We might need to do that to at some point, tho I'm
+    // honestly not sure about all the consequences. Also note that we currently use a
+    // crate type of lib instead of dylib for auxiliaries by default.
+    _ = prefer_dylib;
+
     let edition = match krate.edition {
         // If the resolution of the CLI edition fails, we *don't*
         // want to fall back to the directive edition.
@@ -366,8 +372,8 @@ fn build_directive_driven<'a>(
         Some(edition) => edition.resolve(e_opts.engine(), cx),
         None => edition.map(|edition| Edition::Unknown(edition.bare)),
     };
-    let krate =
-        Crate { path: Some(path), edition, name: krate.name, typ: prefer_dylib.apply(krate.typ) };
+
+    let krate = Crate { path: Some(path), edition, name: krate.name, typ: krate.typ };
 
     opts.v_opts.extend(v_opts);
     match e_opts {
@@ -420,6 +426,9 @@ fn compile_auxiliary<'a>(
     } = directives;
 
     opts.v_opts.extend(v_opts);
+
+    // Note that if `prefer_dylib` was `Yes` compiletest would now add `-Cprefer-dynamic`
+    // if this was `Engine::Rustc`. Please see note in `build_directive_driven`.
 
     let krate = Crate {
         path: Some(&path.bare),
