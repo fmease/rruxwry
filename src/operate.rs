@@ -451,8 +451,7 @@ fn compile_auxiliary<'a>(
             //        get checked-only and everything working out (linking correctly etc)?
             //        I suspect is doesn't because we need to s%/rlib/rmeta/
             EngineOptions::Rustc(..) => e_opts,
-            // FIXME: Wait, would check_only=true also work and be better?
-            EngineOptions::Rustdoc(_) => const { &EngineOptions::Rustc(CompileOptions::DEFAULT) },
+            EngineOptions::Rustdoc(_) => const { &EngineOptions::Rustc(CompileOptions::default()) },
         },
         krate,
         &opts,

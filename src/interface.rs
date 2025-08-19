@@ -1,7 +1,7 @@
 //! The command-line interface.
 
 use crate::{
-    build::{BuildOptions, CompileOptions, DebugOptions, DocOptions},
+    build::{BuildOptions, CompileOptions, DebugOptions, DocOptions, Ir},
     data::{CrateName, CrateType, DocBackend, Edition, ExtEdition, Identity},
     directive::Flavor,
     operate::{Bless, CompileMode, DocMode, Open, Operation, Run, Test},
@@ -144,6 +144,7 @@ pub(crate) fn arguments() -> Arguments {
                 .value_name("IDENTITY")
                 .value_parser(Identity::parse_cli_style)
                 .help("Force rust{,do}c's identity"),
+            // FIXME: Does this actually work for rustdoc?
             clap::Arg::new(id::NO_DEDUPE)
                 .short('D')
                 .long("no-dedupe")
@@ -219,6 +220,14 @@ pub(crate) fn arguments() -> Arguments {
                                 .action(clap::ArgAction::SetTrue)
                                 .help("Halt after parsing the source file")
                                 .conflicts_with(id::RUN),
+                        )
+                        .arg(
+                            clap::Arg::new(id::DUMP)
+                                .short('d')
+                                .long("dump")
+                                .value_name("IR")
+                                .value_parser(Ir::parse_cli_style)
+                                .help("Print the given compiler IR"),
                         )
                         .args(extra())
                 }),
@@ -326,6 +335,7 @@ pub(crate) fn arguments() -> Arguments {
             options: CompileOptions {
                 check_only: matches.remove_one(id::CHECK_ONLY).unwrap_or_default(),
                 shallow: matches.remove_one(id::SHALLOW).unwrap_or_default(),
+                dump: matches.remove_one(id::DUMP),
             },
         },
         (id::BUILD, true) => Operation::QueryRustcVersion,
@@ -472,10 +482,28 @@ impl Identity {
 }
 
 impl Flavor {
-    fn parse_cli_style(source: &str) -> Result<Flavor, String> {
+    fn parse_cli_style(source: &str) -> Result<Self, String> {
         parse!(
             "v" | "vanilla" => Self::Vanilla,
             "x" | "rruxwry" => Self::Rruxwry,
+        )(source)
+        .map_err(possible_values)
+    }
+}
+
+impl Ir {
+    fn parse_cli_style(source: &str) -> Result<Self, String> {
+        parse!(
+            "ast" => Self::Ast,
+            "astpp" => Self::Astpp,
+            "xast" => Self::Xast,
+            "xastpp" => Self::Xastpp,
+            "hir" => Self::Hir,
+            "hirpp" => Self::Hirpp,
+            "thir" => Self::Thir,
+            "mir" => Self::Mir,
+            "lir" => Self::Lir,
+            "asm" => Self::Asm,
         )(source)
         .map_err(possible_values)
     }
@@ -533,6 +561,7 @@ mod id {
     pub(super) const CROSS_CRATE: &str = "CROSS_CRATE";
     pub(super) const DIRECTIVES: &str = "DIRECTIVES";
     pub(super) const DOC: &str = "doc";
+    pub(super) const DUMP: &str = "DUMP";
     pub(super) const EDITION: &str = "EDITION";
     pub(super) const PRINT_ENGINE_VERSION: &str = "PRINT_ENGINE_VERSION";
     pub(super) const EXTERN: &str = "EXTERN";

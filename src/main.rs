@@ -2,7 +2,10 @@
 #![feature(adt_const_params)]
 #![feature(ascii_char_variants)]
 #![feature(ascii_char)]
+#![feature(const_default)]
+#![feature(const_trait_impl)]
 #![feature(decl_macro)]
+#![feature(derive_const)]
 #![feature(exact_size_is_empty)]
 #![feature(exit_status_error)]
 // FIXME: Switch to feature `min_generic_const_args` as soon as it no longer ICEs with:

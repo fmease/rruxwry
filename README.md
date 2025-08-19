@@ -149,6 +149,7 @@ Options:
   -R, --revision <NAME>        Enable a compiletest revision
   -F, --feature <NAME>         Enable an experimental library or language feature
   -s, --shallow                Halt after parsing the source file
+  -d, --dump <IR>              Print the given compiler IR
   -x, --extern <NAME>          Register an external library
   -/, --suppress-lints         Cap lints at allow level
   -#, --internals              Enable internal pretty-printing of data types

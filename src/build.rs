@@ -599,6 +599,23 @@ fn configure_e_opts(cmd: &mut Command, e_opts: &EngineOptions<'_>, cx: Context<'
                     Syntax::ZeeParseOnly => "-Zparse-only",
                 });
             }
+
+            if let Some(ir) = c_opts.dump {
+                // FIXME: Repr "identified", "expanded,identified", "expanded,hygiene",
+                //        hir,typed", "thir-flar", "mir-cfg".
+                cmd.arg(match ir {
+                    Ir::Ast => "-Zunpretty=ast-tree",
+                    Ir::Astpp => "-Zunpretty=normal",
+                    Ir::Xast => "-Zunpretty=ast-tree,expanded",
+                    Ir::Xastpp => "-Zunpretty=expanded",
+                    Ir::Hir => "-Zunpretty=hir-tree",
+                    Ir::Hirpp => "-Zunpretty=hir",
+                    Ir::Thir => "-Zunpretty=thir-tree",
+                    Ir::Mir => "-Zunpretty=mir",
+                    Ir::Lir => "--emit=llvm-ir=-",
+                    Ir::Asm => "--emit=asm=-",
+                });
+            }
         }
         EngineOptions::Rustdoc(d_opts) => {
             if let DocBackend::Json = d_opts.backend {
@@ -1012,15 +1029,25 @@ mod palette {
     pub(super) const ARGUMENT: AnsiColor = AnsiColor::Green;
 }
 
-#[derive(Default)]
+#[derive_const(Default)]
 pub(crate) struct CompileOptions {
     pub(crate) check_only: bool,
     pub(crate) shallow: bool,
+    pub(crate) dump: Option<Ir>,
 }
 
-// FIXME: Remove once we have const Default
-impl CompileOptions {
-    pub(crate) const DEFAULT: Self = Self { check_only: false, shallow: false };
+#[derive(Clone, Copy)]
+pub(crate) enum Ir {
+    Ast,
+    Astpp,
+    Xast,
+    Xastpp,
+    Hir,
+    Hirpp,
+    Thir,
+    Mir,
+    Lir,
+    Asm,
 }
 
 #[allow(clippy::struct_excessive_bools)] // not worth to address
