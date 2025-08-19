@@ -18,7 +18,7 @@ use crate::{
     directive,
     error::Result,
     source::Spanned,
-    utility::{OsStrExt as _, default, paint::Painter},
+    utility::{OsStrExt as _, Stream, default, paint::Painter},
 };
 use anstyle::AnsiColor;
 use std::{
@@ -49,9 +49,8 @@ pub(crate) fn perform(
         }
         Operation::QueryRustcVersion => {
             // Don't create a fresh painter that's expensive! Use the one from the Context!
-            let stdout = io::stdout().lock();
-            let colorize = anstream::AutoStream::choice(&stdout) != anstream::ColorChoice::Never;
-            let mut p = Painter::new(io::BufWriter::new(stdout), colorize);
+            let colorize = Stream::Stdout.colorize(cx);
+            let mut p = Painter::new(io::BufWriter::new(io::stdout().lock()), colorize);
 
             write!(p, "rustc: ")?;
             match Engine::Rustc.version(cx) {
@@ -67,9 +66,8 @@ pub(crate) fn perform(
         }
         Operation::QueryRustdocVersion => {
             // Don't create a fresh painter that's expensive! Use the one from the Context!
-            let stdout = io::stdout().lock();
-            let colorize = anstream::AutoStream::choice(&stdout) != anstream::ColorChoice::Never;
-            let mut p = Painter::new(io::BufWriter::new(stdout), colorize);
+            let colorize = Stream::Stdout.colorize(cx);
+            let mut p = Painter::new(io::BufWriter::new(io::stdout().lock()), colorize);
 
             write!(p, "rustdoc: ")?;
             match Engine::Rustdoc.version(cx) {
