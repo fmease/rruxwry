@@ -17,7 +17,7 @@ use crate::{
     diagnostic::{error, fmt, warn},
     directive,
     error::Result,
-    source::Spanned,
+    source::{SourcePath, Spanned},
     utility::{OsStrExt as _, default, paint::Painter},
 };
 use anstyle::AnsiColor;
@@ -218,7 +218,12 @@ fn document_cross_crate(
         .map_or_else(|| CrateName::adjust_and_parse_file_path(path).unwrap().into(), Into::into);
 
     let root_crate_name = CrateName::new_unchecked(format!("u_{crate_name}"));
-    let root_crate_path = path.with_file_name(root_crate_name.as_str()).with_extension("rs");
+    let root_crate_path = match path {
+        SourcePath::Regular(path) => path,
+        SourcePath::Stdin => Path::new(""),
+    }
+    .with_file_name(root_crate_name.as_str())
+    .with_extension("rs");
 
     if !root_crate_path.exists() {
         // While we could omit the `extern crate` declaration in `edition >= Edition::Edition2018`,
@@ -238,7 +243,7 @@ fn document_cross_crate(
     opts.b_opts.extern_crates.push(crate_name.as_str().to_owned());
 
     let krate = Crate {
-        path: Some(&root_crate_path),
+        path: Some(SourcePath::Regular(&root_crate_path)),
         name: Some(root_crate_name.as_ref()),
         typ: None,
         ..krate
@@ -286,19 +291,20 @@ fn build_directive_driven<'a>(
         .done()
     })?;
 
-    let (path, revision) = match path.as_os_str().rsplit_once(Char::NumberSign) {
-        Some((path, revision)) => {
-            let Some(revision) = revision.to_str() else {
-                return Err(error(fmt!(
-                    "active revision suffix `{}` is not valid UTF-8",
-                    revision.display()
-                ))
-                .done()
-                .into());
-            };
-            (Path::new(path), Some(revision))
-        }
-        None => (path, None),
+    let (path, revision) = if let SourcePath::Regular(path) = path
+        && let Some((path, revision)) = path.as_os_str().rsplit_once(Char::NumberSign)
+    {
+        let Some(revision) = revision.to_str() else {
+            return Err(error(fmt!(
+                "active revision suffix `{}` is not valid UTF-8",
+                revision.display()
+            ))
+            .done()
+            .into());
+        };
+        (SourcePath::Regular(Path::new(path)), Some(revision))
+    } else {
+        (path, None)
     };
 
     let revision = match (revision, opts.b_opts.revision.as_deref()) {
@@ -337,8 +343,14 @@ fn build_directive_driven<'a>(
         prefer_dylib,
     } = directives;
 
-    // FIXME: unwrap
-    let aux_base_path = LazyCell::new(|| path.parent().unwrap().join("auxiliary"));
+    let aux_base_path = LazyCell::new(|| {
+        match path {
+            // FIXME: unwrap
+            SourcePath::Regular(path) => path.parent().unwrap(),
+            SourcePath::Stdin => Path::new(""),
+        }
+        .join("auxiliary")
+    });
     let mut extern_crates = Vec::new();
 
     auxes.iter().try_for_each(|aux| {
@@ -373,7 +385,7 @@ fn build_directive_driven<'a>(
         None => edition.map(|edition| Edition::Unknown(edition.bare)),
     };
 
-    let krate = Crate { path: Some(path), edition, name: krate.name, typ: krate.typ };
+    let krate = Crate { path: Some(path), edition, ..krate };
 
     opts.v_opts.extend(v_opts);
     match e_opts {
@@ -406,7 +418,7 @@ fn compile_auxiliary<'a>(
     let path = path.map(|path| base_path.join(path));
 
     let directives = directive::gather(
-        path.as_deref(),
+        path.as_deref().map(SourcePath::Regular),
         scope(e_opts),
         directive::Role::Auxiliary,
         flavor,
@@ -431,7 +443,7 @@ fn compile_auxiliary<'a>(
     // if this was `Engine::Rustc`. Please see note in `build_directive_driven`.
 
     let krate = Crate {
-        path: Some(&path.bare),
+        path: Some(SourcePath::Regular(&path.bare)),
         name: None,
         typ: prefer_dylib.apply(typ),
         edition: edition.map(|edition| Edition::Unknown(edition.bare)),

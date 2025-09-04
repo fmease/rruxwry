@@ -1,6 +1,6 @@
 use crate::{
     context::Context,
-    source::{LocalSpan, Span},
+    source::{LocalSpan, SourcePath, Span},
     utility,
 };
 use anstream::ColorChoice;
@@ -89,10 +89,15 @@ impl Diagnostic {
 
         let p = &mut self.p;
         (|| {
-            p.with(
-                Effects::ITALIC,
-                fmt!("   {}:{line_number}:{column_number}", file.path.display()),
-            )?;
+            write!(p, "   ")?;
+            p.with(Effects::ITALIC, |p| {
+                match file.path {
+                    // FIXME: Custom style for Stdin
+                    SourcePath::Stdin => write!(p, "⟨stdin⟩"),
+                    SourcePath::Regular(path) => write!(p, "{}", path.display()),
+                }?;
+                write!(p, ":{line_number}:{column_number}",)
+            })?;
             writeln!(p)?;
             writeln!(p, "{line}")?;
 

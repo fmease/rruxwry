@@ -5,9 +5,13 @@ use crate::{
     data::{CrateName, CrateType, DocBackend, Edition, ExtEdition, Identity},
     directive::Flavor,
     operate::{Bless, CompileMode, DocMode, Open, Operation, Run, Test},
+    source::SourcePathBuf,
     utility::{Conjunction, ListingExt as _, default, parse},
 };
-use std::{ffi::OsString, path::PathBuf};
+use std::{
+    ffi::OsString,
+    path::{Path, PathBuf},
+};
 
 // Similar to `-h`, `-Q` is compatible with all other flags and renders required arguments optional.
 // While there could be a world where `-Q` is incompatible with flags like `-r` (run) or `-o` (open)
@@ -375,6 +379,7 @@ pub(crate) fn arguments() -> Arguments {
     //        deserializing from borrowed program arguments and providing &strs.
     //        Fix: Throw out clap and do it manually.
 
+    // FIXME: Move this logic into `operate`! Layer violation.
     let crate_type = matches
         .remove_one(id::CRATE_TYPE)
         .map(|typ: String| CrateType::parse_cli_style(typ.leak()))
@@ -385,9 +390,14 @@ pub(crate) fn arguments() -> Arguments {
             _ => None,
         });
 
+    // FIXME: Use comporison against string once <https://github.com/rust-lang/rust/issues/146183> is fixed.
+    let path = matches.remove_one::<PathBuf>(id::PATH).map(|path| {
+        if &path == Path::new("-") { SourcePathBuf::Stdin } else { SourcePathBuf::Regular(path) }
+    });
+
     Arguments {
         toolchain,
-        path: matches.remove_one(id::PATH),
+        path,
         verbatim: matches.remove_many(id::VERBATIM).map(Iterator::collect).unwrap_or_default(),
         operation,
         crate_name: matches.remove_one(id::CRATE_NAME),
@@ -422,7 +432,7 @@ pub(crate) fn arguments() -> Arguments {
 pub(crate) struct Arguments {
     /// The toolchain, prefixed with `+`.
     pub(crate) toolchain: Option<OsString>,
-    pub(crate) path: Option<PathBuf>,
+    pub(crate) path: Option<SourcePathBuf>,
     pub(crate) verbatim: Vec<String>,
     pub(crate) operation: Operation,
     pub(crate) crate_name: Option<CrateName<String>>,

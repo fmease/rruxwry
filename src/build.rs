@@ -8,6 +8,7 @@ use crate::{
     diagnostic::{EmittedError, debug, error},
     error::Result,
     fmt,
+    source::SourcePath,
     utility::default,
 };
 use anstyle::AnsiColor;
@@ -47,7 +48,7 @@ pub(crate) fn perform(
         cmd.arg("-Zunstable-options");
     }
 
-    cmd.execute(cx)?.exit_ok().map_err(io::Error::other)?;
+    cmd.execute()?.exit_ok().map_err(io::Error::other)?;
     Ok(())
 }
 
@@ -56,7 +57,7 @@ fn query_engine_path(engine: Engine, cx: Context<'_>) -> Result<String, QueryEng
     use QueryEnginePathError as Error;
 
     // FIXME: Support non-rustup environments somehow (needs design work).
-    let mut cmd = Command::new("rustup");
+    let mut cmd = Command::new("rustup", cx);
     if let Some(toolchain) = &cx.opts().toolchain {
         cmd.arg(toolchain);
     }
@@ -64,7 +65,7 @@ fn query_engine_path(engine: Engine, cx: Context<'_>) -> Result<String, QueryEng
     cmd.arg(engine.name());
 
     // FIXME: Forward underlying IO error (we can't rn, it doesn't impl `Clone`).
-    let mut output = cmd.execute_capturing_output(cx).map_err(|_| Error::RustupSpawnFailure)?;
+    let mut output = cmd.execute_capturing_output().map_err(|_| Error::RustupSpawnFailure)?;
 
     if !output.status.success() {
         // Sadly, rustup doesn't offer any mechanism to make it output machine-readable and
@@ -165,7 +166,7 @@ fn query_engine_version(
 
     cmd.arg("-V");
 
-    let mut output = cmd.execute_capturing_output(cx).map_err(|_| Error::EngineSpawnFailure)?;
+    let mut output = cmd.execute_capturing_output().map_err(|_| Error::EngineSpawnFailure)?;
 
     if !output.status.success() {
         return Err(Error::EngineFailure);
@@ -243,7 +244,7 @@ pub(crate) fn query_crate_name<'a>(
 
     cmd.arg("--print=crate-name");
 
-    let mut output = cmd.execute_capturing_output(cx).map_err(Error::RustcSpawnFailure)?;
+    let mut output = cmd.execute_capturing_output().map_err(Error::RustcSpawnFailure)?;
     _ = output.stderr;
 
     if !output.status.success() {
@@ -313,17 +314,24 @@ impl QueryCrateNameError {
 
 /// Configure the engine invocation with options that it needs very early
 /// (i.e., during certain print requests).
-fn configure_early(
-    cmd: &mut Command,
+fn configure_early<'cx>(
+    cmd: &mut Command<'cx>,
     e_opts: &EngineOptions<'_>,
     krate: Crate<'_>,
     opts: &Options<'_>,
-    cx: Context<'_>,
+    cx: Context<'cx>,
 ) -> Result<()> {
     let engine = e_opts.engine();
 
-    if let Some(path) = krate.path {
-        cmd.arg(path);
+    match krate.path {
+        Some(SourcePath::Regular(path)) => cmd.arg(path),
+        Some(path @ SourcePath::Stdin) => {
+            if let Some(file) = cx.map().get(path) {
+                cmd.feed(file.contents);
+            }
+            cmd.arg("-")
+        }
+        None => {}
     }
 
     if let Some(name) = krate.name {
@@ -411,7 +419,7 @@ fn configure_early(
 /// Configure the engine invocation with options that it doesn't need early
 /// (i.e., during certain print requests).
 fn configure_late(
-    cmd: &mut Command,
+    cmd: &mut Command<'_>,
     engine: Engine,
     opts: &Options<'_>,
     cx: Context<'_>,
@@ -525,7 +533,7 @@ fn configure_late(
     Ok(())
 }
 
-fn configure_v_opts(cmd: &mut Command, v_opts: &VerbatimOptions<'_>) {
+fn configure_v_opts(cmd: &mut Command<'_>, v_opts: &VerbatimOptions<'_>) {
     v_opts.variables.iter().for_each(|&(key, value)| cmd.env(key, value));
     // FIXME: This comment is out of context now
     // Regardin crate name querying,...
@@ -534,7 +542,11 @@ fn configure_v_opts(cmd: &mut Command, v_opts: &VerbatimOptions<'_>) {
     cmd.args(&v_opts.arguments);
 }
 
-fn configure_e_opts(cmd: &mut Command, e_opts: &EngineOptions<'_>, cx: Context<'_>) -> Result<()> {
+fn configure_e_opts(
+    cmd: &mut Command<'_>,
+    e_opts: &EngineOptions<'_>,
+    cx: Context<'_>,
+) -> Result<()> {
     match e_opts {
         EngineOptions::Rustc(c_opts) => {
             if c_opts.check_only {
@@ -646,7 +658,7 @@ fn configure_e_opts(cmd: &mut Command, e_opts: &EngineOptions<'_>, cx: Context<'
 }
 
 fn configure_forced_identity(
-    cmd: &mut Command,
+    cmd: &mut Command<'_>,
     identity: Identity,
     e_opts: &EngineOptions<'_>,
     cx: Context<'_>,
@@ -859,9 +871,9 @@ pub(crate) fn run(
     v_opts: &VerbatimOptions<'_>,
     cx: Context<'_>,
 ) -> io::Result<Result<(), ExitStatusError>> {
-    let mut cmd = Command::new(program);
+    let mut cmd = Command::new(program, cx);
     configure_v_opts(&mut cmd, v_opts);
-    cmd.execute(cx).map(|status| status.exit_ok())
+    cmd.execute().map(|status| status.exit_ok())
 }
 
 pub(crate) fn open(path: &Path, cx: Context<'_>) -> io::Result<()> {
@@ -946,9 +958,9 @@ impl Engine {
         crate::context::invoke!(cx.query_engine_path(self))
     }
 
-    fn command(self, cx: Context<'_>) -> Result<Command, QueryEnginePathError> {
+    fn command(self, cx: Context<'_>) -> Result<Command<'_>, QueryEnginePathError> {
         let path = PathBuf::from(self.path(cx)?);
-        let mut cmd = Command::new(&path);
+        let mut cmd = Command::new(&path, cx);
         // Very old versions (e.g, 1.0 and 1.2) can't find some of their shared libraries if we don't do this.
         // FIXME: We assume that the path is of the form "$PREFIX/bin/$FILE" and that the corresponding library
         //        folder is "$PREFIX/lib/". This relies on the likely undocumented/unstable file structure of

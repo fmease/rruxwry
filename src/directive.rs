@@ -18,7 +18,7 @@ use crate::{
     context::Context,
     data::{CrateName, CrateType},
     diagnostic::{EmittedError, error, fmt, warn},
-    source::{LocalSpan, SourceFileRef, Span, Spanned},
+    source::{LocalSpan, SourceFile, SourcePath, Span, Spanned},
     utility::{Conjunction, ListingExt, default},
 };
 use std::{borrow::Cow, collections::BTreeSet, fmt, mem, path::Path, str::CharIndices};
@@ -27,7 +27,7 @@ use std::{borrow::Cow, collections::BTreeSet, fmt, mem, path::Path, str::CharInd
 mod test;
 
 pub(crate) fn gather<'cx>(
-    path: Spanned<&Path>,
+    path: Spanned<SourcePath<'_>>,
     scope: Scope,
     role: Role,
     flavor: Flavor,
@@ -49,7 +49,7 @@ pub(crate) fn gather<'cx>(
 }
 
 fn parse<'cx>(
-    file: SourceFileRef<'cx>,
+    file: SourceFile<'cx>,
     scope: Scope,
     role: Role,
     flavor: Flavor,
@@ -244,7 +244,10 @@ impl<'src> InstantiatedDirectives<'src> {
                 }
                 AuxiliaryDirective::ProcMacro { path } => {
                     // FIXME: unwrap
-                    let prefix = CrateName::adjust_and_parse_file_path(path.bare).unwrap();
+                    let prefix = CrateName::adjust_and_parse_file_path(SourcePath::Regular(
+                        Path::new(path.bare),
+                    ))
+                    .unwrap();
                     Auxiliary {
                         prefix: Some(prefix.into_inner().into()),
                         path,
