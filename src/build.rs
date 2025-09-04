@@ -5,21 +5,23 @@
 use crate::{
     context::Context,
     data::{Channel, Crate, CrateName, CrateType, D, DocBackend, Identity, V, Version},
-    diagnostic::{self, EmittedError, Paint, debug, error},
+    diagnostic::{EmittedError, debug, error},
     error::Result,
     fmt,
     utility::default,
 };
-use anstyle::{AnsiColor, Effects};
+use anstyle::AnsiColor;
+use command::Command;
 use std::{
     borrow::Cow,
     ffi::OsStr,
     io::{self, Write as _},
     path::{Path, PathBuf},
-    process::{self, Command, ExitStatusError},
+    process::ExitStatusError,
     string::FromUtf8Error,
 };
 
+mod command;
 mod environment;
 
 pub(crate) fn perform(
@@ -42,12 +44,10 @@ pub(crate) fn perform(
             Identity::Nightly => true,
         }
     {
-        // FIXME: Should we offer an explicit opt out (e.g., via `-I*z` with * in "tsn")?
         cmd.arg("-Zunstable-options");
     }
 
-    execute(cmd, cx).and_then(|res| res.map_err(io::Error::other))?;
-
+    cmd.execute(cx)?.exit_ok().map_err(io::Error::other)?;
     Ok(())
 }
 
@@ -63,10 +63,8 @@ fn query_engine_path(engine: Engine, cx: Context<'_>) -> Result<String, QueryEng
     cmd.arg("which");
     cmd.arg(engine.name());
 
-    log_execution(|p| render(&cmd, p), cx);
-
     // FIXME: Forward underlying IO error (we can't rn, it doesn't impl `Clone`).
-    let mut output = cmd.output().map_err(|_| Error::RustupSpawnFailure)?;
+    let mut output = cmd.execute_capturing_output(cx).map_err(|_| Error::RustupSpawnFailure)?;
 
     if !output.status.success() {
         // Sadly, rustup doesn't offer any mechanism to make it output machine-readable and
@@ -167,9 +165,7 @@ fn query_engine_version(
 
     cmd.arg("-V");
 
-    log_execution(|p| render(&cmd, p), cx);
-
-    let mut output = cmd.output().map_err(|_| Error::EngineSpawnFailure)?;
+    let mut output = cmd.execute_capturing_output(cx).map_err(|_| Error::EngineSpawnFailure)?;
 
     if !output.status.success() {
         return Err(Error::EngineFailure);
@@ -247,10 +243,7 @@ pub(crate) fn query_crate_name<'a>(
 
     cmd.arg("--print=crate-name");
 
-    log_execution(|p| render(&cmd, p), cx);
-
-    // FIXME: Double check that `path`=`-` (STDIN) properly works with `output()` once we support that ourselves.
-    let mut output = cmd.output().map_err(Error::RustcSpawnFailure)?;
+    let mut output = cmd.execute_capturing_output(cx).map_err(Error::RustcSpawnFailure)?;
     _ = output.stderr;
 
     if !output.status.success() {
@@ -521,24 +514,19 @@ fn configure_late(
     }
 
     if opts.b_opts.no_backtrace {
-        cmd.env("RUST_BACKTRACE", "0");
+        cmd.env("RUST_BACKTRACE", Some("0"));
     }
 
     // The logging output would just get thrown away.
     if let Some(filter) = &opts.b_opts.log {
-        cmd.env(engine.logging_env_var(), filter);
+        cmd.env(engine.logging_env_var(), Some(filter));
     }
 
     Ok(())
 }
 
-fn configure_v_opts(cmd: &mut process::Command, v_opts: &VerbatimOptions<'_>) {
-    for (key, value) in &v_opts.variables {
-        match value {
-            Some(value) => cmd.env(key, value),
-            None => cmd.env_remove(key),
-        };
-    }
+fn configure_v_opts(cmd: &mut Command, v_opts: &VerbatimOptions<'_>) {
+    v_opts.variables.iter().for_each(|&(key, value)| cmd.env(key, value));
     // FIXME: This comment is out of context now
     // Regardin crate name querying,...
     // It's vital that we pass through verbatim arguments when querying the crate name as they might
@@ -721,7 +709,7 @@ fn configure_forced_identity(
             match version.channel {
                 Channel::Stable => {
                     if version.triple >= V!(1, 13, 0) {
-                        cmd.env(ENV_VAR, "1");
+                        cmd.env(ENV_VAR, Some("1"));
                         return Ok(());
                     }
 
@@ -734,7 +722,7 @@ fn configure_forced_identity(
                         _ => None,
                     };
                     if let Some(secret) = secret {
-                        cmd.env(LEGACY_ENV_VAR, secret);
+                        cmd.env(LEGACY_ENV_VAR, Some(secret));
                         return Ok(());
                     }
 
@@ -861,7 +849,7 @@ fn configure_forced_identity(
         }
     };
 
-    cmd.env(key, value);
+    cmd.env(key, Some(value));
 
     Ok(())
 }
@@ -873,64 +861,27 @@ pub(crate) fn run(
 ) -> io::Result<Result<(), ExitStatusError>> {
     let mut cmd = Command::new(program);
     configure_v_opts(&mut cmd, v_opts);
-    execute(cmd, cx)
+    cmd.execute(cx).map(|status| status.exit_ok())
 }
 
 pub(crate) fn open(path: &Path, cx: Context<'_>) -> io::Result<()> {
-    let message = |p: &mut diagnostic::Painter| {
-        p.with(palette::COMMAND.on_default().bold(), |p| write!(p, "⟨open⟩ "))?;
-        p.with(AnsiColor::Green, |p| write!(p, "{}", path.display()))
-    };
+    if cx.opts().dbg_opts.verbose {
+        debug(|p| {
+            write!(p, "running ")?;
 
-    log_execution(message, cx);
-    open::that(path)
-}
-
-fn log_execution(message: impl Paint, cx: Context<'_>) {
-    if !cx.opts().dbg_opts.verbose {
-        return;
+            p.with(palette::COMMAND.on_default().bold(), |p| write!(p, "⟨open⟩ "))?;
+            p.with(AnsiColor::Green, |p| write!(p, "{}", path.display()))
+        })
+        .done();
     }
-    #[rustfmt::skip]
-    debug(|p| { write!(p, "running ")?; message(p) }).done();
-}
 
-fn execute(mut cmd: process::Command, cx: Context<'_>) -> io::Result<Result<(), ExitStatusError>> {
-    log_execution(|p| render(&cmd, p), cx);
-    Ok(cmd.status()?.exit_ok())
+    open::that(path)
 }
 
 pub(crate) fn probe_identity(opts: &Options<'_>) -> Identity {
     // FIXME: This doesn't take into account verbatim env vars (more specifically,
     //        `//@ rustc-env`).
     opts.b_opts.identity.or_else(environment::probe_identity).unwrap_or_default()
-}
-
-// This is very close to `<process::Command as fmt::Debug>::fmt` but prettier.
-// FIXME: This lacks shell escaping!
-fn render(cmd: &process::Command, p: &mut diagnostic::Painter) -> io::Result<()> {
-    #[allow(irrefutable_let_patterns)]
-    if let envs = cmd.get_envs()
-        && !envs.is_empty()
-    {
-        p.set(palette::VARIABLE)?;
-        for (key, value) in cmd.get_envs() {
-            // FIXME: Print `env -u VAR` for removed vars before
-            // added vars just like `Command`'s `Debug` impl.
-            let Some(value) = value else { continue };
-
-            p.with(Effects::BOLD, |p| write!(p, "{}", key.display()))?;
-            write!(p, "={} ", value.display())?;
-        }
-        p.unset()?;
-    }
-
-    p.with(palette::COMMAND.on_default().bold(), |p| write!(p, "{}", cmd.get_program().display()))?;
-
-    for arg in cmd.get_args() {
-        p.with(palette::ARGUMENT, |p| write!(p, " {}", arg.display()))?;
-    }
-
-    Ok(())
 }
 
 fn version_for_opt(engine: Engine, opt: &str, cx: Context<'_>) -> Result<Version<String>> {
@@ -1006,7 +957,7 @@ impl Engine {
             // FIXME: This likely doesn't work on non-*nix OSes.
             // NOTE: We should probably *append* onto the library path instead of overwriting it completely.
             //       However, I've yet to find an issue with the current approach in our specific scenario.
-            cmd.env("LD_LIBRARY_PATH", path.join("lib"));
+            cmd.env("LD_LIBRARY_PATH", Some(path.join("lib")));
         }
         Ok(cmd)
     }
