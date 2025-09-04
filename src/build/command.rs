@@ -10,13 +10,15 @@ use std::{
     process,
 };
 
-pub(crate) struct Command {
+pub(crate) struct Command<'cx> {
     raw: process::Command,
+    feed: Option<&'cx str>,
+    cx: Context<'cx>,
 }
 
-impl Command {
-    pub(super) fn new(program: impl AsRef<OsStr>) -> Self {
-        Self { raw: process::Command::new(program) }
+impl<'cx> Command<'cx> {
+    pub(super) fn new(program: impl AsRef<OsStr>, cx: Context<'cx>) -> Self {
+        Self { raw: process::Command::new(program), feed: None, cx }
     }
 
     pub(super) fn arg(&mut self, arg: impl AsRef<OsStr>) {
@@ -34,21 +36,40 @@ impl Command {
         };
     }
 
-    pub(crate) fn execute_capturing_output(
-        mut self,
-        cx: Context<'_>,
-    ) -> io::Result<process::Output> {
-        self.log(cx);
-        self.raw.output()
+    pub(crate) fn feed(&mut self, contents: &'cx str) {
+        let previous = self.feed.replace(contents);
+        debug_assert!(previous.is_none());
     }
 
-    pub(crate) fn execute(mut self, cx: Context<'_>) -> io::Result<process::ExitStatus> {
-        self.log(cx);
-        self.raw.status()
+    fn spawn_with_feed(&mut self, feed: &str) -> io::Result<process::Child> {
+        self.raw.stdin(process::Stdio::piped());
+        let mut child = self.raw.spawn()?;
+        write!(child.stdin.take().unwrap(), "{feed}")?;
+        Ok(child)
     }
 
-    fn log(&self, cx: Context<'_>) {
-        if cx.opts().dbg_opts.verbose {
+    pub(crate) fn execute_capturing_output(mut self) -> io::Result<process::Output> {
+        self.log();
+        match self.feed {
+            Some(feed) => {
+                self.raw.stdout(process::Stdio::piped());
+                self.raw.stderr(process::Stdio::piped());
+                self.spawn_with_feed(feed)?.wait_with_output()
+            }
+            None => self.raw.output(),
+        }
+    }
+
+    pub(crate) fn execute(mut self) -> io::Result<process::ExitStatus> {
+        self.log();
+        match self.feed {
+            Some(feed) => self.spawn_with_feed(feed)?.wait(),
+            None => self.raw.status(),
+        }
+    }
+
+    fn log(&self) {
+        if self.cx.opts().dbg_opts.verbose {
             #[rustfmt::skip]
             debug(|p| { write!(p, "running ")?; self.paint(p) }).done();
         }

@@ -10,7 +10,7 @@ use std::{
 
 #[derive(Default)]
 pub(crate) struct SourceMap {
-    files: MonotonicVec<SourceFile>,
+    files: MonotonicVec<SourceFileBuf>,
 }
 
 impl SourceMap {
@@ -22,26 +22,27 @@ impl SourceMap {
     // FIXME: Detect circular/cyclic imports here.
     pub(crate) fn add(
         &self,
-        path: Spanned<&Path>,
+        path: Spanned<SourcePath<'_>>,
         cx: Context<'_>,
-    ) -> crate::error::Result<SourceFileRef<'_>> {
+    ) -> crate::error::Result<SourceFile<'_>> {
         // We don't care about canonicalization (this is just for caching).
         // We don't care about TOC-TOU (not safety critical).
-        if let Some(file) = self.files.iter().find(|file| file.path == path.bare) {
+        if let Some(file) = self.files.iter().find(|file| file.path.as_ref() == path.bare) {
             // FIXME: Safety comment.
             return Ok(unsafe { file.as_ref() });
         }
 
-        // FIXME: On `--force` (hypoth), we could suppress the error and
-        //        create a sham/dummy SourceFile.
-        let contents = std::fs::read_to_string(path.bare).map_err(|error| {
-            self::error(fmt!("failed to read `{}`", path.bare.display()))
-                .highlight(path.span, cx)
-                .note(fmt!("{error}"))
-                .done()
-        })?;
+        let contents = match path.bare {
+            SourcePath::Regular(path_) => std::fs::read_to_string(path_).map_err(|error| {
+                self::error(fmt!("failed to read `{}`", path_.display()))
+                    .highlight(path.span, cx)
+                    .note(fmt!("{error}"))
+                    .done()
+            })?,
+            SourcePath::Stdin => std::io::read_to_string(std::io::stdin())?,
+        };
 
-        let file = SourceFile::new(path.bare.to_owned(), contents, self.offset());
+        let file = SourceFileBuf::new(path.bare.to_owned(), contents, self.offset());
         // FIXME: Safety comment.
         let result = unsafe { file.as_ref() };
         self.files.push(file);
@@ -51,7 +52,7 @@ impl SourceMap {
     // FIXME: Use this comment again:
     // UNSAFETY: `project` must return an address to `R` that remains valid even if `T` is moved.
 
-    pub(crate) fn by_span(&self, span: Span) -> Option<SourceFileRef<'_>> {
+    pub(crate) fn by_span(&self, span: Span) -> Option<SourceFile<'_>> {
         if span.is_sham() {
             return None;
         }
@@ -60,36 +61,78 @@ impl SourceMap {
         // FIXME: Safety comment.
         Some(unsafe { file.as_ref() })
     }
+
+    pub(crate) fn get<'a>(&'a self, path: SourcePath<'_>) -> Option<SourceFile<'a>> {
+        self.files
+            .iter()
+            .find(|file| file.path.as_ref() == path)
+            // FIXME: Safety comment.
+            .map(|file| unsafe { file.as_ref() })
+    }
 }
 
-struct SourceFile {
-    path: PathBuf,
+struct SourceFileBuf {
+    path: SourcePathBuf,
     contents: String,
     span: Span,
 }
 
-impl SourceFile {
-    fn new(path: PathBuf, contents: String, offset: u32) -> Self {
+impl SourceFileBuf {
+    fn new(path: SourcePathBuf, contents: String, offset: u32) -> Self {
         let span = Span::new(offset, offset + u32::try_from(contents.len()).unwrap());
         Self { path, contents, span }
     }
 
     // FIXME: Safety conditions.
-    unsafe fn as_ref<'a>(&self) -> SourceFileRef<'a> {
+    unsafe fn as_ref<'a>(&self) -> SourceFile<'a> {
         // FIXME: Safety comments
-        SourceFileRef {
-            path: unsafe { &*std::ptr::from_ref(self.path.as_path()) },
+        SourceFile {
+            path: match self.path {
+                SourcePathBuf::Regular(ref path) => {
+                    SourcePath::Regular(unsafe { &*std::ptr::from_ref(path.as_path()) })
+                }
+                SourcePathBuf::Stdin => SourcePath::Stdin,
+            },
             contents: unsafe { &*std::ptr::from_ref(self.contents.as_str()) },
             span: self.span,
         }
     }
 }
 
+pub(crate) enum SourcePathBuf {
+    Regular(PathBuf),
+    Stdin,
+}
+
+impl SourcePathBuf {
+    pub(crate) fn as_ref(&self) -> SourcePath<'_> {
+        match self {
+            Self::Regular(path) => SourcePath::Regular(&path),
+            Self::Stdin => SourcePath::Stdin,
+        }
+    }
+}
+
 #[derive(Clone, Copy)]
-pub(crate) struct SourceFileRef<'a> {
-    pub(crate) path: &'a Path,
+pub(crate) struct SourceFile<'a> {
+    pub(crate) path: SourcePath<'a>,
     pub(crate) contents: &'a str,
-    pub(crate) span: Span<{ Locality::Global }>,
+    pub(crate) span: Span,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SourcePath<'a> {
+    Regular(&'a Path),
+    Stdin,
+}
+
+impl SourcePath<'_> {
+    fn to_owned(self) -> SourcePathBuf {
+        match self {
+            Self::Regular(path) => SourcePathBuf::Regular(path.to_owned()),
+            Self::Stdin => SourcePathBuf::Stdin,
+        }
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -136,7 +179,7 @@ impl<const L: Locality> Span<L> {
 impl Span {
     pub(crate) const SHAM: Self = Self::new(0, 0);
 
-    pub(crate) const fn local(self, file: SourceFileRef<'_>) -> LocalSpan {
+    pub(crate) const fn local(self, file: SourceFile<'_>) -> LocalSpan {
         self.unshift(file.span.start).reinterpret()
     }
 
@@ -156,7 +199,7 @@ pub(crate) type LocalSpan = Span<{ Locality::Local }>;
 
 impl LocalSpan {
     #[allow(dead_code)] // FIXME: actually use it
-    pub(crate) fn global(self, file: SourceFileRef<'_>) -> Span {
+    pub(crate) fn global(self, file: SourceFile<'_>) -> Span {
         self.shift(file.span.start).reinterpret()
     }
 
@@ -173,8 +216,8 @@ pub(crate) enum Locality {
 
 #[derive(Clone, Copy)]
 #[cfg_attr(test, derive(PartialEq, Eq))]
-pub(crate) struct Spanned<T> {
-    pub(crate) span: Span,
+pub(crate) struct Spanned<T, const L: Locality = { Locality::Global }> {
+    pub(crate) span: Span<L>,
     pub(crate) bare: T,
 }
 

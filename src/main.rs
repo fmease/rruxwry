@@ -71,7 +71,7 @@ fn try_main() -> error::Result {
     }
 
     let krate = data::Crate {
-        path: args.path.as_deref(),
+        path: args.path.as_ref().map(|path| path.as_ref()),
         name: args.crate_name.as_ref().map(|name| name.as_ref()),
         typ: args.crate_type,
         edition: args.edition,

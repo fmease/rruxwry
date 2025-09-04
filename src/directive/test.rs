@@ -1,5 +1,5 @@
 use super::*;
-use crate::utility::default;
+use crate::{source::SourcePath, utility::default};
 
 // FIXME: Test trailing colons `:` (1) on argument-taking directives (2) on argument-less directivess.
 // FIXME: Test padded colons `  :  `.
@@ -16,7 +16,7 @@ fn parse_directives<'cx>(
 ) -> Directives<'cx> {
     // FIXME: Make role a parameter.
     parse(
-        SourceFileRef { path: Path::new(""), contents: source, span: Span::SHAM },
+        SourceFile { path: SourcePath::Stdin, contents: source, span: Span::SHAM },
         scope,
         Role::Principal,
         flavor,

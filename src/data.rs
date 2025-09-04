@@ -1,11 +1,12 @@
-use crate::{build::Engine, context::Context, diagnostic::fmt, utility::paint::Painter};
+use crate::{
+    build::Engine, context::Context, diagnostic::fmt, source::SourcePath, utility::paint::Painter,
+};
 use anstyle::{AnsiColor, Effects};
 use std::{
     borrow::Cow,
     fmt,
     io::{self, Write as _},
     num::NonZero,
-    path::Path,
 };
 
 #[cfg(test)]
@@ -172,12 +173,12 @@ impl<S: AsRef<str>> CrateName<S> {
 }
 
 impl CrateName<String> {
-    pub(crate) fn adjust_and_parse_file_path(path: impl AsRef<Path>) -> Result<Self, ()> {
-        path.as_ref()
-            .file_stem()
-            .and_then(|name| name.to_str())
-            .ok_or(())
-            .and_then(Self::adjust_and_parse)
+    pub(crate) fn adjust_and_parse_file_path(path: SourcePath<'_>) -> Result<Self, ()> {
+        let path = match path {
+            SourcePath::Regular(path) => path,
+            SourcePath::Stdin => return Ok(CrateName("rust_out".to_owned())),
+        };
+        path.file_stem().and_then(|name| name.to_str()).ok_or(()).and_then(Self::adjust_and_parse)
     }
 
     pub(crate) fn adjust_and_parse(source: &str) -> Result<Self, ()> {
@@ -232,7 +233,7 @@ pub(crate) enum Identity {
 
 #[derive(Clone, Copy)]
 pub(crate) struct Crate<'a, E = Edition<'a>> {
-    pub(crate) path: Option<&'a Path>,
+    pub(crate) path: Option<SourcePath<'a>>,
     pub(crate) name: Option<CrateName<&'a str>>,
     pub(crate) typ: Option<CrateType>,
     pub(crate) edition: Option<E>,
