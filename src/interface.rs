@@ -8,10 +8,7 @@ use crate::{
     source::SourcePathBuf,
     utility::{Conjunction, ListingExt as _, default, parse},
 };
-use std::{
-    ffi::OsString,
-    path::{Path, PathBuf},
-};
+use std::{ffi::OsString, path::PathBuf};
 
 // Similar to `-h`, `-Q` is compatible with all other flags and renders required arguments optional.
 // While there could be a world where `-Q` is incompatible with flags like `-r` (run) or `-o` (open)
@@ -34,7 +31,6 @@ pub(crate) fn arguments() -> Arguments {
     // NOTE:  Currently we don't offer a way to manually specify the path to rust{c,doc}.
     let toolchain = args
         .peek()
-        // FIXME: Is this actually correct on Windows (UTF-16 and all)?
         .filter(|arg| arg.as_encoded_bytes().starts_with(b"+"))
         .map(drop)
         .and_then(|()| args.next());
@@ -379,21 +375,9 @@ pub(crate) fn arguments() -> Arguments {
     //        deserializing from borrowed program arguments and providing &strs.
     //        Fix: Throw out clap and do it manually.
 
-    // FIXME: Move this logic into `operate`! Layer violation.
-    let crate_type = matches
-        .remove_one(id::CRATE_TYPE)
-        .map(|typ: String| CrateType::parse_cli_style(typ.leak()))
-        .or(match operation {
-            Operation::Compile { run: Run::No, mode: CompileMode::Default, .. } => {
-                Some(CrateType::LIB)
-            }
-            _ => None,
-        });
-
-    // FIXME: Use comporison against string once <https://github.com/rust-lang/rust/issues/146183> is fixed.
-    let path = matches.remove_one::<PathBuf>(id::PATH).map(|path| {
-        if &path == Path::new("-") { SourcePathBuf::Stdin } else { SourcePathBuf::Regular(path) }
-    });
+    let path = matches
+        .remove_one::<PathBuf>(id::PATH)
+        .map(|path| if &path == "-" { SourcePathBuf::Stdin } else { SourcePathBuf::Regular(path) });
 
     Arguments {
         toolchain,
@@ -401,7 +385,9 @@ pub(crate) fn arguments() -> Arguments {
         verbatim: matches.remove_many(id::VERBATIM).map(Iterator::collect).unwrap_or_default(),
         operation,
         crate_name: matches.remove_one(id::CRATE_NAME),
-        crate_type,
+        crate_type: matches
+            .remove_one(id::CRATE_TYPE)
+            .map(|typ: String| CrateType::parse_cli_style(typ.leak())),
         edition: matches
             .remove_one(id::EDITION)
             .map(|edition: String| ExtEdition::parse_cli_style(edition.leak())),

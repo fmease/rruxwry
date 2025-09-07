@@ -101,6 +101,8 @@ fn compile<'a>(
     let mut e_opts = EngineOptions::Rustc(c_opts);
     let (krate, opts, run_v_opts) = match mode {
         CompileMode::Default => {
+            let typ = krate.typ.or_else(|| matches!(run, Run::No).then_some(CrateType::LIB));
+            let krate = Crate { typ, ..krate };
             let (krate, opts) = build_default(&e_opts, krate, opts, cx)?;
             (krate, opts, default())
         }
