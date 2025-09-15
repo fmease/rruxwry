@@ -25,6 +25,8 @@ use std::{
 mod command;
 mod environment;
 
+const DEFAULT_THEME: &str = "ayu"; // personal preference
+
 pub(crate) fn perform(
     e_opts: &EngineOptions<'_>,
     krate: Crate<'_>,
@@ -647,8 +649,62 @@ fn configure_e_opts(
                 cmd.arg("-Znormalize-docs");
             }
 
-            cmd.arg("--default-theme");
-            cmd.arg(&d_opts.theme);
+            if let Some(theme) = &d_opts.theme {
+                let version = version_for_opt(Engine::Rustdoc, "--theme", cx)?;
+
+                // FIXME: TODO
+                // https://github.com/rust-lang/rust/pull/77213
+                // https://github.com/rust-lang/rust/pull/79642
+                // https://github.com/rust-lang/rust/pull/87288
+                let supported = match version.channel {
+                    Channel::Stable => match () {
+                        // () if version.triple >= V!(1, 84, 0) => true,
+                        () => false,
+                    },
+                    Channel::Beta { prerelease: _ } => true, // FIXME
+                    Channel::Nightly | Channel::Dev => match version.commit {
+                        Some(commit) => match () {
+                            // // <https://github.com/rust-lang/rust/pull/132993>, base: 1.84.0
+                            // () if commit.date >= D!(2024, 11, 18) => true,
+                            () => false,
+                        },
+                        None => match () {
+                            // () if version.triple > V!(1, 84, 0) => true,
+                            // () if version.triple == V!(1, 84, 0) => {
+                            //     // FIXME: print candidates and version
+                            //     return Err(error(fmt!(
+                            //     "could not determine how to forward option `--identity` to the underlying `{}`",
+                            //     Engine::Rustdoc.name()
+                            // ))
+                            // .done()
+                            // .into());
+                            // }
+                            () => false,
+                        },
+                    },
+                };
+
+                if supported {
+                    cmd.arg("--default-theme");
+                    cmd.arg(match theme {
+                        Theme::Default => DEFAULT_THEME,
+                        Theme::Fixed(theme) => theme,
+                    });
+                } else {
+                    match theme {
+                        Theme::Default => {}
+                        // FIMXE: print the actual version
+                        Theme::Fixed(_) => {
+                            return Err(error(fmt!(
+                                "the version of the underlying `{}` does not support faking a stable identity",
+                                Engine::Rustdoc.name()
+                            ))
+                            .done()
+                            .into());
+                        }
+                    }
+                }
+            }
 
             cmd.args(&d_opts.v_opts.arguments);
         }
@@ -676,7 +732,6 @@ fn configure_forced_identity(
         Identity::Stable => {
             let version = version_for_opt(engine, "--identity", cx)?;
 
-            // FIXME: Simplify once we support `beta` properly.
             let supported = match version.channel {
                 Channel::Stable => match () {
                     () if version.triple >= V!(1, 84, 0) => true,
@@ -704,6 +759,7 @@ fn configure_forced_identity(
                     },
                 },
             };
+
             if !supported {
                 // FIMXE: print the actual version
                 return Err(error(fmt!(
@@ -713,6 +769,7 @@ fn configure_forced_identity(
                 .done()
                 .into());
             }
+
             (ENV_VAR, "-1")
         }
         Identity::Nightly => {
@@ -1023,8 +1080,14 @@ pub(crate) struct DocOptions<'a> {
     pub(crate) layout: bool,
     pub(crate) link_to_def: bool,
     pub(crate) normalize: bool,
-    pub(crate) theme: String,
+    pub(crate) theme: Option<Theme>,
     pub(crate) v_opts: VerbatimOptions<'a, ()>,
+}
+
+#[derive(Clone)]
+pub(crate) enum Theme {
+    Default,
+    Fixed(String),
 }
 
 #[derive(Clone)] // FIXME: This is awful!

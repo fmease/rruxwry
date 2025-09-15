@@ -1,7 +1,7 @@
 //! The command-line interface.
 
 use crate::{
-    build::{BuildOptions, CompileOptions, DebugOptions, DocOptions, Ir},
+    build::{BuildOptions, CompileOptions, DebugOptions, DocOptions, Ir, Theme},
     data::{CrateName, CrateType, DocBackend, Edition, ExtEdition, Identity},
     directive::Flavor,
     operate::{Bless, CompileMode, DocMode, Open, Operation, Run, Test},
@@ -10,11 +10,11 @@ use crate::{
 };
 use std::{ffi::OsString, path::PathBuf};
 
-// Similar to `-h`, `-Q` is compatible with all other flags and renders required arguments optional.
-// While there could be a world where `-Q` is incompatible with flags like `-r` (run) or `-o` (open)
+// Similar to `-h`, `-V` is compatible with all other flags and renders required arguments optional.
+// While there could be a world where `-V` is incompatible with flags like `-r` (run) or `-o` (open)
 // (i.e., action it prevents from being performed potentially confusing the user), I think it's way
-// more convenient for `-Q` to have a higher precedence (I can imagine users spontaneously tacking
-// `-Q` onto a preexisting execution containing `-o` to double check they're using a correctly set up
+// more convenient for `-V` to have a higher precedence (I can imagine users spontaneously tacking
+// `-V` onto a preexisting execution containing `-o` to double check they're using a correctly set up
 // toolchain).
 
 pub(crate) fn arguments() -> Arguments {
@@ -296,10 +296,7 @@ pub(crate) fn arguments() -> Arguments {
                                 .long("normalize")
                                 .action(clap::ArgAction::SetTrue)
                                 .help("Normalize types"),
-                            clap::Arg::new(id::THEME)
-                                .long("theme")
-                                .default_value("ayu")
-                                .help("Set the theme"),
+                            clap::Arg::new(id::THEME).long("theme").help("Set the theme"),
                         ])
                         .args(extra())
                 }),
@@ -362,7 +359,12 @@ pub(crate) fn arguments() -> Arguments {
                 layout: matches.remove_one(id::LAYOUT).unwrap_or_default(),
                 link_to_def: matches.remove_one(id::LINK_TO_DEF).unwrap_or_default(),
                 normalize: matches.remove_one(id::NORMALIZE).unwrap_or_default(),
-                theme: matches.remove_one(id::THEME).unwrap(),
+                theme: match matches.remove_one::<String>(id::THEME) {
+                    // Empty string means unsetting the default theme.
+                    Some(deref!("")) => None,
+                    Some(theme) => Some(Theme::Fixed(theme)),
+                    None => Some(Theme::Default),
+                },
                 v_opts: default(),
             },
         },

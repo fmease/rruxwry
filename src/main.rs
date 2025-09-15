@@ -5,6 +5,7 @@
 #![feature(const_default)]
 #![feature(const_trait_impl)]
 #![feature(decl_macro)]
+#![feature(deref_patterns)]
 #![feature(derive_const)]
 #![feature(exact_size_is_empty)]
 #![feature(exit_status_error)]
