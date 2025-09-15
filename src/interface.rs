@@ -1,7 +1,9 @@
 //! The command-line interface.
 
 use crate::{
-    build::{BuildOptions, CompileOptions, DebugOptions, DocOptions, Engine, Ir, Shallowness},
+    build::{
+        BuildOptions, CompileOptions, DebugOptions, DocOptions, Engine, Ir, Shallowness, Theme,
+    },
     data::{
         CrateName, CrateType, DocBackend, Edition, ExtEdition, Identity, PlusPrefixedToolchain,
     },
@@ -233,7 +235,7 @@ fn with_doc_args(command: clap::Command) -> clap::Command {
                 .long("normalize")
                 .action(clap::ArgAction::SetTrue)
                 .help("Normalize types"),
-            clap::Arg::new(id::THEME).long("theme").default_value("ayu").help("Set the theme"),
+            clap::Arg::new(id::THEME).long("theme").help("Set the theme"),
         ])
         .args(extra_args())
 }
@@ -444,7 +446,12 @@ fn extract_normal_operation(operation: &str, matches: &mut clap::ArgMatches) -> 
                 layout: matches.remove_one(id::layout).unwrap_or_default(),
                 link_to_def: matches.remove_one(id::link_to_def).unwrap_or_default(),
                 normalize: matches.remove_one(id::normalize).unwrap_or_default(),
-                theme: matches.remove_one(id::THEME).unwrap(),
+                theme: match matches.remove_one::<String>(id::THEME) {
+                    // Empty string means unsetting the default theme.
+                    Some("") => None,
+                    Some(theme) => Some(Theme::Fixed(theme)),
+                    None => Some(Theme::Default),
+                },
                 v_opts: default(),
             },
         },
