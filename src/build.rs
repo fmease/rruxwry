@@ -28,6 +28,8 @@ use std::{
 mod command;
 mod environment;
 
+const DEFAULT_THEME: &str = "ayu"; // personal preference
+
 pub(crate) fn perform(
     e_opts: &EngineOptions<'_>,
     krate: Crate<'_>,
@@ -421,7 +423,7 @@ fn configure_early<'cx>(
     }
 
     configure_v_opts(cmd, &opts.v_opts);
-    configure_e_opts(cmd, e_opts, cx)?;
+    configure_e_opts(cmd, e_opts, opts, cx)?;
 
     if let Some(opts) = e_opts.engine().env_opts() {
         cmd.args(opts);
@@ -484,6 +486,7 @@ fn configure_late(
 
         let syntax = match version.channel {
             Channel::Stable => match () {
+                // <rust-lang/rust#119129>
                 () if version.triple >= V!(1, 77, 0) => Syntax::ZeeVerboseInternals,
                 // FIXME Find the *actual* lower bound.
                 () => Syntax::ZeeVerbose,
@@ -491,7 +494,7 @@ fn configure_late(
             Channel::Beta { prerelease: _ } => Syntax::ZeeVerboseInternals, // FIXME: actually unimpl'ed!
             Channel::Nightly | Channel::Dev => match version.commit {
                 Some(commit) => match () {
-                    // <https://github.com/rust-lang/rust/pull/119129>, base: 1.77
+                    // <rust-lang/rust#119129>, base: 1.77
                     () if commit.date >= D!(2023, 12, 26) => Syntax::ZeeVerboseInternals,
                     // FIXME: Find the *actual* lower bound.
                     () => Syntax::ZeeVerbose,
@@ -552,6 +555,7 @@ fn configure_v_opts(cmd: &mut Command<'_>, v_opts: &VerbatimOptions<'_>) {
 fn configure_e_opts(
     cmd: &mut Command<'_>,
     e_opts: &EngineOptions<'_>,
+    opts: &Options<'_>,
     cx: Context<'_>,
 ) -> Result<()> {
     match e_opts {
@@ -612,8 +616,96 @@ fn configure_e_opts(
                 cmd.arg("-Znormalize-docs");
             }
 
-            cmd.arg("--default-theme");
-            cmd.arg(&d_opts.theme);
+            if let Some(theme) = &d_opts.theme {
+                let version = version_for_opt(Engine::Rustdoc, "--theme", cx)?;
+
+                // FIXME: Account for the period of time in which `--default-theme` didn't work due to a bug:
+                //        <https://github.com/rust-lang/rust/issues/87263>.
+                let support = match version.channel {
+                    Channel::Stable => match () {
+                        // <rust-lang/rust#79642>, nightly: 2020-12-27
+                        () if version.triple >= V!(1, 51, 0) => Support::Yes,
+                        // <rust-lang/rust#77213>
+                        // XXX FIXME: the fake identity shouldn't be queried *here*
+                        () if version.triple >= V!(1, 49, 0) => match probe_identity(opts) {
+                            Identity::True | Identity::Stable => Support::UNSTABLE,
+                            Identity::Nightly => Support::Yes,
+                        },
+                        () => Support::UNIMPLEMENTED,
+                    },
+                    Channel::Beta { prerelease: _ } => Support::Yes, // FIXME
+                    Channel::Nightly | Channel::Dev => match version.commit {
+                        Some(commit) => match () {
+                            // <rust-lang/rust#77213>, base: 1.49.0
+                            () if commit.date >= D!(2020, 10, 29) => Support::Yes,
+                            () => Support::UNIMPLEMENTED,
+                        },
+                        None => match () {
+                            // <rust-lang/rust#77213>
+                            () if version.triple > V!(1, 49, 0) => Support::Yes,
+                            () if version.triple == V!(1, 49, 0) => {
+                                // FIXME: print candidates and version
+                                return Err(error(fmt!(
+                                "could not determine how to forward option `--theme` to the underlying `{}`",
+                                Engine::Rustdoc.name()
+                            ))
+                            .done()
+                            .into());
+                            }
+                            () => Support::UNIMPLEMENTED,
+                        },
+                    },
+                };
+
+                enum Support {
+                    Yes,
+                    No(UnsupportedReason),
+                }
+
+                impl Support {
+                    const UNIMPLEMENTED: Self = Self::No(UnsupportedReason::Unimplemented);
+                    const UNSTABLE: Self = Self::No(UnsupportedReason::Unstable);
+                }
+
+                enum UnsupportedReason {
+                    Unimplemented,
+                    Unstable,
+                }
+
+                match support {
+                    Support::Yes => {
+                        cmd.arg("--default-theme");
+                        cmd.arg(match theme {
+                            Theme::Default => DEFAULT_THEME,
+                            Theme::Fixed(theme) => theme,
+                        });
+                    }
+                    Support::No(reason) => {
+                        match theme {
+                            Theme::Default => {}
+                            // FIMXE: print the actual version
+                            Theme::Fixed(_) => {
+                                let (extra, help) = match reason {
+                                    UnsupportedReason::Unimplemented => ("", None),
+                                    UnsupportedReason::Unstable => {
+                                        (" on stable", Some("consider forcing a nightly identity"))
+                                    }
+                                };
+
+                                let error = error(fmt!(
+                                    "the version of the underlying `{}` does not support setting a default theme{extra}",
+                                    Engine::Rustdoc.name()
+                                ));
+                                let error = match help {
+                                    Some(help) => error.help(fmt!("{help}")),
+                                    None => error,
+                                };
+                                return Err(error.done().into());
+                            }
+                        }
+                    }
+                }
+            }
 
             cmd.args(&d_opts.v_opts.arguments);
         }
@@ -709,7 +801,6 @@ fn configure_forced_identity(
         Identity::Stable => {
             let version = version_for_opt(engine, "--identity", cx)?;
 
-            // FIXME: Simplify once we support `beta` properly.
             let supported = match version.channel {
                 Channel::Stable => match () {
                     () if version.triple >= V!(1, 84, 0) => true,
@@ -737,6 +828,7 @@ fn configure_forced_identity(
                     },
                 },
             };
+
             if !supported {
                 // FIMXE: print the actual version
                 return Err(error(fmt!(
@@ -746,6 +838,7 @@ fn configure_forced_identity(
                 .done()
                 .into());
             }
+
             (ENV_VAR, "-1")
         }
         Identity::Nightly => {
@@ -1092,8 +1185,14 @@ pub(crate) struct DocOptions<'a> {
     pub(crate) layout: bool,
     pub(crate) link_to_def: bool,
     pub(crate) normalize: bool,
-    pub(crate) theme: String,
+    pub(crate) theme: Option<Theme>,
     pub(crate) v_opts: VerbatimOptions<'a, ()>,
+}
+
+#[derive(Clone)]
+pub(crate) enum Theme {
+    Default,
+    Fixed(String),
 }
 
 #[derive(Clone, Default)] // FIXME: `Clone` is awful!

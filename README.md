@@ -94,7 +94,7 @@ Options:
       --layout                   Document the memory layout of types
       --link-to-def              Generate links to definitions
       --normalize                Normalize types
-      --theme <THEME>            Set the theme [default: ayu]
+      --theme <THEME>            Set the theme
   -/, --suppress-lints           Cap lints at allow level
   -#, --internals                Enable internal pretty-printing of data types
   -N, --next-solver              Enable the next-gen trait solver
