@@ -37,12 +37,19 @@ pub(crate) fn arguments() -> Arguments {
 
     let args = bin.chain(subcommand).chain(args);
 
-    fn path() -> clap::Arg {
-        // The path is intentionally optional to enable invocations like `rrc -V`, `rrc -- -h`,
-        // `rrc -- -Zhelp`, `rrc -- -Chelp`, etc.
-        clap::Arg::new(id::PATH)
-            .value_parser(clap::builder::ValueParser::path_buf())
-            .help("Path to the source file")
+    fn source() -> impl IntoIterator<Item = clap::Arg> {
+        [
+            // The path is intentionally optional to enable invocations like `rrc -V`, `rrc -- -h`,
+            // `rrc -- -Zhelp`, `rrc -- -Chelp`, etc.
+            clap::Arg::new(id::PATH)
+                .value_parser(clap::builder::ValueParser::path_buf())
+                .help("Path to the source file"),
+            clap::Arg::new(id::SOURCE)
+                .short(':')
+                .long("source")
+                .conflicts_with(id::PATH)
+                .help("Provide the source code"),
+        ]
     }
     fn verbatim() -> clap::Arg {
         clap::Arg::new(id::VERBATIM).num_args(..).last(true).value_name("VERBATIM")
@@ -191,7 +198,7 @@ pub(crate) fn arguments() -> Arguments {
                 .about("Compile the given crate with rustc")
                 .defer(|command| {
                     command
-                        .arg(path())
+                        .args(source())
                         .arg(verbatim().help("Flags passed to `rustc` verbatim"))
                         .arg(
                             clap::Arg::new(id::RUN)
@@ -236,7 +243,7 @@ pub(crate) fn arguments() -> Arguments {
                 .about("Document the given crate with rustdoc")
                 .defer(|command| {
                     command
-                        .arg(path())
+                        .args(source())
                         .arg(verbatim().help("Flags passed to `rustc` and `rustdoc` verbatim"))
                         .arg(
                             clap::Arg::new(id::OPEN)
@@ -375,13 +382,15 @@ pub(crate) fn arguments() -> Arguments {
     //        deserializing from borrowed program arguments and providing &strs.
     //        Fix: Throw out clap and do it manually.
 
+    let source = matches.remove_one(id::SOURCE).map(Source::String);
     let path = matches
         .remove_one::<PathBuf>(id::PATH)
         .map(|path| if &path == "-" { SourcePathBuf::Stdin } else { SourcePathBuf::Regular(path) });
+    let source = source.xor(path.map(Source::Path));
 
     Arguments {
         toolchain,
-        path,
+        source,
         verbatim: matches.remove_many(id::VERBATIM).map(Iterator::collect).unwrap_or_default(),
         operation,
         crate_name: matches.remove_one(id::CRATE_NAME),
@@ -418,7 +427,7 @@ pub(crate) fn arguments() -> Arguments {
 pub(crate) struct Arguments {
     /// The toolchain, prefixed with `+`.
     pub(crate) toolchain: Option<OsString>,
-    pub(crate) path: Option<SourcePathBuf>,
+    pub(crate) source: Option<Source>,
     pub(crate) verbatim: Vec<String>,
     pub(crate) operation: Operation,
     pub(crate) crate_name: Option<CrateName<String>>,
@@ -427,6 +436,11 @@ pub(crate) struct Arguments {
     pub(crate) b_opts: BuildOptions,
     pub(crate) dbg_opts: DebugOptions,
     pub(crate) color: clap::ColorChoice,
+}
+
+pub(crate) enum Source {
+    Path(SourcePathBuf),
+    String(String),
 }
 
 impl ExtEdition<'static> {
@@ -559,7 +573,6 @@ mod id {
     pub(super) const DOC: &str = "doc";
     pub(super) const DUMP: &str = "DUMP";
     pub(super) const EDITION: &str = "EDITION";
-    pub(super) const PRINT_ENGINE_VERSION: &str = "PRINT_ENGINE_VERSION";
     pub(super) const EXTERN: &str = "EXTERN";
     pub(super) const HIDDEN: &str = "HIDDEN";
     pub(super) const IDENTITY: &str = "IDENTITY";
@@ -569,15 +582,17 @@ mod id {
     pub(super) const LINK_TO_DEF: &str = "LINK_TO_DEF";
     pub(super) const LOG: &str = "LOG";
     pub(super) const NEXT_SOLVER: &str = "NEXT_SOLVER";
+    pub(super) const NORMALIZE: &str = "NORMALIZE";
     pub(super) const NO_BACKTRACE: &str = "NO_BACKTRACE";
     pub(super) const NO_DEDUPE: &str = "NO_DEDUPE";
-    pub(super) const NORMALIZE: &str = "NORMALIZE";
     pub(super) const OPEN: &str = "OPEN";
     pub(super) const PATH: &str = "PATH";
+    pub(super) const PRINT_ENGINE_VERSION: &str = "PRINT_ENGINE_VERSION";
     pub(super) const PRIVATE: &str = "PRIVATE";
     pub(super) const REVISION: &str = "REVISION";
     pub(super) const RUN: &str = "RUN";
     pub(super) const SHALLOW: &str = "SHALLOW";
+    pub(super) const SOURCE: &str = "SOURCE";
     pub(super) const SUPPRESS_LINTS: &str = "SUPPRESS_LINTS";
     pub(super) const THEME: &str = "THEME";
     pub(super) const UNSTABLE_FEATURES: &str = "UNSTABLE_FEATURES";

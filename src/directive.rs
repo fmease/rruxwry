@@ -36,7 +36,7 @@ pub(crate) fn gather<'cx>(
 ) -> crate::error::Result<InstantiatedDirectives<'cx>> {
     // FIXME: The error handling is pretty awkward!
     let mut errors = Errors::default();
-    let directives = parse(cx.map().add(path, cx)?, scope, role, flavor, &mut errors);
+    let directives = parse(cx.map().read(path, cx)?, scope, role, flavor, &mut errors);
     // FIXME: Certain kinds of errors likely occur in large quantities (e.g., unsupported and unavailable directives).
     //        In order to avoid "terminal spamming", suppress duplicates. We actually used to *coalesce* certain
     //        error kinds but that's not super compatible with source code highlighting.

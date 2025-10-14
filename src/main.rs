@@ -33,6 +33,7 @@
 #![allow(clippy::option_option)] // I disagree
 #![allow(clippy::too_many_lines)] // I disagree
 
+use crate::{interface::Source, source::SourcePathBuf};
 use diagnostic::{bug, fmt};
 use std::process::ExitCode;
 
@@ -70,8 +71,19 @@ fn try_main() -> error::Result {
         clap::ColorChoice::Auto => {}
     }
 
+    let cx = context::new!(context::Options { toolchain: args.toolchain, dbg_opts: args.dbg_opts });
+
+    let path = match args.source {
+        Some(Source::String(contents)) => {
+            let file = cx.map().add(SourcePathBuf::Stdin, contents)?;
+            Some(file.path.to_owned())
+        }
+        Some(Source::Path(path)) => Some(path),
+        None => None,
+    };
+
     let krate = data::Crate {
-        path: args.path.as_ref().map(|path| path.as_ref()),
+        path: path.as_ref().map(|path| path.as_ref()),
         name: args.crate_name.as_ref().map(|name| name.as_ref()),
         typ: args.crate_type,
         edition: args.edition,
@@ -84,8 +96,6 @@ fn try_main() -> error::Result {
             variables: Vec::new(),
         },
     };
-
-    let cx = context::new!(context::Options { toolchain: args.toolchain, dbg_opts: args.dbg_opts });
 
     operate::perform(args.operation, krate, opts, cx)
 }

@@ -137,6 +137,7 @@ Arguments:
   [VERBATIM]...  Flags passed to `rustc` verbatim
 
 Options:
+  -:, --source <SOURCE>        Provide the source code
   -r, --run                    Also run the built binary
   -c, --check-only             Don't fully compile, only check the crate
   -@, --directives[=<FLAVOR>]  Enable compiletest-like directives
@@ -177,6 +178,7 @@ Arguments:
   [VERBATIM]...  Flags passed to `rustc` and `rustdoc` verbatim
 
 Options:
+  -:, --source <SOURCE>          Provide the source code
   -o, --open                     Also open the generated docs in a browser
   -j, --json                     Output JSON instead of HTML
   -@, --directives[=<FLAVOR>]    Enable compiletest-like directives

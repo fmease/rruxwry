@@ -1,10 +1,10 @@
-#!/usr/bin/env -S cargo +nightly -Zscript
+#!/usr/bin/env -S cargo -Zscript
 ---
 [package]
 edition = "2024"
 ---
 //! Regenerate the `README.md`.
-#![feature(exit_status_error, path_add_extension)]
+#![feature(exit_status_error)]
 
 use std::{env, error::Error, path::Path, process::Command};
 

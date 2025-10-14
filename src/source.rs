@@ -4,7 +4,7 @@ use crate::{
     utility::monotonic::MonotonicVec,
 };
 use std::{
-    fmt,
+    fmt, fs, io,
     path::{Path, PathBuf},
 };
 
@@ -20,7 +20,7 @@ impl SourceMap {
     }
 
     // FIXME: Detect circular/cyclic imports here.
-    pub(crate) fn add(
+    pub(crate) fn read(
         &self,
         path: Spanned<SourcePath<'_>>,
         cx: Context<'_>,
@@ -33,16 +33,25 @@ impl SourceMap {
         }
 
         let contents = match path.bare {
-            SourcePath::Regular(path_) => std::fs::read_to_string(path_).map_err(|error| {
+            SourcePath::Regular(path_) => fs::read_to_string(path_).map_err(|error| {
                 self::error(fmt!("failed to read `{}`", path_.display()))
                     .highlight(path.span, cx)
                     .note(fmt!("{error}"))
                     .done()
             })?,
-            SourcePath::Stdin => std::io::read_to_string(std::io::stdin())?,
+            SourcePath::Stdin => io::read_to_string(io::stdin())?,
         };
 
-        let file = SourceFileBuf::new(path.bare.to_owned(), contents, self.offset());
+        // FIXME: Ideally, we would take an owned path to avoid the clone.
+        self.add(path.bare.to_owned(), contents)
+    }
+
+    pub(crate) fn add(
+        &self,
+        path: SourcePathBuf,
+        contents: String,
+    ) -> crate::error::Result<SourceFile<'_>> {
+        let file = SourceFileBuf::new(path, contents, self.offset());
         // FIXME: Safety comment.
         let result = unsafe { file.as_ref() };
         self.files.push(file);
@@ -89,7 +98,7 @@ impl SourceFileBuf {
         SourceFile {
             path: match self.path {
                 SourcePathBuf::Regular(ref path) => {
-                    SourcePath::Regular(unsafe { &*std::ptr::from_ref(path.as_path()) })
+                    SourcePath::Regular(unsafe { &*std::ptr::from_ref::<Path>(path) })
                 }
                 SourcePathBuf::Stdin => SourcePath::Stdin,
             },
@@ -127,7 +136,7 @@ pub(crate) enum SourcePath<'a> {
 }
 
 impl SourcePath<'_> {
-    fn to_owned(self) -> SourcePathBuf {
+    pub(crate) fn to_owned(self) -> SourcePathBuf {
         match self {
             Self::Regular(path) => SourcePathBuf::Regular(path.to_owned()),
             Self::Stdin => SourcePathBuf::Stdin,
