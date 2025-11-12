@@ -4,7 +4,7 @@ use crate::{
     source::SourceMap,
     utility::{
         default,
-        small_fixed_map::{SmallFixedKey, SmallFixedMap, WellFormedKey},
+        small_fixed_map::{SmallFixedKey, SmallFixedMap},
     },
 };
 use std::{cell::RefCell, path::PathBuf};
@@ -84,6 +84,7 @@ store! {
 }
 
 impl SmallFixedKey for Engine {
+    #[type_const]
     const LEN: usize = 2;
 
     fn index(self) -> usize {
@@ -101,10 +102,7 @@ pub(crate) fn invoke<I: SmallFixedKey, O: Clone>(
     compute: fn(I, Context<'_>) -> O,
     input: I,
     cx: Context<'_>,
-) -> O
-where
-    WellFormedKey<I>:,
-{
+) -> O {
     if let Some(result) = query.cache.borrow().get(input) {
         return result.clone();
     }
@@ -113,17 +111,11 @@ where
 }
 
 #[doc(hidden)] // used internally by macro `invoke`
-pub(crate) struct Query<I: SmallFixedKey, O>
-where
-    WellFormedKey<I>:,
-{
+pub(crate) struct Query<I: SmallFixedKey, O> {
     cache: RefCell<SmallFixedMap<I, O>>,
 }
 
-impl<I: SmallFixedKey, O> Default for Query<I, O>
-where
-    WellFormedKey<I>:,
-{
+impl<I: SmallFixedKey, O> Default for Query<I, O> {
     fn default() -> Self {
         Self { cache: default() }
     }
