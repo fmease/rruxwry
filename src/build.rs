@@ -450,11 +450,6 @@ fn configure_late(
         cmd.arg("--cfg");
         cmd.arg(cfg);
     }
-    // FIXME: This shouldn't be done here.
-    if let Some(revision) = &opts.b_opts.revision {
-        cmd.arg("--cfg");
-        cmd.arg(revision);
-    }
 
     for feature in &opts.b_opts.unstable_features {
         // NOTE: If <https://github.com/rust-lang/rfcs/pull/3791> gets accepted and implemented,
@@ -1031,7 +1026,6 @@ pub(crate) struct DocOptions<'a> {
 #[allow(clippy::struct_excessive_bools)] // not worth to address
 pub(crate) struct BuildOptions {
     pub(crate) cfgs: Vec<String>,
-    pub(crate) revision: Option<String>,
     pub(crate) unstable_features: Vec<String>,
     pub(crate) extern_crates: Vec<String>,
     pub(crate) suppress_lints: bool,
