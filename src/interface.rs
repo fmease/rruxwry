@@ -10,11 +10,11 @@ use crate::{
 };
 use std::{ffi::OsString, path::PathBuf};
 
-// Similar to `-h`, `-Q` is compatible with all other flags and renders required arguments optional.
-// While there could be a world where `-Q` is incompatible with flags like `-r` (run) or `-o` (open)
+// Similar to `-h`, `-V` is compatible with all other flags and renders required arguments optional.
+// While there could be a world where `-V` is incompatible with flags like `-r` (run) or `-o` (open)
 // (i.e., action it prevents from being performed potentially confusing the user), I think it's way
-// more convenient for `-Q` to have a higher precedence (I can imagine users spontaneously tacking
-// `-Q` onto a preexisting execution containing `-o` to double check they're using a correctly set up
+// more convenient for `-V` to have a higher precedence (I can imagine users spontaneously tacking
+// `-V` onto a preexisting execution containing `-o` to double check they're using a correctly set up
 // toolchain).
 
 pub(crate) fn arguments() -> Arguments {
@@ -316,15 +316,19 @@ pub(crate) fn arguments() -> Arguments {
     // unwrap: handled by `clap`.
     let (operation, mut matches) = matches.remove_subcommand().unwrap();
 
-    let directives = matches.remove_one(id::DIRECTIVES);
-
-    let test = match matches.remove_one(id::COMPILETEST).unwrap_or_default() {
-        false => Test::No,
-        true => Test::Yes(match matches.remove_one(id::BLESS).unwrap_or_default() {
-            false => Bless::No,
-            true => Bless::Yes,
-        }),
-    };
+    let directives = matches.remove_one::<Flavor>(id::DIRECTIVES).map(|flavor| {
+        crate::operate::DirectiveOptions {
+            flavor,
+            revision: matches.remove_one(id::REVISION),
+            test: match matches.remove_one(id::COMPILETEST).unwrap_or_default() {
+                false => Test::No,
+                true => Test::Yes(match matches.remove_one(id::BLESS).unwrap_or_default() {
+                    false => Bless::No,
+                    true => Bless::Yes,
+                }),
+            },
+        }
+    });
 
     let print_engine_version: bool =
         matches.remove_one(id::PRINT_ENGINE_VERSION).unwrap_or_default();
@@ -336,7 +340,7 @@ pub(crate) fn arguments() -> Arguments {
                 false => Run::No,
             },
             mode: match directives {
-                Some(flavor) => CompileMode::DirectiveDriven(flavor, test),
+                Some(dir_opts) => CompileMode::DirectiveDriven(dir_opts),
                 None => CompileMode::Default,
             },
             options: CompileOptions {
@@ -353,7 +357,7 @@ pub(crate) fn arguments() -> Arguments {
             },
             mode: match (matches.remove_one(id::CROSS_CRATE).unwrap_or_default(), directives) {
                 (true, None) => DocMode::CrossCrate,
-                (false, Some(flavor)) => DocMode::DirectiveDriven(flavor, test),
+                (false, Some(dir_opts)) => DocMode::DirectiveDriven(dir_opts),
                 (false, None) => DocMode::Default,
                 (true, Some(_)) => unreachable!(), // Already caught by `clap`.
             },
@@ -402,7 +406,6 @@ pub(crate) fn arguments() -> Arguments {
             .map(|edition: String| ExtEdition::parse_cli_style(edition.leak())),
         b_opts: BuildOptions {
             cfgs: matches.remove_many(id::CFGS).map(Iterator::collect).unwrap_or_default(),
-            revision: matches.remove_one(id::REVISION),
             unstable_features: matches
                 .remove_many(id::UNSTABLE_FEATURES)
                 .map(Iterator::collect)

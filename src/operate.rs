@@ -29,9 +29,9 @@ use std::{
     path::{Path, PathBuf},
 };
 
-// FIXME: `-@Q` may fail to report fake identities as set via `//@ rustc-env: RUST_BOOTSTRAP=…`.
+// FIXME: `-@V` may fail to report fake identities as set via `//@ rustc-env: RUST_BOOTSTRAP=…`.
 //        Should we consider that a bug or "out of scope"? We could theoretically gather directives
-//        under `-@Q` to obtain this piece of information.
+//        under `-@V` to obtain this piece of information.
 
 pub(crate) fn perform(
     op: Operation,
@@ -106,9 +106,8 @@ fn compile<'a>(
             let (krate, opts) = build_default(&e_opts, krate, opts, cx)?;
             (krate, opts, default())
         }
-        // FIXME: _test
-        CompileMode::DirectiveDriven(flavor, _test) => {
-            build_directive_driven(&mut e_opts, krate, opts, flavor, cx)?
+        CompileMode::DirectiveDriven(dir_opts) => {
+            build_directive_driven(&mut e_opts, krate, dir_opts, opts, cx)?
         }
     };
     match run {
@@ -159,13 +158,12 @@ fn document<'a>(
     let (krate, opts) = match mode {
         DocMode::Default => build_default(&EngineOptions::Rustdoc(d_opts), krate, opts, cx)?,
         DocMode::CrossCrate => return document_cross_crate(krate, opts, d_opts, open, cx),
-        // FIXME: _test
-        DocMode::DirectiveDriven(flavor, _test) => {
+        DocMode::DirectiveDriven(dir_opts) => {
             let (krate, opts, _) = build_directive_driven(
                 &mut EngineOptions::Rustdoc(d_opts),
                 krate,
+                dir_opts,
                 opts,
-                flavor,
                 cx,
             )?;
             (krate, opts)
@@ -282,8 +280,8 @@ fn build_default<'a>(
 fn build_directive_driven<'a>(
     e_opts: &mut EngineOptions<'a>,
     krate: Crate<'a, ExtEdition<'a>>,
+    mut dir_opts: DirectiveOptions,
     mut opts: Options<'a>,
-    flavor: directive::Flavor,
     cx: Context<'a>,
 ) -> Result<(Crate<'a>, Options<'a>, VerbatimOptions<'a>)> {
     let path = krate.path.ok_or_else(|| {
@@ -293,7 +291,7 @@ fn build_directive_driven<'a>(
         .done()
     })?;
 
-    let (path, revision) = if let SourcePath::Regular(path) = path
+    let (path, revision_from_path) = if let SourcePath::Regular(path) = path
         && let Some((path, revision)) = path.as_os_str().rsplit_once(Char::NumberSign)
     {
         let Some(revision) = revision.to_str() else {
@@ -309,12 +307,11 @@ fn build_directive_driven<'a>(
         (path, None)
     };
 
-    let revision = match (revision, opts.b_opts.revision.as_deref()) {
+    match (revision_from_path, &dir_opts.revision) {
         (Some(rev0), Some(rev1)) if rev0 == rev1 => {
             warn(fmt!("the active revision `{rev0}` was passed twice"))
                 .note(fmt!("once as a path suffix, once via a flag"))
                 .done();
-            Some(rev0)
         }
         (Some(rev0), Some(rev1)) => {
             return Err(error(fmt!("two conflicting active revisions were passed"))
@@ -322,28 +319,18 @@ fn build_directive_driven<'a>(
                 .done()
                 .into());
         }
-        (rev @ Some(_), None) | (None, rev @ Some(_)) => rev,
-        (None, None) => None,
-    };
+        (Some(rev), None) => dir_opts.revision = Some(rev.to_owned()),
+        (None, _) => {}
+    }
 
     let directives = directive::gather(
         Spanned::sham(path),
         scope(e_opts),
         directive::Role::Principal,
-        flavor,
-        revision,
+        dir_opts.flavor,
+        dir_opts.revision.as_deref(),
         cx,
     )?;
-
-    let directive::InstantiatedDirectives {
-        build_aux_docs,
-        auxes,
-        edition,
-        v_opts,
-        v_d_opts,
-        run_v_opts,
-        prefer_dylib,
-    } = directives;
 
     let aux_base_path = LazyCell::new(|| {
         match path {
@@ -355,19 +342,23 @@ fn build_directive_driven<'a>(
     });
     let mut extern_crates = Vec::new();
 
-    auxes.iter().try_for_each(|aux| {
+    directives.auxes.iter().try_for_each(|aux| {
         compile_auxiliary(
             aux,
             &aux_base_path,
             e_opts,
+            dir_opts.clone(),
             // FIXME: This awful!
             opts.clone(),
-            build_aux_docs,
-            flavor,
+            directives.build_aux_docs,
             cx,
             &mut extern_crates,
         )
     })?;
+
+    if let Some(revision) = dir_opts.revision {
+        opts.b_opts.cfgs.push(revision);
+    }
 
     opts.b_opts.extern_crates.append(&mut extern_crates);
 
@@ -375,7 +366,7 @@ fn build_directive_driven<'a>(
     // if this was `Engine::Rustc`. We might need to do that to at some point, tho I'm
     // honestly not sure about all the consequences. Also note that we currently use a
     // crate type of lib instead of dylib for auxiliaries by default.
-    _ = prefer_dylib;
+    _ = directives.prefer_dylib;
 
     let edition = match krate.edition {
         // If the resolution of the CLI edition fails, we *don't*
@@ -384,19 +375,19 @@ fn build_directive_driven<'a>(
         //        for engine==rustdoc see comment above the other invocation of
         //        `resolve` in this module.
         Some(edition) => edition.resolve(e_opts.engine(), cx),
-        None => edition.map(|edition| Edition::Unknown(edition.bare)),
+        None => directives.edition.map(|edition| Edition::Unknown(edition.bare)),
     };
 
     let krate = Crate { path: Some(path), edition, ..krate };
 
-    opts.v_opts.extend(v_opts);
+    opts.v_opts.extend(directives.v_opts);
     match e_opts {
         EngineOptions::Rustc(..) => {} // rustc-exclusive (verbatim) flags is not a thing.
-        EngineOptions::Rustdoc(d_opts) => d_opts.v_opts.extend(v_d_opts),
+        EngineOptions::Rustdoc(d_opts) => d_opts.v_opts.extend(directives.v_d_opts),
     }
 
     build::perform(e_opts, krate, &opts, ImplyUnstableOptions::No, cx)?;
-    Ok((krate, opts, run_v_opts))
+    Ok((krate, opts, directives.run_v_opts))
 }
 
 // FIXME: Support nested auxiliaries!
@@ -405,6 +396,7 @@ fn compile_auxiliary<'a>(
     &directive::Auxiliary { ref prefix, path, typ }: &directive::Auxiliary<'a>,
     base_path: &Path,
     e_opts: &EngineOptions<'_>,
+    dir_opts: DirectiveOptions,
     // FIXME: Do we actually want to pass along *all* of these opts?
     //        Arguably some of them belong to the root crate only (e.g. crate name).
     //        On top of that, the status quo is inconsistent because
@@ -413,7 +405,6 @@ fn compile_auxiliary<'a>(
     //        debug. Should subset vs. all be a CLI option?
     mut opts: Options<'a>,
     doc: bool,
-    flavor: directive::Flavor,
     cx: Context<'a>,
     parent_extern_crates: &mut Vec<String>,
 ) -> Result<()> {
@@ -423,10 +414,14 @@ fn compile_auxiliary<'a>(
         path.as_deref().map(SourcePath::Regular),
         scope(e_opts),
         directive::Role::Auxiliary,
-        flavor,
-        opts.b_opts.revision.as_deref(),
+        dir_opts.flavor,
+        dir_opts.revision.as_deref(),
         cx,
     )?;
+
+    if let Some(revision) = dir_opts.revision {
+        opts.b_opts.cfgs.push(revision);
+    }
 
     let directive::InstantiatedDirectives {
         edition,
@@ -434,6 +429,7 @@ fn compile_auxiliary<'a>(
         prefer_dylib,
         // FIXME
         build_aux_docs: _,
+        // FIXME
         auxes: _,
         v_d_opts: _,
         run_v_opts: _,
@@ -529,10 +525,36 @@ pub(crate) enum Operation {
     QueryRustdocVersion,
 }
 
-#[derive(Clone, Copy)]
 pub(crate) enum CompileMode {
     Default,
-    DirectiveDriven(directive::Flavor, Test),
+    DirectiveDriven(DirectiveOptions),
+}
+
+pub(crate) enum DocMode {
+    Default,
+    CrossCrate,
+    DirectiveDriven(DirectiveOptions),
+}
+
+#[derive(Clone)]
+pub(crate) struct DirectiveOptions {
+    pub(crate) flavor: directive::Flavor,
+    pub(crate) revision: Option<String>,
+    #[expect(dead_code)] // FIXME
+    pub(crate) test: Test,
+}
+
+#[derive(Clone, Copy)]
+pub(crate) enum Test {
+    #[expect(dead_code)] // FIXME
+    Yes(Bless),
+    No,
+}
+
+#[derive(Clone, Copy)]
+pub(crate) enum Bless {
+    Yes,
+    No,
 }
 
 #[derive(Clone, Copy)]
@@ -542,27 +564,7 @@ pub(crate) enum Run {
 }
 
 #[derive(Clone, Copy)]
-pub(crate) enum DocMode {
-    Default,
-    CrossCrate,
-    DirectiveDriven(directive::Flavor, Test),
-}
-
-#[derive(Clone, Copy)]
 pub(crate) enum Open {
-    Yes,
-    No,
-}
-
-#[derive(Clone, Copy)]
-pub(crate) enum Test {
-    #[allow(dead_code)] // FIXME
-    Yes(Bless),
-    No,
-}
-
-#[derive(Clone, Copy)]
-pub(crate) enum Bless {
     Yes,
     No,
 }
