@@ -34,7 +34,9 @@ pub(crate) fn perform(
 ) -> Result<()> {
     let engine = e_opts.engine();
 
-    let mut cmd = engine.command(cx).map_err(|error| error.emit())?;
+    let mut cmd = engine
+        .command(cx, AddRuntimeLibraryPath::IfAncientVersion)
+        .map_err(|error| error.emit())?;
     configure_early(&mut cmd, e_opts, krate, opts, cx)?;
     configure_late(&mut cmd, engine, opts, cx)?;
 
@@ -162,7 +164,7 @@ fn query_engine_version(
 ) -> Result<Version<String>, QueryEngineVersionError> {
     use QueryEngineVersionError as Error;
 
-    let mut cmd = engine.command(cx).map_err(Error::EnginePathError)?;
+    let mut cmd = engine.command(cx, AddRuntimeLibraryPath::Yes).map_err(Error::EnginePathError)?;
 
     cmd.arg("-V");
 
@@ -237,7 +239,10 @@ pub(crate) fn query_crate_name<'a>(
 
     let e_opts = EngineOptions::Rustc(default());
 
-    let mut cmd = e_opts.engine().command(cx).map_err(Error::EnginePathError)?;
+    let mut cmd = e_opts
+        .engine()
+        .command(cx, AddRuntimeLibraryPath::IfAncientVersion)
+        .map_err(Error::EnginePathError)?;
 
     // FIXME: Make this function return a more structured error and then get rid of `Error::Other`.
     configure_early(&mut cmd, &e_opts, krate, opts, cx).map_err(Error::Other)?;
@@ -250,7 +255,7 @@ pub(crate) fn query_crate_name<'a>(
     if !output.status.success() {
         // (1) This likely means we passed incorrect flags to the rustc invocation which
         // can happen in practice if the user knowingly or unknowingly provided verbatim
-        // flags that don't make for `rustc --print=crate-name`.
+        // flags that don't make sense for `rustc --print=crate-name`.
         //
         // A common example at the time of writing would be rustdoc tests using
         // `//@ compile-flags` for rustdoc-specific flags instead of `//@ doc-flags`.
@@ -953,19 +958,44 @@ impl Engine {
         crate::context::invoke!(cx.query_engine_path(self))
     }
 
-    fn command(self, cx: Context<'_>) -> Result<Command<'_>, QueryEnginePathError> {
+    fn command(
+        self,
+        cx: Context<'_>,
+        add: AddRuntimeLibraryPath,
+    ) -> Result<Command<'_>, QueryEnginePathError> {
         let path = PathBuf::from(self.path(cx)?);
         let mut cmd = Command::new(&path, cx);
-        // Very old versions (e.g, 1.0 and 1.2) can't find some of their shared libraries if we don't do this.
-        // FIXME: We assume that the path is of the form "$PREFIX/bin/$FILE" and that the corresponding library
-        //        folder is "$PREFIX/lib/". This relies on the likely undocumented/unstable file structure of
-        //        rustup toolchains.
-        if let Some(path) = path.ancestors().nth(const { ["bin", "*"].len() }) {
-            // FIXME: This likely doesn't work on non-*nix OSes.
-            // NOTE: We should probably *append* onto the library path instead of overwriting it completely.
-            //       However, I've yet to find an issue with the current approach in our specific scenario.
-            cmd.env("LD_LIBRARY_PATH", Some(path.join("lib")));
+
+        if cfg!(unix) {
+            let add = match add {
+                AddRuntimeLibraryPath::Yes => true,
+                AddRuntimeLibraryPath::IfAncientVersion => {
+                    self.version(cx).is_ok_and(|version| match version.channel {
+                        // NOTE: I couldn't fully verify the beta channel since the earliest beta
+                        // one can download (for my platform) is 1.75-beta at the time of writing.
+                        Channel::Stable | Channel::Beta { .. } => version.triple < V!(1, 7, 0),
+                        Channel::Nightly | Channel::Dev => match version.commit {
+                            // NOTE: I couldn't fully verify this since the earliest nightly one can
+                            // download (for my platform) is nightly-2016-03-08 at the time of writing.
+                            // I presume the following PR made it unnecessary to add the path:
+                            // <https://github.com/rust-lang/rust/pull/30739>
+                            Some(commit) => commit.date < D!(2016, 01, 08),
+                            // Conservative choice; we certainly don't want to error out if we can't
+                            // determine it (=1.7.0) since that would be annoying and entirely unnecessary.
+                            None => version.triple <= V!(1, 7, 0),
+                        },
+                    })
+                }
+            };
+
+            // FIXME: We assume that the path is of the form "$PREFIX/bin/$FILE" and that the corresponding library
+            //        folder is "$PREFIX/lib/". This relies on the likely undocumented/unstable file structure of
+            //        rustup toolchains.
+            if add && let Some(path) = path.ancestors().nth(const { ["bin", "*"].len() }) {
+                cmd.env("LD_LIBRARY_PATH", Some(path.join("lib")));
+            }
         }
+
         Ok(cmd)
     }
 
@@ -977,6 +1007,11 @@ impl Engine {
     ) -> Result<Version<String>, QueryEngineVersionError> {
         crate::context::invoke!(cx.query_engine_version(self))
     }
+}
+
+enum AddRuntimeLibraryPath {
+    Yes,
+    IfAncientVersion,
 }
 
 mod palette {
