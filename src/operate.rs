@@ -130,7 +130,16 @@ fn run(
         error.emit()
     })?;
 
-    let mut path: PathBuf = [".", crate_name.as_str()].into_iter().collect();
+    let path = if let Some(path) = krate.path
+        && let Ok(path) = CrateName::prepare_source_path(path)
+        && CrateName::parse_relaxed(path).is_ok_and(|name| name.as_ref() == crate_name.as_ref())
+    {
+        path
+    } else {
+        crate_name.as_str()
+    };
+
+    let mut path = PathBuf::from_iter([".", path]);
     path.set_extension(std::env::consts::EXE_EXTENSION);
 
     build::run(&path, run_v_opts, cx)
@@ -215,7 +224,7 @@ fn document_cross_crate(
     // FIXME: This `unwrap` is obviously reachable (e.g., on `rrc '%$?'`)
     let crate_name: CrateName<Cow<'_, _>> = krate
         .name
-        .map_or_else(|| CrateName::adjust_and_parse_file_path(path).unwrap().into(), Into::into);
+        .map_or_else(|| CrateName::parse_source_file_relaxed(path).unwrap().into(), Into::into);
 
     let root_crate_name = CrateName::new_unchecked(format!("u_{crate_name}"));
     let root_crate_path = match path {
