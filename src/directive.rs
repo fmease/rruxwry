@@ -244,7 +244,8 @@ impl<'src> InstantiatedDirectives<'src> {
                 }
                 AuxiliaryDirective::ProcMacro { path } => {
                     // FIXME: unwrap
-                    let prefix = CrateName::adjust_and_parse_file_path(SourcePath::Regular(
+                    // FIXME: is this what compiletest does, too?
+                    let prefix = CrateName::parse_source_file_relaxed(SourcePath::Regular(
                         Path::new(path.bare),
                     ))
                     .unwrap();

@@ -173,22 +173,27 @@ impl<S: AsRef<str>> CrateName<S> {
 }
 
 impl CrateName<String> {
-    pub(crate) fn adjust_and_parse_file_path(path: SourcePath<'_>) -> Result<Self, ()> {
-        let path = match path {
-            SourcePath::Regular(path) => path,
-            SourcePath::Stdin => return Ok(CrateName("rust_out".to_owned())),
-        };
-        path.file_stem().and_then(|name| name.to_str()).ok_or(()).and_then(Self::adjust_and_parse)
-    }
+    const FALLBACK: &str = "rust_out";
 
-    pub(crate) fn adjust_and_parse(source: &str) -> Result<Self, ()> {
-        // NB: See the comment over in `CrateNameRef::parse` for why this makes sense.
+    pub(crate) fn parse_relaxed(source: &str) -> Result<Self, ()> {
+        // NB: See the comment over in `CrateName::parse` for why this makes sense.
         if !source.is_empty()
             && source.chars().all(|char| char.is_alphanumeric() || char == '_' || char == '-')
         {
             Ok(Self::new_unchecked(source.replace('-', "_")))
         } else {
             Err(())
+        }
+    }
+
+    pub(crate) fn parse_source_file_relaxed(path: SourcePath<'_>) -> Result<Self, ()> {
+        Self::parse_relaxed(Self::prepare_source_path(path)?)
+    }
+
+    pub(crate) fn prepare_source_path(path: SourcePath<'_>) -> Result<&str, ()> {
+        match path {
+            SourcePath::Regular(path) => path.file_stem().ok_or(())?.to_str().ok_or(()),
+            SourcePath::Stdin => Ok(Self::FALLBACK),
         }
     }
 }

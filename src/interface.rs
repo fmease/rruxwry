@@ -467,7 +467,7 @@ impl ExtEdition<'static> {
 
 impl CrateName<String> {
     fn parse_cli_style(source: &str) -> Result<Self, &'static str> {
-        Self::adjust_and_parse(source).map_err(|()| "not a non-empty alphanumeric string")
+        Self::parse_relaxed(source).map_err(|()| "not a non-empty alphanumeric string")
     }
 }
 
