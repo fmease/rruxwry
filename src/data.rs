@@ -1,9 +1,15 @@
 use crate::{
-    build::Engine, context::Context, diagnostic::fmt, source::SourcePath, utility::paint::Painter,
+    build::Engine,
+    context::Context,
+    diagnostic::fmt,
+    source::SourcePath,
+    utility::{OsStrExt, paint::Painter},
 };
 use anstyle::{AnsiColor, Effects};
 use std::{
+    ascii::Char,
     borrow::Cow,
+    ffi::{OsStr, OsString},
     fmt,
     io::{self, Write as _},
     num::NonZero,
@@ -482,5 +488,27 @@ pub(crate) macro D($year:literal, $month:literal, $day:literal) {
 impl Date {
     fn paint(&self, p: &mut Painter<impl io::Write>) -> io::Result<()> {
         write!(p, "{:04}-{:02}-{:02}", self.year, self.month, self.day)
+    }
+}
+
+pub(crate) struct PlusPrefixedToolchain {
+    source: OsString,
+}
+
+impl PlusPrefixedToolchain {
+    pub(crate) fn new(source: OsString) -> Result<Self, OsString> {
+        if !source.as_encoded_bytes().starts_with(b"+") {
+            return Err(source);
+        }
+
+        Ok(Self { source })
+    }
+
+    pub(crate) fn as_os_str(&self) -> &OsStr {
+        &self.source
+    }
+
+    pub(crate) fn unprefixed(&self) -> &OsStr {
+        self.source.strip_prefix(Char::PlusSign).unwrap()
     }
 }

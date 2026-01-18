@@ -62,15 +62,26 @@ impl Conjunction {
 }
 
 pub(crate) trait OsStrExt {
+    fn strip_prefix(&self, pat: Char) -> Option<&OsStr>;
     fn rsplit_once(&self, pat: Char) -> Option<(&OsStr, &OsStr)>;
 }
 
 impl OsStrExt for OsStr {
+    fn strip_prefix(&self, pat: Char) -> Option<&OsStr> {
+        let s = self.as_encoded_bytes().strip_prefix(std::slice::from_ref(&pat.to_u8()))?;
+        // SAFETY: We're allowed to split the bytes coming from `as_encoded_bytes` immediately
+        //         after a valid non-empty UTF-8 substring which the pattern trivially satisfies
+        //         being a length-one 7-bit ASCII char subslice.
+        let s = unsafe { OsStr::from_encoded_bytes_unchecked(s) };
+        Some(s)
+    }
+
     fn rsplit_once(&self, pat: Char) -> Option<(&OsStr, &OsStr)> {
-        let (a, b) = self.as_encoded_bytes().rsplit_once(|&byte| byte == pat as _)?;
+        let (s, t) = self.as_encoded_bytes().rsplit_once(|&byte| byte == pat as _)?;
+        // FIXME: Further elaborate this explanation:
         // SAFETY: Each substring was separated by a 7-bit ASCII char (length-one substring).
-        let a = unsafe { OsStr::from_encoded_bytes_unchecked(a) };
-        let b = unsafe { OsStr::from_encoded_bytes_unchecked(b) };
-        Some((a, b))
+        let s = unsafe { OsStr::from_encoded_bytes_unchecked(s) };
+        let t = unsafe { OsStr::from_encoded_bytes_unchecked(t) };
+        Some((s, t))
     }
 }

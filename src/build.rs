@@ -4,7 +4,10 @@
 
 use crate::{
     context::Context,
-    data::{Channel, Crate, CrateName, CrateType, D, DocBackend, Identity, V, Version},
+    data::{
+        Channel, Crate, CrateName, CrateType, D, DocBackend, Identity, PlusPrefixedToolchain, V,
+        Version,
+    },
     diagnostic::{EmittedError, debug, error},
     error::Result,
     fmt,
@@ -55,19 +58,28 @@ pub(crate) fn perform(
 }
 
 /// Don't call this directly! Use [`EngineKind::path`] instead.
-fn query_engine_path(engine: Engine, cx: Context<'_>) -> Result<String, QueryEnginePathError> {
+fn query_engine_path(engine: Engine, cx: Context<'_>) -> Result<PathBuf, QueryEnginePathError> {
     use QueryEnginePathError as Error;
 
-    // FIXME: Support non-rustup environments somehow (needs design work).
+    let name = engine.name();
+    let toolchain = &cx.opts().toolchain;
+
+    if let Some(toolchain) = toolchain.as_ref().map(PlusPrefixedToolchain::unprefixed)
+        && toolchain.as_encoded_bytes().starts_with(b"/")
+    {
+        // FIXME: Add disclaimer about rustup impl details
+        return Ok(PathBuf::from_iter([toolchain, OsStr::new("bin"), OsStr::new(name)]));
+    }
+
     let mut cmd = Command::new("rustup", cx);
     cmd.env("RUSTUP_AUTO_INSTALL", Some("0"));
 
-    if let Some(toolchain) = &cx.opts().toolchain {
-        cmd.arg(toolchain);
+    if let Some(toolchain) = toolchain {
+        cmd.arg(toolchain.as_os_str());
     }
 
     cmd.arg("which");
-    cmd.arg(engine.name());
+    cmd.arg(name);
 
     // FIXME: Forward underlying IO error (we can't rn, it doesn't impl `Clone`).
     let mut output = cmd.execute_capturing_output().map_err(|_| Error::RustupSpawnFailure)?;
@@ -109,8 +121,7 @@ fn query_engine_path(engine: Engine, cx: Context<'_>) -> Result<String, QueryEng
     }
 
     output.stdout.truncate_ascii_end();
-    // FIXME: Does `rustup` forward paths that aren't valid UTF-8 or does it error?
-    let path = String::from_utf8(output.stdout).map_err(Error::InvalidPath)?;
+    let path = PathBuf::from(String::from_utf8(output.stdout).map_err(Error::InvalidPath)?);
 
     Ok(path)
 }
@@ -953,7 +964,7 @@ impl Engine {
         }
     }
 
-    fn path(self, cx: Context<'_>) -> Result<String, QueryEnginePathError> {
+    fn path(self, cx: Context<'_>) -> Result<PathBuf, QueryEnginePathError> {
         crate::context::invoke!(cx.query_engine_path(self))
     }
 
@@ -962,7 +973,7 @@ impl Engine {
         cx: Context<'_>,
         add: AddRuntimeLibraryPath,
     ) -> Result<Command<'_>, QueryEnginePathError> {
-        let path = PathBuf::from(self.path(cx)?);
+        let path = self.path(cx)?;
         let mut cmd = Command::new(&path, cx);
 
         if cfg!(unix) {

@@ -2,7 +2,9 @@
 
 use crate::{
     build::{BuildOptions, CompileOptions, DebugOptions, DocOptions, Ir},
-    data::{CrateName, CrateType, DocBackend, Edition, ExtEdition, Identity},
+    data::{
+        CrateName, CrateType, DocBackend, Edition, ExtEdition, Identity, PlusPrefixedToolchain,
+    },
     directive::Flavor,
     operate::{Bless, CompileMode, DocMode, Open, Operation, Run, Test},
     source::SourcePathBuf,
@@ -18,24 +20,7 @@ use std::{ffi::OsString, path::PathBuf};
 // toolchain).
 
 pub(crate) fn arguments() -> Arguments {
-    let mut args = std::env::args_os().peekable();
-
-    let bin = args.next().into_iter();
-    // FIXME: If this resembles a toolchain argument, throw an error suggesting to
-    //        move it after the subcommand.
-    let subcommand = args.next().into_iter();
-
-    // FIXME: Ideally, `clap` would support custom prefixes (here: `+`).
-    //        See <https://github.com/clap-rs/clap/issues/2468>.
-    // FIXME: It would be nice if we could show this as `[+<TOOLCHAIN>]` or similar in the help output.
-    // NOTE:  Currently we don't offer a way to manually specify the path to rust{c,doc}.
-    let toolchain = args
-        .peek()
-        .filter(|arg| arg.as_encoded_bytes().starts_with(b"+"))
-        .map(drop)
-        .and_then(|()| args.next());
-
-    let args = bin.chain(subcommand).chain(args);
+    let (toolchain, args) = toolchain(std::env::args_os());
 
     fn source() -> impl IntoIterator<Item = clap::Arg> {
         [
@@ -427,9 +412,35 @@ pub(crate) fn arguments() -> Arguments {
     }
 }
 
+fn toolchain(mut args: std::env::ArgsOs) -> (Option<PlusPrefixedToolchain>, Vec<OsString>) {
+    // FIXME: Ideally, `clap` would support custom prefixes (for positional args), here: `+`.
+    //        However, it does not. See also <https://github.com/clap-rs/clap/issues/2468>.
+    //        Therefore, we need to extract it ourselves.
+    // FIXME: It would be nice if we could show this as `[+<TOOLCHAIN>]` or similar in the help output.
+
+    let (capacity, _) = args.size_hint();
+    let mut result = Vec::with_capacity(capacity);
+
+    if let Some(bin) = args.next() {
+        result.push(bin);
+    }
+    if let Some(subcommand) = args.next() {
+        // FIXME: If this resembles a toolchain argument, emit a custom
+        //        error suggesting to move it after the subcommand.
+        result.push(subcommand);
+    }
+
+    let toolchain = args
+        .next()
+        .and_then(|arg| PlusPrefixedToolchain::new(arg).map_err(|arg| result.push(arg)).ok());
+
+    result.extend(args);
+
+    (toolchain, result)
+}
+
 pub(crate) struct Arguments {
-    /// The toolchain, prefixed with `+`.
-    pub(crate) toolchain: Option<OsString>,
+    pub(crate) toolchain: Option<PlusPrefixedToolchain>,
     pub(crate) source: Option<Source>,
     pub(crate) verbatim: Vec<String>,
     pub(crate) operation: Operation,

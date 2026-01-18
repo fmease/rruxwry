@@ -1,13 +1,13 @@
 use crate::{
     build::{DebugOptions, Engine, QueryEnginePathError, QueryEngineVersionError},
-    data::Version,
+    data::{PlusPrefixedToolchain, Version},
     source::SourceMap,
     utility::{
         default,
         small_fixed_map::{SmallFixedKey, SmallFixedMap, WellFormedKey},
     },
 };
-use std::{cell::RefCell, ffi::OsString};
+use std::{cell::RefCell, path::PathBuf};
 
 pub(crate) macro new($opts:expr) {{
     super let cx = ContextData::new($opts);
@@ -58,7 +58,7 @@ impl ContextData {
 /// A subset of `Opts` of which we know it won't change over the program lifetime.
 // FIXME: Include other "immutable" opts and use it pervasively throughout the project!
 pub(crate) struct Options {
-    pub(crate) toolchain: Option<OsString>,
+    pub(crate) toolchain: Option<PlusPrefixedToolchain>,
     pub(crate) dbg_opts: DebugOptions,
 }
 
@@ -77,8 +77,8 @@ macro_rules! store {
 
 // FIXME: Smh. provide these from within mod `build`.
 store! {
-    // FIXME: Smh. return `&'cx str` instead of `String`.
-    query_engine_path(engine: Engine) -> Result<String, QueryEnginePathError>;
+    // FIXME: Smh. return `&'cx Path` instead of `PathBuf`.
+    query_engine_path(engine: Engine) -> Result<PathBuf, QueryEnginePathError>;
     // FIXME: Smh. return `&'cx Version<String>` or better yet `Version<&'cx str>` instead of `Version<String>`.
     query_engine_version(engine: Engine) -> Result<Version<String>, QueryEngineVersionError>;
 }
