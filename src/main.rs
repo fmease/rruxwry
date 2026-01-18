@@ -104,13 +104,7 @@ fn set_panic_hook() {
     const ENV_VAR: &str = "RRUXWRY_BACKTRACE";
 
     std::panic::set_hook(Box::new(|info| {
-        let payload = info.payload();
-
-        let message = payload
-            .downcast_ref::<&str>()
-            .copied()
-            .or_else(|| payload.downcast_ref::<String>().map(String::as_str))
-            .unwrap_or("<unknown cause>");
+        let message = info.payload_as_str().unwrap_or("<unknown cause>");
 
         let backtrace = std::env::var(ENV_VAR)
             .is_ok_and(|variable| variable != "0")

@@ -218,6 +218,7 @@ impl QueryEngineVersionError {
     }
 }
 
+// FIXME: Document why querying rustc is needed at all.
 pub(crate) fn query_crate_name<'a>(
     krate: Crate<'a>,
     opts: &Options<'_>,

@@ -23,7 +23,6 @@ use crate::{
 use anstyle::AnsiColor;
 use std::{
     ascii::Char,
-    borrow::Cow,
     cell::LazyCell,
     io::{self, Write as _},
     path::{Path, PathBuf},
@@ -122,7 +121,6 @@ fn run(
     run_v_opts: &VerbatimOptions<'_>,
     cx: Context<'_>,
 ) -> Result {
-    // FIXME: Explain why we need to query the crate name.
     let crate_name = build::query_crate_name(krate, opts, cx).map_err(|error| {
         // FIXME: Actually create a 'parent' error diagnostic with a message akin to
         //        "failed to run the built binary (requested …)" and smh.
@@ -185,7 +183,6 @@ fn document<'a>(
 }
 
 fn open(krate: Crate<'_>, opts: &Options<'_>, cx: Context<'_>) -> Result<()> {
-    // FIXME: Explain why we need to query the crate name.
     let crate_name = build::query_crate_name(krate, opts, cx).map_err(|error| {
         // FIXME: Actually create a 'parent' error diagnostic with a message akin to
         //        "failed to open the generated docs (requested …)" and smh.
@@ -221,10 +218,12 @@ fn document_cross_crate(
     // FIXME: The clone is awful!
     let (krate, _) = build_default(&EngineOptions::Rustc(default()), krate, opts.clone(), cx)?;
 
-    // FIXME: This `unwrap` is obviously reachable (e.g., on `rrc '%$?'`)
-    let crate_name: CrateName<Cow<'_, _>> = krate
-        .name
-        .map_or_else(|| CrateName::parse_source_file_relaxed(path).unwrap().into(), Into::into);
+    let crate_name = build::query_crate_name(krate, &opts, cx).map_err(|error| {
+        // FIXME: Actually create a 'parent' error diagnostic with a message akin to
+        //        "failed to XYZ (requested …)" and smh.
+        //        'tuck' the QueryCrateNameError below it (i.e., more indented).
+        error.emit()
+    })?;
 
     let root_crate_name = CrateName::new_unchecked(format!("u_{crate_name}"));
     let root_crate_path = match path {
