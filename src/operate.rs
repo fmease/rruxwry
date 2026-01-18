@@ -39,7 +39,7 @@ pub(crate) fn perform(
     cx: Context<'_>,
 ) -> Result<()> {
     let paint_err = |error: QueryEngineVersionError, p: &mut Painter<_>| {
-        p.with(AnsiColor::Red, |p| write!(p, "{{ {} }}", error.short_desc()))
+        p.with(AnsiColor::Red, |p| write!(p, "[{}]", error.short_desc()))
     };
 
     match op {

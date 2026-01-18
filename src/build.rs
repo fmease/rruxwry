@@ -60,9 +60,12 @@ fn query_engine_path(engine: Engine, cx: Context<'_>) -> Result<String, QueryEng
 
     // FIXME: Support non-rustup environments somehow (needs design work).
     let mut cmd = Command::new("rustup", cx);
+    cmd.env("RUSTUP_AUTO_INSTALL", Some("0"));
+
     if let Some(toolchain) = &cx.opts().toolchain {
         cmd.arg(toolchain);
     }
+
     cmd.arg("which");
     cmd.arg(engine.name());
 
@@ -70,41 +73,39 @@ fn query_engine_path(engine: Engine, cx: Context<'_>) -> Result<String, QueryEng
     let mut output = cmd.execute_capturing_output().map_err(|_| Error::RustupSpawnFailure)?;
 
     if !output.status.success() {
-        // Sadly, rustup doesn't offer any mechanism to make it output machine-readable and
-        // stable data. See also <https://github.com/rust-lang/rustup/issues/450>.
-        // So unfortunately we have no choice but to try and parse stderr output.
+        // I don't want to forward the verbose and roundabout error diagnostics.
         //
+        // Sadly, rustup doesn't offer any mechanism to make it output machine-readable
+        // and stable data. See also <https://github.com/rust-lang/rustup/issues/450>.
+        //
+        // So unfortunately we have no choice but to try parsing the stderr output
+        // on a best effort basis. We attempt to find the most common cases of
+        // failures in order to return a more concise error code.
+
         // FIXME: Avoid the need for `from_utf8`.
         if let Ok(stderr) = String::from_utf8(output.stderr)
             && let Some(line) = stderr.lines().next()
             && let Some(line) = line.strip_prefix("error: ")
         {
-            // We now try to find the most common cases of rustup failure in order to
-            // return a more concise error code. I don't want to forward the verbose and
-            // roundabout error diagnostics.
-            //
-            // FIXME: Admittedly, these checks could be stricter by comparing the "variables"
-            // (toolchain, component, …). In practice however it shouldn't really matter.
-
-            if let Some(line) = line.strip_prefix("toolchain '") {
-                if line.ends_with("' is not installable") {
-                    return Err(Error::UnknownToolchain);
-                }
-                if line.ends_with("' is not installed") {
-                    return Err(Error::ToolchainNotInstalled);
-                }
+            if let Some(line) = line.strip_prefix("toolchain '")
+                && line.ends_with("' is not installed")
+            {
+                return Err(Error::UnresolvedToolchain);
             }
 
-            if let Some((component, toolchain)) =
-                line.split_once("' is not installed for the custom toolchain '")
-                && component.starts_with('\'')
-                && toolchain.ends_with("'.")
+            // If the toolchain in the override file is problematic.
+            if let Some(line) = line.strip_prefix("custom toolchain '")
+                && line.ends_with("' is not installed")
             {
-                return Err(Error::UnavailableComponent);
+                return Err(Error::UnresolvedToolchain);
+            }
+
+            if line.starts_with("not a file: ") {
+                return Err(Error::UnresolvedComponent);
             }
         }
 
-        return Err(Error::RustupFailure);
+        return Err(Error::GenericRustupFailure);
     }
 
     output.stdout.truncate_ascii_end();
@@ -117,10 +118,9 @@ fn query_engine_path(engine: Engine, cx: Context<'_>) -> Result<String, QueryEng
 #[derive(Clone)]
 pub(crate) enum QueryEnginePathError {
     RustupSpawnFailure,
-    UnknownToolchain,
-    ToolchainNotInstalled,
-    UnavailableComponent,
-    RustupFailure,
+    UnresolvedToolchain,
+    UnresolvedComponent,
+    GenericRustupFailure,
     InvalidPath(FromUtf8Error),
 }
 
@@ -130,10 +130,9 @@ impl QueryEnginePathError {
     pub(crate) fn short_desc(self) -> &'static str {
         match self {
             Self::RustupSpawnFailure => "rustup unavailable",
-            Self::RustupFailure | Self::InvalidPath(_) => "error",
-            Self::UnknownToolchain => "toolchain unknown",
-            Self::ToolchainNotInstalled => "toolchain not installed",
-            Self::UnavailableComponent => "component unavailable",
+            Self::GenericRustupFailure | Self::InvalidPath(_) => "rustup errored",
+            Self::UnresolvedToolchain => "toolchain unresolved",
+            Self::UnresolvedComponent => "component unresolved",
         }
     }
 
@@ -144,13 +143,12 @@ impl QueryEnginePathError {
         match self {
             // FIMXE: Print underlying IO error cause (we can't thread it thru rn cuz io::Error doesn't impl `Clone`
             //        but `Self` unfortunately requires `Clone` due to the "query system" impl needing it atm).
-            Self::RustupSpawnFailure => error.note(fmt!("failed to execute `rustup`")),
-            Self::UnknownToolchain | Self::ToolchainNotInstalled | Self::UnavailableComponent => {
-                error.note(fmt!("{}", self.short_desc()))
-            }
-            Self::RustupFailure => error.note(fmt!("`rustup` exited unsuccessfully")),
+            Self::RustupSpawnFailure => error.note(fmt!("failed to execute rustup")),
+            Self::UnresolvedToolchain => error.note(fmt!("the rustup toolchain is unresolved")),
+            Self::UnresolvedComponent => error.note(fmt!("the rustup component is unresolved")),
+            Self::GenericRustupFailure => error.note(fmt!("rustup exited unsuccessfully")),
             Self::InvalidPath(cause) => {
-                error.note(fmt!("`rustup` provided a non-UTF-8 path: {cause}"))
+                error.note(fmt!("rustup provided a non-UTF-8 path: {cause}"))
             }
         }
         .done()
