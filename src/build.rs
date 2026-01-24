@@ -12,7 +12,7 @@ use crate::{
     error::Result,
     fmt,
     source::SourcePath,
-    utility::default,
+    utility::{default, small_fixed_map::SmallFixedKey},
 };
 use anstyle::AnsiColor;
 use command::Command;
@@ -935,7 +935,7 @@ impl EngineOptions<'_> {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, SmallFixedKey)]
 pub(crate) enum Engine {
     Rustc,
     Rustdoc,

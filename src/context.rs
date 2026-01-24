@@ -83,15 +83,6 @@ store! {
     query_engine_version(engine: Engine) -> Result<Version<String>, QueryEngineVersionError>;
 }
 
-impl SmallFixedKey for Engine {
-    #[type_const]
-    const LEN: usize = 2;
-
-    fn index(self) -> usize {
-        self as _
-    }
-}
-
 pub(crate) macro invoke($cx:ident.$query:ident($input:expr)) {
     invoke(&$cx.store().$query, $query, $input, $cx)
 }

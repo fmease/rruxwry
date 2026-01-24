@@ -27,3 +27,16 @@ pub(crate) trait SmallFixedKey: Copy {
     const LEN: usize;
     fn index(self) -> usize;
 }
+
+pub(crate) macro SmallFixedKey {
+    derive() ($vis:vis enum $name:ident { $($variant:ident),* $(,)? }) => {
+        impl SmallFixedKey for $name {
+            #[type_const]
+            const LEN: usize = ${count($variant)};
+
+            fn index(self) -> usize {
+                self as _
+            }
+        }
+    }
+}

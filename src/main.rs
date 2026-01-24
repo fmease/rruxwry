@@ -10,6 +10,8 @@
 #![feature(exit_status_error)]
 #![feature(if_let_guard)]
 #![feature(iter_collect_into)]
+#![feature(macro_derive)]
+#![feature(macro_metavar_expr)]
 #![feature(min_generic_const_args)]
 #![feature(slice_split_once)]
 #![feature(str_split_remainder)]
