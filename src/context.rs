@@ -4,7 +4,7 @@ use crate::{
     source::SourceMap,
     utility::{
         default,
-        small_fixed_map::{SmallFixedKey, SmallFixedMap},
+        small_fixed_map::{SmallFixedMap, SmallKey},
     },
 };
 use std::{cell::RefCell, path::PathBuf};
@@ -88,7 +88,7 @@ pub(crate) macro invoke($cx:ident.$query:ident($input:expr)) {
 }
 
 #[doc(hidden)] // used internally by macro `invoke`
-pub(crate) fn invoke<I: SmallFixedKey, O: Clone>(
+pub(crate) fn invoke<I: SmallKey, O: Clone>(
     query: &Query<I, O>,
     compute: fn(I, Context<'_>) -> O,
     input: I,
@@ -102,11 +102,11 @@ pub(crate) fn invoke<I: SmallFixedKey, O: Clone>(
 }
 
 #[doc(hidden)] // used internally by macro `invoke`
-pub(crate) struct Query<I: SmallFixedKey, O> {
+pub(crate) struct Query<I: SmallKey, O> {
     cache: RefCell<SmallFixedMap<I, O>>,
 }
 
-impl<I: SmallFixedKey, O> Default for Query<I, O> {
+impl<I: SmallKey, O> Default for Query<I, O> {
     fn default() -> Self {
         Self { cache: default() }
     }
