@@ -39,7 +39,7 @@ pub(crate) fn perform(
 
     let mut cmd = engine
         .command(cx, AddRuntimeLibraryPath::IfAncientVersion)
-        .map_err(|error| error.emit())?;
+        .map_err(|error| error.emit(engine))?;
     configure_early(&mut cmd, e_opts, krate, opts, cx)?;
     configure_late(&mut cmd, engine, opts, cx)?;
 
@@ -147,9 +147,8 @@ impl QueryEnginePathError {
         }
     }
 
-    fn emit(self) -> EmittedError {
-        // FIMXE: Print actual name of the engine.
-        let error = error(fmt!("failed to obtain path to rust{{,do}}c"));
+    fn emit(self, engine: Engine) -> EmittedError {
+        let error = error(fmt!("failed to obtain path to {}", engine.name()));
 
         match self {
             // FIMXE: Print underlying IO error cause (we can't thread it thru rn cuz io::Error doesn't impl `Clone`
@@ -301,7 +300,7 @@ impl QueryCrateNameError {
 
         match self {
             // FIXME: embed inner error inside the one above (indented)
-            Self::EnginePathError(error) => return error.emit(),
+            Self::EnginePathError(error) => return error.emit(Engine::Rustc),
             Self::RustcSpawnFailure(cause) => {
                 error.note(fmt!("failed to execute `rustc`: {cause}"))
             }
