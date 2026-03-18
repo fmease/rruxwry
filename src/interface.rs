@@ -1,7 +1,7 @@
 //! The command-line interface.
 
 use crate::{
-    build::{BuildOptions, CompileOptions, DebugOptions, DocOptions, Ir},
+    build::{BuildOptions, CompileOptions, DebugOptions, DocOptions, Ir, Shallowness},
     data::{
         CrateName, CrateType, DocBackend, Edition, ExtEdition, Identity, PlusPrefixedToolchain,
     },
@@ -209,7 +209,12 @@ pub(crate) fn arguments() -> Arguments {
                             clap::Arg::new(id::SHALLOW)
                                 .short('s')
                                 .long("shallow")
-                                .action(clap::ArgAction::SetTrue)
+                                .value_name("MODE")
+                                .require_equals(true)
+                                .num_args(..=1)
+                                .default_missing_value("parse-only")
+                                .value_parser(Shallowness::parse_cli_style)
+                                // FIXME: W/ the intro of `-s=cfg-false` not quite accurate anymore
                                 .help("Halt after parsing the source file")
                                 .conflicts_with(id::RUN),
                         )
@@ -330,7 +335,7 @@ pub(crate) fn arguments() -> Arguments {
             },
             options: CompileOptions {
                 check_only: matches.remove_one(id::CHECK_ONLY).unwrap_or_default(),
-                shallow: matches.remove_one(id::SHALLOW).unwrap_or_default(),
+                shallowness: matches.remove_one(id::SHALLOW),
                 dump: matches.remove_one(id::DUMP),
             },
         },
@@ -510,6 +515,16 @@ impl Flavor {
         parse!(
             "v" | "vanilla" => Self::Vanilla,
             "x" | "rruxwry" => Self::Rruxwry,
+        )(source)
+        .map_err(possible_values)
+    }
+}
+
+impl Shallowness {
+    fn parse_cli_style(source: &str) -> Result<Self, String> {
+        parse!(
+            "#" | "cfg-false" => Self::CfgFalse,
+            "parse-only" => Self::ParseOnly,
         )(source)
         .map_err(possible_values)
     }

@@ -466,9 +466,7 @@ fn configure_late(
     }
 
     for feature in &opts.b_opts.unstable_features {
-        // NOTE: If <https://github.com/rust-lang/rfcs/pull/3791> gets accepted and implemented,
-        //       we need to start switching on the version and change the lowering.
-        cmd.arg(format!("-Zcrate-attr=feature({feature})"));
+        register_crate_attr(cmd, format_args!("feature({feature})"));
     }
 
     if opts.b_opts.suppress_lints {
@@ -563,50 +561,8 @@ fn configure_e_opts(
                 cmd.arg("--emit=metadata");
             }
 
-            if c_opts.shallow {
-                let version = version_for_opt(e_opts.engine(), "--shallow", cx)?;
-
-                let syntax = match version.channel {
-                    Channel::Stable => match () {
-                        () if version.triple >= V!(1, 85, 0) => Syntax::ZeeParseCrateRootOnly,
-                        // FIXME: Find the *actual* lower bound.
-                        () => Syntax::ZeeParseOnly,
-                    },
-                    // FIXME: Unimplemented!
-                    Channel::Beta { prerelease: _ } => Syntax::ZeeParseCrateRootOnly, // FIXME: Actually unimpl'ed!
-                    Channel::Nightly | Channel::Dev => match version.commit {
-                        Some(commit) => match () {
-                            () if commit.date >= D!(2024, 11, 29) => Syntax::ZeeParseCrateRootOnly,
-                            // FIXME: Find the *actual* lower bound.
-                            () => Syntax::ZeeParseOnly,
-                        },
-                        None => match () {
-                            () if version.triple > V!(1, 85, 0) => Syntax::ZeeParseCrateRootOnly,
-                            () if version.triple == V!(1, 85, 0) => {
-                                // FIXME: Improve wording. Actually print the version and print
-                                //        the two candidates!
-                                return Err(error(fmt!(
-                                    "could not determine how to forward option `--shallow` to the underyling `{}`",
-                                    e_opts.engine().name()
-                                ))
-                                .done()
-                                .into());
-                            }
-                            // FIXME: Find the *actual* lower bound.
-                            () => Syntax::ZeeParseOnly,
-                        },
-                    },
-                };
-
-                enum Syntax {
-                    ZeeParseCrateRootOnly,
-                    ZeeParseOnly,
-                }
-
-                cmd.arg(match syntax {
-                    Syntax::ZeeParseCrateRootOnly => "-Zparse-crate-root-only",
-                    Syntax::ZeeParseOnly => "-Zparse-only",
-                });
+            if let Some(shallowness) = c_opts.shallowness {
+                configure_shallowness(cmd, shallowness, e_opts, cx)?;
             }
 
             if let Some(ir) = c_opts.dump {
@@ -664,6 +620,74 @@ fn configure_e_opts(
     }
 
     Ok(())
+}
+
+fn configure_shallowness(
+    cmd: &mut Command<'_>,
+    shallowness: Shallowness,
+    e_opts: &EngineOptions<'_>,
+    cx: Context<'_>,
+) -> Result<()> {
+    match shallowness {
+        Shallowness::ParseOnly => {}
+        Shallowness::CfgFalse => {
+            register_crate_attr(cmd, format_args!("cfg(false)"));
+            return Ok(());
+        }
+    }
+
+    let version = version_for_opt(e_opts.engine(), "--shallow", cx)?;
+
+    let syntax = match version.channel {
+        Channel::Stable => match () {
+            () if version.triple >= V!(1, 85, 0) => Syntax::ZeeParseCrateRootOnly,
+            // FIXME: Find the *actual* lower bound.
+            () => Syntax::ZeeParseOnly,
+        },
+        // FIXME: Unimplemented!
+        Channel::Beta { prerelease: _ } => Syntax::ZeeParseCrateRootOnly, // FIXME: Actually unimpl'ed!
+        Channel::Nightly | Channel::Dev => match version.commit {
+            Some(commit) => match () {
+                () if commit.date >= D!(2024, 11, 29) => Syntax::ZeeParseCrateRootOnly,
+                // FIXME: Find the *actual* lower bound.
+                () => Syntax::ZeeParseOnly,
+            },
+            None => match () {
+                () if version.triple > V!(1, 85, 0) => Syntax::ZeeParseCrateRootOnly,
+                () if version.triple == V!(1, 85, 0) => {
+                    // FIXME: Improve wording. Actually print the version and print
+                    //        the two candidates!
+                    return Err(error(fmt!(
+                                    "could not determine how to forward option `--shallow` to the underyling `{}`",
+                                    e_opts.engine().name()
+                                ))
+                                .done()
+                                .into());
+                }
+                // FIXME: Find the *actual* lower bound.
+                () => Syntax::ZeeParseOnly,
+            },
+        },
+    };
+
+    enum Syntax {
+        ZeeParseCrateRootOnly,
+        ZeeParseOnly,
+    }
+
+    cmd.arg(match syntax {
+        Syntax::ZeeParseCrateRootOnly => "-Zparse-crate-root-only",
+        Syntax::ZeeParseOnly => "-Zparse-only",
+    });
+
+    Ok(())
+}
+
+fn register_crate_attr(cmd: &mut Command<'_>, args: std::fmt::Arguments<'_>) {
+    // NOTE: If <https://github.com/rust-lang/rfcs/pull/3791> gets accepted and implemented,
+    //       we need to start switching on the version and change the lowering.
+    // Indeed, the `=` is required.
+    cmd.arg(format!("-Zcrate-attr={args}"));
 }
 
 fn configure_forced_identity(
@@ -1034,8 +1058,14 @@ mod palette {
 #[derive_const(Default)]
 pub(crate) struct CompileOptions {
     pub(crate) check_only: bool,
-    pub(crate) shallow: bool,
+    pub(crate) shallowness: Option<Shallowness>,
     pub(crate) dump: Option<Ir>,
+}
+
+#[derive(Clone, Copy)]
+pub(crate) enum Shallowness {
+    ParseOnly,
+    CfgFalse,
 }
 
 #[derive(Clone, Copy)]

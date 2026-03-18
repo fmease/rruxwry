@@ -45,7 +45,7 @@ Options:
       --cfg <NAME[="VALUE"]>   Enable a configuration
   -R, --revision <NAME>        Enable a compiletest revision
   -F, --feature <NAME>         Enable an experimental library or language feature
-  -s, --shallow                Halt after parsing the source file
+  -s, --shallow[=<MODE>]       Halt after parsing the source file
   -d, --dump <IR>              Print the given compiler IR
   -x, --extern <NAME>          Register an external library
   -/, --suppress-lints         Cap lints at allow level
