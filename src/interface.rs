@@ -26,22 +26,22 @@ pub(crate) fn arguments() -> Arguments {
         [
             // The path is intentionally optional to enable invocations like `rrc -V`, `rrc -- -h`,
             // `rrc -- -Zhelp`, `rrc -- -Chelp`, etc.
-            clap::Arg::new(id::PATH)
+            clap::Arg::new(id::path)
                 .value_parser(clap::builder::ValueParser::path_buf())
                 .help("Path to the source file"),
-            clap::Arg::new(id::SOURCE)
+            clap::Arg::new(id::source)
                 .short(':')
                 .long("source")
-                .conflicts_with(id::PATH)
+                .conflicts_with(id::path)
                 .help("Provide the source code"),
         ]
     }
     fn verbatim() -> clap::Arg {
-        clap::Arg::new(id::VERBATIM).num_args(..).last(true).value_name("VERBATIM")
+        clap::Arg::new(id::verbatim).num_args(..).last(true).value_name("VERBATIM")
     }
     fn compiletest() -> impl IntoIterator<Item = clap::Arg> {
         [
-            clap::Arg::new(id::DIRECTIVES)
+            clap::Arg::new(id::directives)
                 .short('@')
                 .long("directives")
                 .value_name("FLAVOR")
@@ -50,30 +50,30 @@ pub(crate) fn arguments() -> Arguments {
                 .default_missing_value("vanilla")
                 .value_parser(Flavor::parse_cli_style)
                 .help("Enable compiletest-like directives"),
-            clap::Arg::new(id::COMPILETEST)
+            clap::Arg::new(id::compiletest)
                 .short('T')
                 .long("compiletest")
                 .action(clap::ArgAction::SetTrue)
                 // FIXME: Maybe reject if flavor isn't vanilla (`-@=x`)?
-                .requires(id::DIRECTIVES)
+                .requires(id::directives)
                 .help("Check in a compiletest-esque manner"),
-            clap::Arg::new(id::BLESS)
+            clap::Arg::new(id::bless)
                 .short('.')
                 .long("bless")
-                .requires(id::COMPILETEST)
+                .requires(id::compiletest)
                 .action(clap::ArgAction::SetTrue)
                 .help("Update the test expectations"),
         ]
     }
     fn crate_name_and_type() -> impl IntoIterator<Item = clap::Arg> {
         [
-            clap::Arg::new(id::CRATE_NAME)
+            clap::Arg::new(id::crate_name)
                 .short('n')
                 .long("crate-name")
                 .value_name("NAME")
                 .value_parser(CrateName::parse_cli_style)
                 .help("Set the name of the crate"),
-            clap::Arg::new(id::CRATE_TYPE)
+            clap::Arg::new(id::crate_type)
                 .short('t')
                 .long("crate-type")
                 .value_name("TYPE")
@@ -81,24 +81,24 @@ pub(crate) fn arguments() -> Arguments {
         ]
     }
     fn edition() -> clap::Arg {
-        clap::Arg::new(id::EDITION).short('e').long("edition").help("Set the edition of the crate")
+        clap::Arg::new(id::edition).short('e').long("edition").help("Set the edition of the crate")
     }
     fn cfgs() -> impl IntoIterator<Item = clap::Arg> {
         [
-            clap::Arg::new(id::CFGS)
+            clap::Arg::new(id::cfgs)
                 .long("cfg")
                 // FIXME: This gets rendered as `<NAME[="VALUE"]>` by clap but ideally we'd print `<NAME>[="<VALUE>"]`.
                 .value_name(r#"NAME[="VALUE"]"#)
                 .action(clap::ArgAction::Append)
                 .help("Enable a configuration"),
-            clap::Arg::new(id::REVISION)
+            clap::Arg::new(id::revision)
                 .short('R')
                 .long("revision")
                 .value_name("NAME")
-                .requires(id::DIRECTIVES)
+                .requires(id::directives)
                 .help("Enable a compiletest revision"),
             // FIXME: This doesn't really belong in this "group" (`cfgs`)
-            clap::Arg::new(id::UNSTABLE_FEATURES)
+            clap::Arg::new(id::unstable_features)
                 .short('F')
                 .long("feature")
                 .value_name("NAME")
@@ -109,62 +109,62 @@ pub(crate) fn arguments() -> Arguments {
     }
     fn extra() -> impl IntoIterator<Item = clap::Arg> {
         [
-            clap::Arg::new(id::EXTERN)
+            clap::Arg::new(id::extern_)
                 .short('x')
                 .long("extern")
                 .value_name("NAME")
                 .action(clap::ArgAction::Append)
                 .help("Register an external library"),
-            clap::Arg::new(id::SUPPRESS_LINTS)
+            clap::Arg::new(id::suppress_lints)
                 .short('/')
                 .long("suppress-lints")
                 .action(clap::ArgAction::SetTrue)
                 .help("Cap lints at allow level"),
-            clap::Arg::new(id::INTERNALS)
+            clap::Arg::new(id::internals)
                 .short('#')
                 .long("internals")
                 .action(clap::ArgAction::SetTrue)
                 .help("Enable internal pretty-printing of data types"),
-            clap::Arg::new(id::NEXT_SOLVER)
+            clap::Arg::new(id::next_solver)
                 .short('N')
                 .long("next-solver")
                 .action(clap::ArgAction::SetTrue)
                 .help("Enable the next-gen trait solver"),
-            clap::Arg::new(id::IDENTITY)
+            clap::Arg::new(id::identity)
                 .short('I')
                 .long("identity")
                 .value_name("IDENTITY")
                 .value_parser(Identity::parse_cli_style)
                 .help("Force rust{,do}c's identity"),
             // FIXME: Does this actually work for rustdoc?
-            clap::Arg::new(id::NO_DEDUPE)
+            clap::Arg::new(id::no_dedupe)
                 .short('D')
                 .long("no-dedupe")
                 .action(clap::ArgAction::SetTrue)
                 .help("Don't deduplicate diagnostics"),
-            clap::Arg::new(id::LOG)
+            clap::Arg::new(id::log)
                 .long("log")
                 .value_name("FILTER")
                 .require_equals(true)
                 .num_args(..=1)
                 .default_missing_value("debug")
                 .help("Enable rust{,do}c logging. FILTER defaults to `debug`"),
-            clap::Arg::new(id::NO_BACKTRACE)
+            clap::Arg::new(id::no_backtrace)
                 .short('B')
                 .long("no-backtrace")
                 .action(clap::ArgAction::SetTrue)
                 .help("Override `RUST_BACKTRACE` to be `0`"),
-            clap::Arg::new(id::PRINT_ENGINE_VERSION)
+            clap::Arg::new(id::print_engine_version)
                 .short('V')
                 .long("version")
                 .action(clap::ArgAction::SetTrue)
                 .help("Print the underlying rust{,do}c version and halt"),
-            clap::Arg::new(id::VERBOSE)
+            clap::Arg::new(id::verbose)
                 .short('v')
                 .long("verbose")
                 .action(clap::ArgAction::SetTrue)
                 .help("Use verbose output"),
-            clap::Arg::new(id::COLOR)
+            clap::Arg::new(id::color)
                 .long("color")
                 .value_name("WHEN")
                 .default_value("auto")
@@ -178,7 +178,7 @@ pub(crate) fn arguments() -> Arguments {
         .about(env!("CARGO_PKG_DESCRIPTION"))
         .subcommand_required(true)
         .subcommands([
-            clap::Command::new(id::BUILD)
+            clap::Command::new(id::build)
                 .alias("b")
                 .about("Compile the given crate with rustc")
                 .defer(|command| {
@@ -186,19 +186,19 @@ pub(crate) fn arguments() -> Arguments {
                         .args(source())
                         .arg(verbatim().help("Flags passed to `rustc` verbatim"))
                         .arg(
-                            clap::Arg::new(id::RUN)
+                            clap::Arg::new(id::run)
                                 .short('r')
                                 .long("run")
                                 .action(clap::ArgAction::SetTrue)
-                                .conflicts_with(id::COMPILETEST)
+                                .conflicts_with(id::compiletest)
                                 .help("Also run the built binary"),
                         )
                         .arg(
-                            clap::Arg::new(id::CHECK_ONLY)
+                            clap::Arg::new(id::check_only)
                                 .short('c')
                                 .long("check-only")
                                 .action(clap::ArgAction::SetTrue)
-                                .conflicts_with(id::RUN)
+                                .conflicts_with(id::run)
                                 .help("Don't fully compile, only check the crate"),
                         )
                         .args(compiletest())
@@ -206,7 +206,7 @@ pub(crate) fn arguments() -> Arguments {
                         .arg(edition())
                         .args(cfgs())
                         .arg(
-                            clap::Arg::new(id::SHALLOW)
+                            clap::Arg::new(id::shallow)
                                 .short('s')
                                 .long("shallow")
                                 .value_name("MODE")
@@ -216,10 +216,10 @@ pub(crate) fn arguments() -> Arguments {
                                 .value_parser(Shallowness::parse_cli_style)
                                 // FIXME: W/ the intro of `-s=cfg-false` not quite accurate anymore
                                 .help("Halt after parsing the source file")
-                                .conflicts_with(id::RUN),
+                                .conflicts_with(id::run),
                         )
                         .arg(
-                            clap::Arg::new(id::DUMP)
+                            clap::Arg::new(id::dump)
                                 .short('d')
                                 .long("dump")
                                 .value_name("IR")
@@ -228,7 +228,7 @@ pub(crate) fn arguments() -> Arguments {
                         )
                         .args(extra())
                 }),
-            clap::Command::new(id::DOC)
+            clap::Command::new(id::doc)
                 .alias("d")
                 .about("Document the given crate with rustdoc")
                 .defer(|command| {
@@ -236,33 +236,33 @@ pub(crate) fn arguments() -> Arguments {
                         .args(source())
                         .arg(verbatim().help("Flags passed to `rustc` and `rustdoc` verbatim"))
                         .arg(
-                            clap::Arg::new(id::OPEN)
+                            clap::Arg::new(id::open)
                                 .short('o')
                                 .long("open")
                                 .action(clap::ArgAction::SetTrue)
-                                .conflicts_with(id::COMPILETEST)
+                                .conflicts_with(id::compiletest)
                                 .help("Also open the generated docs in a browser"),
                         )
                         .arg(
-                            clap::Arg::new(id::JSON)
+                            clap::Arg::new(id::json)
                                 .short('j')
                                 .long("json")
-                                .conflicts_with(id::OPEN)
+                                .conflicts_with(id::open)
                                 .action(clap::ArgAction::SetTrue)
                                 .help("Output JSON instead of HTML"),
                         )
                         .args(compiletest())
                         .arg(
-                            clap::Arg::new(id::CROSS_CRATE)
+                            clap::Arg::new(id::cross_crate)
                                 .short('X')
                                 .long("cross-crate")
                                 .action(clap::ArgAction::SetTrue)
-                                .conflicts_with(id::DIRECTIVES)
+                                .conflicts_with(id::directives)
                                 .help("Enable the cross-crate re-export mode"),
                         )
                         .args(crate_name_and_type())
                         .arg(
-                            clap::Arg::new(id::CRATE_VERSION)
+                            clap::Arg::new(id::crate_version)
                                 .long("crate-version")
                                 .value_name("VERSION")
                                 .help("Set the version of the (base) crate"),
@@ -270,30 +270,30 @@ pub(crate) fn arguments() -> Arguments {
                         .arg(edition())
                         .args(cfgs())
                         .args([
-                            clap::Arg::new(id::PRIVATE)
+                            clap::Arg::new(id::private)
                                 .short('P')
                                 .long("private")
                                 .action(clap::ArgAction::SetTrue)
                                 .help("Document private items"),
-                            clap::Arg::new(id::HIDDEN)
+                            clap::Arg::new(id::hidden)
                                 .short('H')
                                 .long("hidden")
                                 .action(clap::ArgAction::SetTrue)
                                 .help("Document hidden items"),
-                            clap::Arg::new(id::LAYOUT)
+                            clap::Arg::new(id::layout)
                                 .long("layout")
                                 .action(clap::ArgAction::SetTrue)
                                 .help("Document the memory layout of types"),
-                            clap::Arg::new(id::LINK_TO_DEF)
+                            clap::Arg::new(id::link_to_def)
                                 .long("link-to-def")
                                 .alias("ltd")
                                 .action(clap::ArgAction::SetTrue)
                                 .help("Generate links to definitions"),
-                            clap::Arg::new(id::NORMALIZE)
+                            clap::Arg::new(id::normalize)
                                 .long("normalize")
                                 .action(clap::ArgAction::SetTrue)
                                 .help("Normalize types"),
-                            clap::Arg::new(id::THEME)
+                            clap::Arg::new(id::theme)
                                 .long("theme")
                                 .default_value("ayu")
                                 .help("Set the theme"),
@@ -306,13 +306,13 @@ pub(crate) fn arguments() -> Arguments {
     // unwrap: handled by `clap`.
     let (operation, mut matches) = matches.remove_subcommand().unwrap();
 
-    let directives = matches.remove_one::<Flavor>(id::DIRECTIVES).map(|flavor| {
+    let directives = matches.remove_one::<Flavor>(id::directives).map(|flavor| {
         crate::operate::DirectiveOptions {
             flavor,
-            revision: matches.remove_one(id::REVISION),
-            test: match matches.remove_one(id::COMPILETEST).unwrap_or_default() {
+            revision: matches.remove_one(id::revision),
+            test: match matches.remove_one(id::compiletest).unwrap_or_default() {
                 false => Test::No,
-                true => Test::Yes(match matches.remove_one(id::BLESS).unwrap_or_default() {
+                true => Test::Yes(match matches.remove_one(id::bless).unwrap_or_default() {
                     false => Bless::No,
                     true => Bless::Yes,
                 }),
@@ -321,11 +321,11 @@ pub(crate) fn arguments() -> Arguments {
     });
 
     let print_engine_version: bool =
-        matches.remove_one(id::PRINT_ENGINE_VERSION).unwrap_or_default();
+        matches.remove_one(id::print_engine_version).unwrap_or_default();
 
     let operation = match (operation.as_str(), print_engine_version) {
-        (id::BUILD, false) => Operation::Compile {
-            run: match matches.remove_one::<bool>(id::RUN).unwrap_or_default() {
+        (id::build, false) => Operation::Compile {
+            run: match matches.remove_one::<bool>(id::run).unwrap_or_default() {
                 true => Run::Yes,
                 false => Run::No,
             },
@@ -334,40 +334,40 @@ pub(crate) fn arguments() -> Arguments {
                 None => CompileMode::Default,
             },
             options: CompileOptions {
-                check_only: matches.remove_one(id::CHECK_ONLY).unwrap_or_default(),
-                shallowness: matches.remove_one(id::SHALLOW),
-                dump: matches.remove_one(id::DUMP),
+                check_only: matches.remove_one(id::check_only).unwrap_or_default(),
+                shallowness: matches.remove_one(id::shallow),
+                dump: matches.remove_one(id::dump),
             },
         },
-        (id::BUILD, true) => Operation::QueryRustcVersion,
-        (id::DOC, false) => Operation::Document {
-            open: match matches.remove_one::<bool>(id::OPEN).unwrap_or_default() {
+        (id::build, true) => Operation::QueryRustcVersion,
+        (id::doc, false) => Operation::Document {
+            open: match matches.remove_one::<bool>(id::open).unwrap_or_default() {
                 true => Open::Yes,
                 false => Open::No,
             },
-            mode: match (matches.remove_one(id::CROSS_CRATE).unwrap_or_default(), directives) {
+            mode: match (matches.remove_one(id::cross_crate).unwrap_or_default(), directives) {
                 (true, None) => DocMode::CrossCrate,
                 (false, Some(dir_opts)) => DocMode::DirectiveDriven(dir_opts),
                 (false, None) => DocMode::Default,
                 (true, Some(_)) => unreachable!(), // Already caught by `clap`.
             },
             options: DocOptions {
-                backend: if matches.remove_one(id::JSON).unwrap_or_default() {
+                backend: if matches.remove_one(id::json).unwrap_or_default() {
                     DocBackend::Json
                 } else {
                     DocBackend::Html
                 },
-                crate_version: matches.remove_one(id::CRATE_VERSION),
-                private: matches.remove_one(id::PRIVATE).unwrap_or_default(),
-                hidden: matches.remove_one(id::HIDDEN).unwrap_or_default(),
-                layout: matches.remove_one(id::LAYOUT).unwrap_or_default(),
-                link_to_def: matches.remove_one(id::LINK_TO_DEF).unwrap_or_default(),
-                normalize: matches.remove_one(id::NORMALIZE).unwrap_or_default(),
-                theme: matches.remove_one(id::THEME).unwrap(),
+                crate_version: matches.remove_one(id::crate_version),
+                private: matches.remove_one(id::private).unwrap_or_default(),
+                hidden: matches.remove_one(id::hidden).unwrap_or_default(),
+                layout: matches.remove_one(id::layout).unwrap_or_default(),
+                link_to_def: matches.remove_one(id::link_to_def).unwrap_or_default(),
+                normalize: matches.remove_one(id::normalize).unwrap_or_default(),
+                theme: matches.remove_one(id::theme).unwrap(),
                 v_opts: default(),
             },
         },
-        (id::DOC, true) => Operation::QueryRustdocVersion,
+        (id::doc, true) => Operation::QueryRustdocVersion,
         _ => unreachable!(), // handled by `clap`,
     };
 
@@ -376,44 +376,44 @@ pub(crate) fn arguments() -> Arguments {
     //        deserializing from borrowed program arguments and providing &strs.
     //        Fix: Throw out clap and do it manually.
 
-    let source = matches.remove_one(id::SOURCE).map(Source::String);
+    let source = matches.remove_one(id::source).map(Source::String);
     let path = matches
-        .remove_one::<PathBuf>(id::PATH)
+        .remove_one::<PathBuf>(id::path)
         .map(|path| if &path == "-" { SourcePathBuf::Stdin } else { SourcePathBuf::Regular(path) });
     let source = source.xor(path.map(Source::Path));
 
     Arguments {
         toolchain,
         source,
-        verbatim: matches.remove_many(id::VERBATIM).map(Iterator::collect).unwrap_or_default(),
+        verbatim: matches.remove_many(id::verbatim).map(Iterator::collect).unwrap_or_default(),
         operation,
-        crate_name: matches.remove_one(id::CRATE_NAME),
+        crate_name: matches.remove_one(id::crate_name),
         crate_type: matches
-            .remove_one(id::CRATE_TYPE)
+            .remove_one(id::crate_type)
             .map(|typ: String| CrateType::parse_cli_style(typ.leak())),
         edition: matches
-            .remove_one(id::EDITION)
+            .remove_one(id::edition)
             .map(|edition: String| ExtEdition::parse_cli_style(edition.leak())),
         b_opts: BuildOptions {
-            cfgs: matches.remove_many(id::CFGS).map(Iterator::collect).unwrap_or_default(),
+            cfgs: matches.remove_many(id::cfgs).map(Iterator::collect).unwrap_or_default(),
             unstable_features: matches
-                .remove_many(id::UNSTABLE_FEATURES)
+                .remove_many(id::unstable_features)
                 .map(Iterator::collect)
                 .unwrap_or_default(),
             extern_crates: matches
-                .remove_many(id::EXTERN)
+                .remove_many(id::extern_)
                 .map(Iterator::collect)
                 .unwrap_or_default(),
-            suppress_lints: matches.remove_one(id::SUPPRESS_LINTS).unwrap_or_default(),
-            internals: matches.remove_one(id::INTERNALS).unwrap_or_default(),
-            next_solver: matches.remove_one(id::NEXT_SOLVER).unwrap_or_default(),
-            identity: matches.remove_one(id::IDENTITY),
-            no_dedupe: matches.remove_one(id::NO_DEDUPE).unwrap_or_default(),
-            log: matches.remove_one(id::LOG),
-            no_backtrace: matches.remove_one(id::NO_BACKTRACE).unwrap_or_default(),
+            suppress_lints: matches.remove_one(id::suppress_lints).unwrap_or_default(),
+            internals: matches.remove_one(id::internals).unwrap_or_default(),
+            next_solver: matches.remove_one(id::next_solver).unwrap_or_default(),
+            identity: matches.remove_one(id::identity),
+            no_dedupe: matches.remove_one(id::no_dedupe).unwrap_or_default(),
+            log: matches.remove_one(id::log),
+            no_backtrace: matches.remove_one(id::no_backtrace).unwrap_or_default(),
         },
-        dbg_opts: DebugOptions { verbose: matches.remove_one(id::VERBOSE).unwrap() },
-        color: matches.remove_one(id::COLOR).unwrap(),
+        dbg_opts: DebugOptions { verbose: matches.remove_one(id::verbose).unwrap() },
+        color: matches.remove_one(id::color).unwrap(),
     }
 }
 
@@ -624,44 +624,20 @@ fn possible_values(values: impl Iterator<Item: std::fmt::Display> + Clone) -> St
     )
 }
 
-mod id {
-    pub(super) const BLESS: &str = "BLESS";
-    pub(super) const BUILD: &str = "build";
-    pub(super) const CFGS: &str = "CFGS";
-    pub(super) const CHECK_ONLY: &str = "CHECK_ONLY";
-    pub(super) const COLOR: &str = "COLOR";
-    pub(super) const COMPILETEST: &str = "COMPILETEST";
-    pub(super) const CRATE_NAME: &str = "CRATE_NAME";
-    pub(super) const CRATE_TYPE: &str = "CRATE_TYPE";
-    pub(super) const CRATE_VERSION: &str = "CRATE_VERSION";
-    pub(super) const CROSS_CRATE: &str = "CROSS_CRATE";
-    pub(super) const DIRECTIVES: &str = "DIRECTIVES";
-    pub(super) const DOC: &str = "doc";
-    pub(super) const DUMP: &str = "DUMP";
-    pub(super) const EDITION: &str = "EDITION";
-    pub(super) const EXTERN: &str = "EXTERN";
-    pub(super) const HIDDEN: &str = "HIDDEN";
-    pub(super) const IDENTITY: &str = "IDENTITY";
-    pub(super) const INTERNALS: &str = "INTERNALS";
-    pub(super) const JSON: &str = "JSON";
-    pub(super) const LAYOUT: &str = "LAYOUT";
-    pub(super) const LINK_TO_DEF: &str = "LINK_TO_DEF";
-    pub(super) const LOG: &str = "LOG";
-    pub(super) const NEXT_SOLVER: &str = "NEXT_SOLVER";
-    pub(super) const NORMALIZE: &str = "NORMALIZE";
-    pub(super) const NO_BACKTRACE: &str = "NO_BACKTRACE";
-    pub(super) const NO_DEDUPE: &str = "NO_DEDUPE";
-    pub(super) const OPEN: &str = "OPEN";
-    pub(super) const PATH: &str = "PATH";
-    pub(super) const PRINT_ENGINE_VERSION: &str = "PRINT_ENGINE_VERSION";
-    pub(super) const PRIVATE: &str = "PRIVATE";
-    pub(super) const REVISION: &str = "REVISION";
-    pub(super) const RUN: &str = "RUN";
-    pub(super) const SHALLOW: &str = "SHALLOW";
-    pub(super) const SOURCE: &str = "SOURCE";
-    pub(super) const SUPPRESS_LINTS: &str = "SUPPRESS_LINTS";
-    pub(super) const THEME: &str = "THEME";
-    pub(super) const UNSTABLE_FEATURES: &str = "UNSTABLE_FEATURES";
-    pub(super) const VERBATIM: &str = "VERBATIM";
-    pub(super) const VERBOSE: &str = "VERBOSE";
+macro_rules! ids {
+    ($($id:ident),+ $(,)?) => {
+        #[expect(non_upper_case_globals)]
+        mod id {
+            $( pub(super) const $id: &str = stringify!($id); )+
+        }
+    };
+}
+
+#[rustfmt::skip]
+ids! {
+    bless, build, cfgs, check_only, color, compiletest, crate_name, crate_type, crate_version,
+    cross_crate, directives, doc, dump, edition, extern_, hidden, identity, internals,
+    json, layout, link_to_def, log, next_solver, normalize, no_backtrace, no_dedupe, open,
+    path, print_engine_version, private, revision, run, shallow, source, suppress_lints, theme,
+    unstable_features, verbatim, verbose,
 }
