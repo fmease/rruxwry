@@ -10,14 +10,14 @@
 use crate::{
     build::{
         self, CompileOptions, DocOptions, Engine, EngineOptions, ImplyUnstableOptions, Options,
-        QueryEngineVersionError, VerbatimOptions,
+        VerbatimOptions,
     },
     context::Context,
     data::{Crate, CrateName, CrateType, DocBackend, Edition, ExtEdition},
     diagnostic::{error, fmt, warn},
     directive,
     error::Result,
-    source::{SourcePath, Spanned},
+    source::{SourcePath, SourcePathBuf, Spanned},
     utility::{OsStrExt as _, default, paint::Painter},
 };
 use anstyle::AnsiColor;
@@ -25,68 +25,77 @@ use std::{
     ascii::Char,
     cell::LazyCell,
     io::{self, Write as _},
+    mem,
     path::{Path, PathBuf},
 };
-
-// FIXME: `-@V` may fail to report fake identities as set via `//@ rustc-env: RUST_BOOTSTRAP=…`.
-//        Should we consider that a bug or "out of scope"? We could theoretically gather directives
-//        under `-@V` to obtain this piece of information.
 
 pub(crate) fn perform(
     op: Operation,
     krate: Crate<'_, ExtEdition<'_>>,
-    opts: Options<'_>,
+    mut opts: Options<'_>,
+    deps: Vec<SourcePathBuf>,
     cx: Context<'_>,
 ) -> Result<()> {
-    let paint_err = |error: QueryEngineVersionError, p: &mut Painter<_>| {
-        p.with(AnsiColor::Red, |p| write!(p, "[{}]", error.short_desc()))
-    };
+    let mut reads_from_stdin = false;
+
+    // FIXME: We currently also reject `printf '…' | rrc -: '…' -x-` since we 'desugar'
+    //        `-:` to SourcePath::Stdin despite being totally reasonable: We clearly
+    //        have to distinct sources, STDIN and the one provided inline.
+    for path in deps.iter().map(SourcePathBuf::as_ref).chain(krate.path) {
+        if let SourcePath::Stdin = path
+            && mem::replace(&mut reads_from_stdin, true)
+        {
+            let error =
+                error(fmt!("cannot provide the source code of multiple crates via STDIN")).done();
+            return Err(error.into());
+        }
+    }
+
+    compile_dependencies(deps, &mut opts.b_opts.extern_crates, cx)?;
 
     match op {
         Operation::Compile { mode, run, options: c_opts } => {
             compile(mode, run, krate, opts, c_opts, cx)
         }
-        Operation::QueryRustcVersion => {
-            // Don't create a fresh painter that's expensive! Use the one from the Context!
-            let stdout = io::stdout().lock();
-            let colorize = anstream::AutoStream::choice(&stdout) != anstream::ColorChoice::Never;
-            let mut p = Painter::new(io::BufWriter::new(stdout), colorize);
-
-            write!(p, "rustc: ")?;
-            match Engine::Rustc.version(cx) {
-                Ok(version) => version.paint(build::probe_identity(&opts), &mut p),
-                Err(error) => paint_err(error, &mut p),
-            }?;
-
-            writeln!(p)?;
-            Ok(())
-        }
+        Operation::QueryRustcVersion => render_engine_versions(&[Engine::Rustc], &opts, cx),
         Operation::Document { mode, open, options: d_opts } => {
             document(mode, open, krate, opts, d_opts, cx)
         }
         Operation::QueryRustdocVersion => {
-            // Don't create a fresh painter that's expensive! Use the one from the Context!
-            let stdout = io::stdout().lock();
-            let colorize = anstream::AutoStream::choice(&stdout) != anstream::ColorChoice::Never;
-            let mut p = Painter::new(io::BufWriter::new(stdout), colorize);
-
-            write!(p, "rustdoc: ")?;
-            match Engine::Rustdoc.version(cx) {
-                Ok(version) => version.paint(build::probe_identity(&opts), &mut p),
-                Err(error) => paint_err(error, &mut p),
-            }?;
-
-            writeln!(p)?;
-            write!(p, "  rustc: ")?;
-            match Engine::Rustc.version(cx) {
-                Ok(version) => version.paint(build::probe_identity(&opts), &mut p),
-                Err(error) => paint_err(error, &mut p),
-            }?;
-
-            writeln!(p)?;
-            Ok(())
+            render_engine_versions(&[Engine::Rustdoc, Engine::Rustc], &opts, cx)
         }
     }
+}
+
+fn compile_dependencies(
+    deps: Vec<SourcePathBuf>,
+    registry: &mut Vec<String>,
+    cx: Context<'_>,
+) -> Result {
+    // This is really primitive. In the future we could introduce `-G, --build-graph <GRAPH>`
+    // where the build graph is described via a super concise DSL as originally described in
+    // <https://github.com/fmease/rruxwry/issues/3#issuecomment-2619062193>.
+    //
+    // FIXME: Extend the CLI to support passing arbitrary rrx arguments for individual extern crates.
+
+    registry.reserve(deps.len());
+    for path in deps {
+        let krate = Crate {
+            path: Some(path.as_ref()),
+            name: None,
+            typ: Some(CrateType::LIB),
+            edition: None,
+        };
+        // FIXME: `build_directive_driven` under `-@`! Don't forget to set Role to Auxiliary!
+        //        I guess we want to fwd the active revision (that's what we do for normal
+        //        auxiliaries IIRC)?
+        build_default(&EngineOptions::Rustc(default()), krate, default(), cx)?;
+        // FIXME: unwrap
+        let name = CrateName::parse_source_file_relaxed(path.as_ref()).unwrap();
+        registry.push(name.into_inner());
+    }
+
+    Ok(())
 }
 
 fn compile<'a>(
@@ -524,6 +533,29 @@ fn populate_extern_prelude(typ: Option<CrateType>, extern_crates: &mut Vec<Strin
         Some(CrateType::PROC_MACRO) => extern_crates.push("proc_macro".to_string()),
         _ => {}
     }
+}
+
+fn render_engine_versions(engines: &[Engine], opts: &Options<'_>, cx: Context<'_>) -> Result {
+    // FIXME: `-@V` may fail to report fake identities as set via `//@ rustc-env: RUST_BOOTSTRAP=…`.
+    //        Should we consider that a bug or "out of scope"? We could theoretically gather
+    //        directives under `-@V` to obtain this piece of information.
+
+    // FIXME: Don't create a fresh painter that's expensive!
+    //        Use the one from the Context once it has one!
+    let mut p = Painter::new(io::stdout().lock(), io::BufWriter::new);
+
+    let padding = engines.iter().map(|engine| engine.name().len()).max().unwrap_or_default();
+
+    for &engine in engines {
+        write!(p, "{:>padding$}: ", engine.name())?;
+        match engine.version(cx) {
+            Ok(version) => version.paint(build::probe_identity(opts), &mut p),
+            Err(error) => p.with(AnsiColor::Red, |p| write!(p, "[{}]", error.short_desc())),
+        }?;
+        writeln!(p)?;
+    }
+
+    Ok(())
 }
 
 pub(crate) enum Operation {

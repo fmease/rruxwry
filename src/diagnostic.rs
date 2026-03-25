@@ -3,7 +3,6 @@ use crate::{
     source::{LocalSpan, SourcePath, Span},
     utility,
 };
-use anstream::ColorChoice;
 use anstyle::{AnsiColor, Effects};
 use std::io::{self, Write as _};
 use unicode_segmentation::UnicodeSegmentation as _;
@@ -48,9 +47,8 @@ impl Diagnostic {
     //  NOTE: if we do that change, don't keep the lock the entire time!
     //        we want rustc to print to stderr too!
     fn new(severity: Severity, message: impl Paint) -> Self {
-        let stderr = io::stderr().lock();
-        let colorize = anstream::AutoStream::choice(&stderr) != ColorChoice::Never;
-        let mut p = Painter::new(io::BufWriter::new(stderr), colorize);
+        let mut p = Painter::new(io::stderr().lock(), io::BufWriter::new);
+
         (|| {
             p.set(Effects::BOLD)?;
             p.with(severity.color().on_default().invert(), fmt!("{}", severity.name()))?;

@@ -965,7 +965,7 @@ pub(crate) enum Engine {
 }
 
 impl Engine {
-    const fn name(self) -> &'static str {
+    pub(crate) const fn name(self) -> &'static str {
         match self {
             Self::Rustc => "rustc",
             Self::Rustdoc => "rustdoc",
@@ -1096,7 +1096,7 @@ pub(crate) struct DocOptions<'a> {
     pub(crate) v_opts: VerbatimOptions<'a, ()>,
 }
 
-#[derive(Clone)] // FIXME: This is awful!
+#[derive(Clone, Default)] // FIXME: `Clone` is awful!
 #[allow(clippy::struct_excessive_bools)] // not worth to address
 pub(crate) struct BuildOptions {
     pub(crate) cfgs: Vec<String>,
@@ -1116,7 +1116,7 @@ pub(crate) struct DebugOptions {
     pub(crate) verbose: bool,
 }
 
-#[derive(Clone)] // FIXME: This if awful!
+#[derive(Clone, Default)] // FIXME: `Clone` is awful!
 pub(crate) struct Options<'a> {
     pub(crate) b_opts: BuildOptions,
     pub(crate) v_opts: VerbatimOptions<'a>,

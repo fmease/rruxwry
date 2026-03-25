@@ -1,7 +1,12 @@
-use super::default;
+use crate::utility::default;
+use anstream::{AutoStream, ColorChoice, stream::RawStream};
 use anstyle::{AnsiColor, Effects, Style};
 use smallvec::SmallVec;
 use std::io;
+
+fn colorize(stream: &impl RawStream) -> bool {
+    AutoStream::choice(stream) != ColorChoice::Never
+}
 
 pub(crate) struct Painter<W: io::Write> {
     writer: W,
@@ -10,8 +15,9 @@ pub(crate) struct Painter<W: io::Write> {
 }
 
 impl<W: io::Write> Painter<W> {
-    pub(crate) fn new(writer: W, colorize: bool) -> Self {
-        Self { writer, colorize, stack: default() }
+    pub(crate) fn new<S: RawStream>(stream: S, construct: impl FnOnce(S) -> W) -> Self {
+        let colorize = colorize(&stream);
+        Self { writer: construct(stream), colorize, stack: default() }
     }
 }
 

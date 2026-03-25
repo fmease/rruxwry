@@ -93,7 +93,7 @@ fn try_main() -> error::Result {
         },
     };
 
-    operate::perform(args.operation, krate, opts, cx)
+    operate::perform(args.operation, krate, opts, args.dependencies, cx)
 }
 
 fn set_panic_hook() {

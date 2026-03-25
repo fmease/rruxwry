@@ -34,6 +34,7 @@ Arguments:
 
 Options:
   -:, --source <SOURCE>        Provide the source code
+  -x, --extern <PATH>          Add the source file path to an extern crate
   -r, --run                    Also run the built binary
   -c, --check-only             Don't fully compile, only check the crate
   -@, --directives[=<FLAVOR>]  Enable compiletest-like directives
@@ -47,7 +48,6 @@ Options:
   -F, --feature <NAME>         Enable an experimental library or language feature
   -s, --shallow[=<MODE>]       Halt after parsing the source file
   -d, --dump <IR>              Print the given compiler IR
-  -x, --extern <NAME>          Register an external library
   -/, --suppress-lints         Cap lints at allow level
   -#, --internals              Enable internal pretty-printing of data types
   -N, --next-solver            Enable the next-gen trait solver
@@ -75,6 +75,7 @@ Arguments:
 
 Options:
   -:, --source <SOURCE>          Provide the source code
+  -x, --extern <PATH>            Add the source file path to an extern crate
   -o, --open                     Also open the generated docs in a browser
   -j, --json                     Output JSON instead of HTML
   -@, --directives[=<FLAVOR>]    Enable compiletest-like directives
@@ -94,7 +95,6 @@ Options:
       --link-to-def              Generate links to definitions
       --normalize                Normalize types
       --theme <THEME>            Set the theme [default: ayu]
-  -x, --extern <NAME>            Register an external library
   -/, --suppress-lints           Cap lints at allow level
   -#, --internals                Enable internal pretty-printing of data types
   -N, --next-solver              Enable the next-gen trait solver

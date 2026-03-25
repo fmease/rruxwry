@@ -10,7 +10,7 @@ use crate::{
     source::SourcePathBuf,
     utility::{Conjunction, ListingExt as _, default, parse},
 };
-use std::{ffi::OsString, path::PathBuf};
+use std::ffi::OsString;
 
 // Similar to `-h`, `-V` is compatible with all other flags and renders required arguments optional.
 // While there could be a world where `-V` is incompatible with flags like `-r` (run) or `-o` (open)
@@ -26,14 +26,23 @@ pub(crate) fn arguments() -> Arguments {
         [
             // The path is intentionally optional to enable invocations like `rrc -V`, `rrc -- -h`,
             // `rrc -- -Zhelp`, `rrc -- -Chelp`, etc.
-            clap::Arg::new(id::path)
+            clap::Arg::new(id::PATH)
                 .value_parser(clap::builder::ValueParser::path_buf())
                 .help("Path to the source file"),
-            clap::Arg::new(id::source)
+            clap::Arg::new(id::SOURCE)
                 .short(':')
                 .long("source")
-                .conflicts_with(id::path)
+                .conflicts_with(id::PATH)
                 .help("Provide the source code"),
+            clap::Arg::new(id::extern_)
+                .short('x')
+                .long("extern")
+                .value_name("PATH")
+                .value_parser(clap::builder::ValueParser::path_buf())
+                .action(clap::ArgAction::Append)
+                // FIXME: Temporary limitation of the operation module.
+                .conflicts_with(id::directives)
+                .help("Add the source file path to an extern crate"),
         ]
     }
     fn verbatim() -> clap::Arg {
@@ -81,7 +90,7 @@ pub(crate) fn arguments() -> Arguments {
         ]
     }
     fn edition() -> clap::Arg {
-        clap::Arg::new(id::edition).short('e').long("edition").help("Set the edition of the crate")
+        clap::Arg::new(id::EDITION).short('e').long("edition").help("Set the edition of the crate")
     }
     fn cfgs() -> impl IntoIterator<Item = clap::Arg> {
         [
@@ -109,12 +118,6 @@ pub(crate) fn arguments() -> Arguments {
     }
     fn extra() -> impl IntoIterator<Item = clap::Arg> {
         [
-            clap::Arg::new(id::extern_)
-                .short('x')
-                .long("extern")
-                .value_name("NAME")
-                .action(clap::ArgAction::Append)
-                .help("Register an external library"),
             clap::Arg::new(id::suppress_lints)
                 .short('/')
                 .long("suppress-lints")
@@ -293,7 +296,7 @@ pub(crate) fn arguments() -> Arguments {
                                 .long("normalize")
                                 .action(clap::ArgAction::SetTrue)
                                 .help("Normalize types"),
-                            clap::Arg::new(id::theme)
+                            clap::Arg::new(id::THEME)
                                 .long("theme")
                                 .default_value("ayu")
                                 .help("Set the theme"),
@@ -363,7 +366,7 @@ pub(crate) fn arguments() -> Arguments {
                 layout: matches.remove_one(id::layout).unwrap_or_default(),
                 link_to_def: matches.remove_one(id::link_to_def).unwrap_or_default(),
                 normalize: matches.remove_one(id::normalize).unwrap_or_default(),
-                theme: matches.remove_one(id::theme).unwrap(),
+                theme: matches.remove_one(id::THEME).unwrap(),
                 v_opts: default(),
             },
         },
@@ -376,15 +379,17 @@ pub(crate) fn arguments() -> Arguments {
     //        deserializing from borrowed program arguments and providing &strs.
     //        Fix: Throw out clap and do it manually.
 
-    let source = matches.remove_one(id::source).map(Source::String);
-    let path = matches
-        .remove_one::<PathBuf>(id::path)
-        .map(|path| if &path == "-" { SourcePathBuf::Stdin } else { SourcePathBuf::Regular(path) });
+    let source = matches.remove_one(id::SOURCE).map(Source::String);
+    let path = matches.remove_one(id::PATH).map(SourcePathBuf::new);
     let source = source.xor(path.map(Source::Path));
 
     Arguments {
         toolchain,
         source,
+        dependencies: matches
+            .remove_many(id::extern_)
+            .map(|paths| paths.into_iter().map(SourcePathBuf::new).collect())
+            .unwrap_or_default(),
         verbatim: matches.remove_many(id::verbatim).map(Iterator::collect).unwrap_or_default(),
         operation,
         crate_name: matches.remove_one(id::crate_name),
@@ -392,7 +397,7 @@ pub(crate) fn arguments() -> Arguments {
             .remove_one(id::crate_type)
             .map(|typ: String| CrateType::parse_cli_style(typ.leak())),
         edition: matches
-            .remove_one(id::edition)
+            .remove_one(id::EDITION)
             .map(|edition: String| ExtEdition::parse_cli_style(edition.leak())),
         b_opts: BuildOptions {
             cfgs: matches.remove_many(id::cfgs).map(Iterator::collect).unwrap_or_default(),
@@ -400,10 +405,7 @@ pub(crate) fn arguments() -> Arguments {
                 .remove_many(id::unstable_features)
                 .map(Iterator::collect)
                 .unwrap_or_default(),
-            extern_crates: matches
-                .remove_many(id::extern_)
-                .map(Iterator::collect)
-                .unwrap_or_default(),
+            extern_crates: default(),
             suppress_lints: matches.remove_one(id::suppress_lints).unwrap_or_default(),
             internals: matches.remove_one(id::internals).unwrap_or_default(),
             next_solver: matches.remove_one(id::next_solver).unwrap_or_default(),
@@ -447,6 +449,7 @@ fn toolchain(mut args: std::env::ArgsOs) -> (Option<PlusPrefixedToolchain>, Vec<
 pub(crate) struct Arguments {
     pub(crate) toolchain: Option<PlusPrefixedToolchain>,
     pub(crate) source: Option<Source>,
+    pub(crate) dependencies: Vec<SourcePathBuf>,
     pub(crate) verbatim: Vec<String>,
     pub(crate) operation: Operation,
     pub(crate) crate_name: Option<CrateName<String>>,
@@ -626,7 +629,7 @@ fn possible_values(values: impl Iterator<Item: std::fmt::Display> + Clone) -> St
 
 macro_rules! ids {
     ($($id:ident),+ $(,)?) => {
-        #[expect(non_upper_case_globals)]
+        #[allow(non_upper_case_globals)]
         mod id {
             $( pub(super) const $id: &str = stringify!($id); )+
         }
@@ -636,8 +639,8 @@ macro_rules! ids {
 #[rustfmt::skip]
 ids! {
     bless, build, cfgs, check_only, color, compiletest, crate_name, crate_type, crate_version,
-    cross_crate, directives, doc, dump, edition, extern_, hidden, identity, internals,
+    cross_crate, directives, doc, dump, EDITION, extern_, hidden, identity, internals,
     json, layout, link_to_def, log, next_solver, normalize, no_backtrace, no_dedupe, open,
-    path, print_engine_version, private, revision, run, shallow, source, suppress_lints, theme,
+    PATH, print_engine_version, private, revision, run, shallow, SOURCE, suppress_lints, THEME,
     unstable_features, verbatim, verbose,
 }

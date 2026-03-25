@@ -114,6 +114,12 @@ pub(crate) enum SourcePathBuf {
 }
 
 impl SourcePathBuf {
+    pub(crate) fn new(path: PathBuf) -> Self {
+        if &path == "-" { Self::Stdin } else { Self::Regular(path) }
+    }
+}
+
+impl SourcePathBuf {
     pub(crate) fn as_ref(&self) -> SourcePath<'_> {
         match self {
             Self::Regular(path) => SourcePath::Regular(&path),
