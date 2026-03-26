@@ -1,7 +1,7 @@
 //! The command-line interface.
 
 use crate::{
-    build::{BuildOptions, CompileOptions, DebugOptions, DocOptions, Ir, Shallowness},
+    build::{BuildOptions, CompileOptions, DebugOptions, DocOptions, Engine, Ir, Shallowness},
     data::{
         CrateName, CrateType, DocBackend, Edition, ExtEdition, Identity, PlusPrefixedToolchain,
     },
@@ -342,7 +342,6 @@ pub(crate) fn arguments() -> Arguments {
                 dump: matches.remove_one(id::dump),
             },
         },
-        (id::build, true) => Operation::QueryRustcVersion,
         (id::doc, false) => Operation::Document {
             open: match matches.remove_one::<bool>(id::open).unwrap_or_default() {
                 true => Open::Yes,
@@ -370,7 +369,8 @@ pub(crate) fn arguments() -> Arguments {
                 v_opts: default(),
             },
         },
-        (id::doc, true) => Operation::QueryRustdocVersion,
+        (id::build, true) => Operation::QueryEngineVersion(Engine::Rustc),
+        (id::doc, true) => Operation::QueryEngineVersion(Engine::Rustdoc),
         _ => unreachable!(), // handled by `clap`,
     };
 

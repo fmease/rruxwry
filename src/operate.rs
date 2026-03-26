@@ -2,11 +2,6 @@
 //!
 //! The low-level build routines are defined in [`crate::build`].
 
-// FIXME: Add explainer about why we use `--print=crate-name` over `-o` (crate type nuisance; rustdoc no likey).
-
-// FIXME: Create test for `//@ compile-flags: --extern name` + aux-build
-// FIXME: Create test for `//@ compile-flags: --test`.
-
 use crate::{
     build::{
         self, CompileOptions, DocOptions, Engine, EngineOptions, ImplyUnstableOptions, Options,
@@ -51,27 +46,24 @@ pub(crate) fn perform(
         }
     }
 
-    compile_dependencies(deps, &mut opts.b_opts.extern_crates, cx)?;
+    if let Operation::QueryEngineVersion(engine) = op {
+        return render_engine_version(engine, &opts, cx);
+    }
+
+    compile_deps(deps, &mut opts.b_opts.extern_crates, cx)?;
 
     match op {
         Operation::Compile { mode, run, options: c_opts } => {
             compile(mode, run, krate, opts, c_opts, cx)
         }
-        Operation::QueryRustcVersion => render_engine_versions(&[Engine::Rustc], &opts, cx),
         Operation::Document { mode, open, options: d_opts } => {
             document(mode, open, krate, opts, d_opts, cx)
         }
-        Operation::QueryRustdocVersion => {
-            render_engine_versions(&[Engine::Rustdoc, Engine::Rustc], &opts, cx)
-        }
+        Operation::QueryEngineVersion(_) => Ok(()),
     }
 }
 
-fn compile_dependencies(
-    deps: Vec<SourcePathBuf>,
-    registry: &mut Vec<String>,
-    cx: Context<'_>,
-) -> Result {
+fn compile_deps(deps: Vec<SourcePathBuf>, registry: &mut Vec<String>, cx: Context<'_>) -> Result {
     // This is really primitive. In the future we could introduce `-G, --build-graph <GRAPH>`
     // where the build graph is described via a super concise DSL as originally described in
     // <https://github.com/fmease/rruxwry/issues/3#issuecomment-2619062193>.
@@ -535,14 +527,19 @@ fn populate_extern_prelude(typ: Option<CrateType>, extern_crates: &mut Vec<Strin
     }
 }
 
-fn render_engine_versions(engines: &[Engine], opts: &Options<'_>, cx: Context<'_>) -> Result {
+fn render_engine_version(engine: Engine, opts: &Options<'_>, cx: Context<'_>) -> Result {
     // FIXME: `-@V` may fail to report fake identities as set via `//@ rustc-env: RUST_BOOTSTRAP=…`.
     //        Should we consider that a bug or "out of scope"? We could theoretically gather
     //        directives under `-@V` to obtain this piece of information.
 
-    // FIXME: Don't create a fresh painter that's expensive!
+    // FIXME: Don't create a fresh painter that's semi-expensive!
     //        Use the one from the Context once it has one!
     let mut p = Painter::new(io::stdout().lock(), io::BufWriter::new);
+
+    let engines: &[_] = match engine {
+        Engine::Rustc => &[Engine::Rustc],
+        Engine::Rustdoc => &[Engine::Rustdoc, Engine::Rustc],
+    };
 
     let padding = engines.iter().map(|engine| engine.name().len()).max().unwrap_or_default();
 
@@ -560,9 +557,8 @@ fn render_engine_versions(engines: &[Engine], opts: &Options<'_>, cx: Context<'_
 
 pub(crate) enum Operation {
     Compile { mode: CompileMode, run: Run, options: CompileOptions },
-    QueryRustcVersion,
     Document { mode: DocMode, open: Open, options: DocOptions<'static> },
-    QueryRustdocVersion,
+    QueryEngineVersion(Engine),
 }
 
 pub(crate) enum CompileMode {
