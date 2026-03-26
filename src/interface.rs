@@ -6,7 +6,7 @@ use crate::{
         CrateName, CrateType, DocBackend, Edition, ExtEdition, Identity, PlusPrefixedToolchain,
     },
     directive::Flavor,
-    operate::{Bless, CompileMode, DocMode, Open, Operation, Run, Test},
+    operate::{Bless, CompileMode, DirectiveOptions, DocMode, Open, Operation, Run, Test},
     source::SourcePathBuf,
     utility::{Conjunction, ListingExt as _, default, parse},
 };
@@ -20,161 +20,7 @@ use std::ffi::OsString;
 // toolchain).
 
 pub(crate) fn arguments() -> Arguments {
-    let (toolchain, args) = toolchain(std::env::args_os());
-
-    fn source() -> impl IntoIterator<Item = clap::Arg> {
-        [
-            // The path is intentionally optional to enable invocations like `rrc -V`, `rrc -- -h`,
-            // `rrc -- -Zhelp`, `rrc -- -Chelp`, etc.
-            clap::Arg::new(id::PATH)
-                .value_parser(clap::builder::ValueParser::path_buf())
-                .help("Path to the source file"),
-            clap::Arg::new(id::SOURCE)
-                .short(':')
-                .long("source")
-                .conflicts_with(id::PATH)
-                .help("Provide the source code"),
-            clap::Arg::new(id::extern_)
-                .short('x')
-                .long("extern")
-                .value_name("PATH")
-                .value_parser(clap::builder::ValueParser::path_buf())
-                .action(clap::ArgAction::Append)
-                // FIXME: Temporary limitation of the operation module.
-                .conflicts_with(id::directives)
-                .help("Add the source file path to an extern crate"),
-        ]
-    }
-    fn verbatim() -> clap::Arg {
-        clap::Arg::new(id::verbatim).num_args(..).last(true).value_name("VERBATIM")
-    }
-    fn compiletest() -> impl IntoIterator<Item = clap::Arg> {
-        [
-            clap::Arg::new(id::directives)
-                .short('@')
-                .long("directives")
-                .value_name("FLAVOR")
-                .require_equals(true)
-                .num_args(..=1)
-                .default_missing_value("vanilla")
-                .value_parser(Flavor::parse_cli_style)
-                .help("Enable compiletest-like directives"),
-            clap::Arg::new(id::compiletest)
-                .short('T')
-                .long("compiletest")
-                .action(clap::ArgAction::SetTrue)
-                // FIXME: Maybe reject if flavor isn't vanilla (`-@=x`)?
-                .requires(id::directives)
-                .help("Check in a compiletest-esque manner"),
-            clap::Arg::new(id::bless)
-                .short('.')
-                .long("bless")
-                .requires(id::compiletest)
-                .action(clap::ArgAction::SetTrue)
-                .help("Update the test expectations"),
-        ]
-    }
-    fn crate_name_and_type() -> impl IntoIterator<Item = clap::Arg> {
-        [
-            clap::Arg::new(id::crate_name)
-                .short('n')
-                .long("crate-name")
-                .value_name("NAME")
-                .value_parser(CrateName::parse_cli_style)
-                .help("Set the name of the crate"),
-            clap::Arg::new(id::crate_type)
-                .short('t')
-                .long("crate-type")
-                .value_name("TYPE")
-                .help("Set the type of the crate"),
-        ]
-    }
-    fn edition() -> clap::Arg {
-        clap::Arg::new(id::EDITION).short('e').long("edition").help("Set the edition of the crate")
-    }
-    fn cfgs() -> impl IntoIterator<Item = clap::Arg> {
-        [
-            clap::Arg::new(id::cfgs)
-                .long("cfg")
-                // FIXME: This gets rendered as `<NAME[="VALUE"]>` by clap but ideally we'd print `<NAME>[="<VALUE>"]`.
-                .value_name(r#"NAME[="VALUE"]"#)
-                .action(clap::ArgAction::Append)
-                .help("Enable a configuration"),
-            clap::Arg::new(id::revision)
-                .short('R')
-                .long("revision")
-                .value_name("NAME")
-                .requires(id::directives)
-                .help("Enable a compiletest revision"),
-            // FIXME: This doesn't really belong in this "group" (`cfgs`)
-            clap::Arg::new(id::unstable_features)
-                .short('F')
-                .long("feature")
-                .value_name("NAME")
-                .value_parser(parse_unstable_feature_cli_style)
-                .action(clap::ArgAction::Append)
-                .help("Enable an experimental library or language feature"),
-        ]
-    }
-    fn extra() -> impl IntoIterator<Item = clap::Arg> {
-        [
-            clap::Arg::new(id::suppress_lints)
-                .short('/')
-                .long("suppress-lints")
-                .action(clap::ArgAction::SetTrue)
-                .help("Cap lints at allow level"),
-            clap::Arg::new(id::internals)
-                .short('#')
-                .long("internals")
-                .action(clap::ArgAction::SetTrue)
-                .help("Enable internal pretty-printing of data types"),
-            clap::Arg::new(id::next_solver)
-                .short('N')
-                .long("next-solver")
-                .action(clap::ArgAction::SetTrue)
-                .help("Enable the next-gen trait solver"),
-            clap::Arg::new(id::identity)
-                .short('I')
-                .long("identity")
-                .value_name("IDENTITY")
-                .value_parser(Identity::parse_cli_style)
-                .help("Force rust{,do}c's identity"),
-            // FIXME: Does this actually work for rustdoc?
-            clap::Arg::new(id::no_dedupe)
-                .short('D')
-                .long("no-dedupe")
-                .action(clap::ArgAction::SetTrue)
-                .help("Don't deduplicate diagnostics"),
-            clap::Arg::new(id::log)
-                .long("log")
-                .value_name("FILTER")
-                .require_equals(true)
-                .num_args(..=1)
-                .default_missing_value("debug")
-                .help("Enable rust{,do}c logging. FILTER defaults to `debug`"),
-            clap::Arg::new(id::no_backtrace)
-                .short('B')
-                .long("no-backtrace")
-                .action(clap::ArgAction::SetTrue)
-                .help("Override `RUST_BACKTRACE` to be `0`"),
-            clap::Arg::new(id::print_engine_version)
-                .short('V')
-                .long("version")
-                .action(clap::ArgAction::SetTrue)
-                .help("Print the underlying rust{,do}c version and halt"),
-            clap::Arg::new(id::verbose)
-                .short('v')
-                .long("verbose")
-                .action(clap::ArgAction::SetTrue)
-                .help("Use verbose output"),
-            clap::Arg::new(id::color)
-                .long("color")
-                .value_name("WHEN")
-                .default_value("auto")
-                .value_parser(clap::builder::EnumValueParser::<clap::ColorChoice>::new())
-                .help("Control when to use color"),
-        ]
-    }
+    let (toolchain, args) = extract_toolchain(std::env::args_os());
 
     // FIXME: Use `try_get_matches_from`. Blocker: Define an error type that leads to an exit code of 2 instead of 1.
     let mut matches = clap::Command::new(env!("CARGO_PKG_NAME"))
@@ -184,194 +30,27 @@ pub(crate) fn arguments() -> Arguments {
             clap::Command::new(id::build)
                 .alias("b")
                 .about("Compile the given crate with rustc")
-                .defer(|command| {
-                    command
-                        .args(source())
-                        .arg(verbatim().help("Flags passed to `rustc` verbatim"))
-                        .arg(
-                            clap::Arg::new(id::run)
-                                .short('r')
-                                .long("run")
-                                .action(clap::ArgAction::SetTrue)
-                                .conflicts_with(id::compiletest)
-                                .help("Also run the built binary"),
-                        )
-                        .arg(
-                            clap::Arg::new(id::check_only)
-                                .short('c')
-                                .long("check-only")
-                                .action(clap::ArgAction::SetTrue)
-                                .conflicts_with(id::run)
-                                .help("Don't fully compile, only check the crate"),
-                        )
-                        .args(compiletest())
-                        .args(crate_name_and_type())
-                        .arg(edition())
-                        .args(cfgs())
-                        .arg(
-                            clap::Arg::new(id::shallow)
-                                .short('s')
-                                .long("shallow")
-                                .value_name("MODE")
-                                .require_equals(true)
-                                .num_args(..=1)
-                                .default_missing_value("parse-only")
-                                .value_parser(Shallowness::parse_cli_style)
-                                // FIXME: W/ the intro of `-s=cfg-false` not quite accurate anymore
-                                .help("Halt after parsing the source file")
-                                .conflicts_with(id::run),
-                        )
-                        .arg(
-                            clap::Arg::new(id::dump)
-                                .short('d')
-                                .long("dump")
-                                .value_name("IR")
-                                .value_parser(Ir::parse_cli_style)
-                                .help("Print the given compiler IR"),
-                        )
-                        .args(extra())
-                }),
+                .defer(with_build_args),
             clap::Command::new(id::doc)
                 .alias("d")
                 .about("Document the given crate with rustdoc")
-                .defer(|command| {
-                    command
-                        .args(source())
-                        .arg(verbatim().help("Flags passed to `rustc` and `rustdoc` verbatim"))
-                        .arg(
-                            clap::Arg::new(id::open)
-                                .short('o')
-                                .long("open")
-                                .action(clap::ArgAction::SetTrue)
-                                .conflicts_with(id::compiletest)
-                                .help("Also open the generated docs in a browser"),
-                        )
-                        .arg(
-                            clap::Arg::new(id::json)
-                                .short('j')
-                                .long("json")
-                                .conflicts_with(id::open)
-                                .action(clap::ArgAction::SetTrue)
-                                .help("Output JSON instead of HTML"),
-                        )
-                        .args(compiletest())
-                        .arg(
-                            clap::Arg::new(id::cross_crate)
-                                .short('X')
-                                .long("cross-crate")
-                                .action(clap::ArgAction::SetTrue)
-                                .conflicts_with(id::directives)
-                                .help("Enable the cross-crate re-export mode"),
-                        )
-                        .args(crate_name_and_type())
-                        .arg(
-                            clap::Arg::new(id::crate_version)
-                                .long("crate-version")
-                                .value_name("VERSION")
-                                .help("Set the version of the (base) crate"),
-                        )
-                        .arg(edition())
-                        .args(cfgs())
-                        .args([
-                            clap::Arg::new(id::private)
-                                .short('P')
-                                .long("private")
-                                .action(clap::ArgAction::SetTrue)
-                                .help("Document private items"),
-                            clap::Arg::new(id::hidden)
-                                .short('H')
-                                .long("hidden")
-                                .action(clap::ArgAction::SetTrue)
-                                .help("Document hidden items"),
-                            clap::Arg::new(id::layout)
-                                .long("layout")
-                                .action(clap::ArgAction::SetTrue)
-                                .help("Document the memory layout of types"),
-                            clap::Arg::new(id::link_to_def)
-                                .long("link-to-def")
-                                .alias("ltd")
-                                .action(clap::ArgAction::SetTrue)
-                                .help("Generate links to definitions"),
-                            clap::Arg::new(id::normalize)
-                                .long("normalize")
-                                .action(clap::ArgAction::SetTrue)
-                                .help("Normalize types"),
-                            clap::Arg::new(id::THEME)
-                                .long("theme")
-                                .default_value("ayu")
-                                .help("Set the theme"),
-                        ])
-                        .args(extra())
-                }),
+                .defer(with_doc_args),
         ])
         .get_matches_from(args);
 
     // unwrap: handled by `clap`.
     let (operation, mut matches) = matches.remove_subcommand().unwrap();
 
-    let directives = matches.remove_one::<Flavor>(id::directives).map(|flavor| {
-        crate::operate::DirectiveOptions {
-            flavor,
-            revision: matches.remove_one(id::revision),
-            test: match matches.remove_one(id::compiletest).unwrap_or_default() {
-                false => Test::No,
-                true => Test::Yes(match matches.remove_one(id::bless).unwrap_or_default() {
-                    false => Bless::No,
-                    true => Bless::Yes,
-                }),
-            },
-        }
-    });
+    let query_engine_version: bool =
+        matches.remove_one(id::query_engine_version).unwrap_or_default();
 
-    let print_engine_version: bool =
-        matches.remove_one(id::print_engine_version).unwrap_or_default();
-
-    let operation = match (operation.as_str(), print_engine_version) {
-        (id::build, false) => Operation::Compile {
-            run: match matches.remove_one::<bool>(id::run).unwrap_or_default() {
-                true => Run::Yes,
-                false => Run::No,
-            },
-            mode: match directives {
-                Some(dir_opts) => CompileMode::DirectiveDriven(dir_opts),
-                None => CompileMode::Default,
-            },
-            options: CompileOptions {
-                check_only: matches.remove_one(id::check_only).unwrap_or_default(),
-                shallowness: matches.remove_one(id::shallow),
-                dump: matches.remove_one(id::dump),
-            },
-        },
-        (id::doc, false) => Operation::Document {
-            open: match matches.remove_one::<bool>(id::open).unwrap_or_default() {
-                true => Open::Yes,
-                false => Open::No,
-            },
-            mode: match (matches.remove_one(id::cross_crate).unwrap_or_default(), directives) {
-                (true, None) => DocMode::CrossCrate,
-                (false, Some(dir_opts)) => DocMode::DirectiveDriven(dir_opts),
-                (false, None) => DocMode::Default,
-                (true, Some(_)) => unreachable!(), // Already caught by `clap`.
-            },
-            options: DocOptions {
-                backend: if matches.remove_one(id::json).unwrap_or_default() {
-                    DocBackend::Json
-                } else {
-                    DocBackend::Html
-                },
-                crate_version: matches.remove_one(id::crate_version),
-                private: matches.remove_one(id::private).unwrap_or_default(),
-                hidden: matches.remove_one(id::hidden).unwrap_or_default(),
-                layout: matches.remove_one(id::layout).unwrap_or_default(),
-                link_to_def: matches.remove_one(id::link_to_def).unwrap_or_default(),
-                normalize: matches.remove_one(id::normalize).unwrap_or_default(),
-                theme: matches.remove_one(id::THEME).unwrap(),
-                v_opts: default(),
-            },
-        },
-        (id::build, true) => Operation::QueryEngineVersion(Engine::Rustc),
-        (id::doc, true) => Operation::QueryEngineVersion(Engine::Rustdoc),
-        _ => unreachable!(), // handled by `clap`,
+    let operation = match query_engine_version {
+        true => Operation::QueryEngineVersion(match operation.as_str() {
+            id::build => Engine::Rustc,
+            id::doc => Engine::Rustdoc,
+            id => panic!("unhandled operation `{id}`"),
+        }),
+        false => extract_normal_operation(&operation, &mut matches),
     };
 
     // FIXME: Don't leak the crate type and the edition!
@@ -419,7 +98,7 @@ pub(crate) fn arguments() -> Arguments {
     }
 }
 
-fn toolchain(mut args: std::env::ArgsOs) -> (Option<PlusPrefixedToolchain>, Vec<OsString>) {
+fn extract_toolchain(mut args: std::env::ArgsOs) -> (Option<PlusPrefixedToolchain>, Vec<OsString>) {
     // FIXME: Ideally, `clap` would support custom prefixes (for positional args), here: `+`.
     //        However, it does not. See also <https://github.com/clap-rs/clap/issues/2468>.
     //        Therefore, we need to extract it ourselves.
@@ -444,6 +123,346 @@ fn toolchain(mut args: std::env::ArgsOs) -> (Option<PlusPrefixedToolchain>, Vec<
     result.extend(args);
 
     (toolchain, result)
+}
+
+fn with_build_args(command: clap::Command) -> clap::Command {
+    command
+        .args(source_arg())
+        .arg(verbatim_arg().help("Flags passed to `rustc` verbatim"))
+        .arg(
+            clap::Arg::new(id::run)
+                .short('r')
+                .long("run")
+                .action(clap::ArgAction::SetTrue)
+                .conflicts_with(id::compiletest)
+                .help("Also run the built binary"),
+        )
+        .arg(
+            clap::Arg::new(id::check_only)
+                .short('c')
+                .long("check-only")
+                .action(clap::ArgAction::SetTrue)
+                .conflicts_with(id::run)
+                .help("Don't fully compile, only check the crate"),
+        )
+        .args(compiletest_args())
+        .args(crate_name_and_type_args())
+        .arg(edition_arg())
+        .args(cfg_args())
+        .arg(
+            clap::Arg::new(id::shallow)
+                .short('s')
+                .long("shallow")
+                .value_name("MODE")
+                .require_equals(true)
+                .num_args(..=1)
+                .default_missing_value("parse-only")
+                .value_parser(Shallowness::parse_cli_style)
+                // FIXME: W/ the intro of `-s=cfg-false` not quite accurate anymore
+                .help("Halt after parsing the source file")
+                .conflicts_with(id::run),
+        )
+        .arg(
+            clap::Arg::new(id::dump)
+                .short('d')
+                .long("dump")
+                .value_name("IR")
+                .value_parser(Ir::parse_cli_style)
+                .help("Print the given compiler IR"),
+        )
+        .args(extra_args())
+}
+
+fn with_doc_args(command: clap::Command) -> clap::Command {
+    command
+        .args(source_arg())
+        .arg(verbatim_arg().help("Flags passed to `rustc` and `rustdoc` verbatim"))
+        .arg(
+            clap::Arg::new(id::open)
+                .short('o')
+                .long("open")
+                .action(clap::ArgAction::SetTrue)
+                .conflicts_with(id::compiletest)
+                .help("Also open the generated docs in a browser"),
+        )
+        .arg(
+            clap::Arg::new(id::json)
+                .short('j')
+                .long("json")
+                .conflicts_with(id::open)
+                .action(clap::ArgAction::SetTrue)
+                .help("Output JSON instead of HTML"),
+        )
+        .args(compiletest_args())
+        .arg(
+            clap::Arg::new(id::cross_crate)
+                .short('X')
+                .long("cross-crate")
+                .action(clap::ArgAction::SetTrue)
+                .conflicts_with(id::directives)
+                .help("Enable the cross-crate re-export mode"),
+        )
+        .args(crate_name_and_type_args())
+        .arg(
+            clap::Arg::new(id::crate_version)
+                .long("crate-version")
+                .value_name("VERSION")
+                .help("Set the version of the (base) crate"),
+        )
+        .arg(edition_arg())
+        .args(cfg_args())
+        .args([
+            clap::Arg::new(id::private)
+                .short('P')
+                .long("private")
+                .action(clap::ArgAction::SetTrue)
+                .help("Document private items"),
+            clap::Arg::new(id::hidden)
+                .short('H')
+                .long("hidden")
+                .action(clap::ArgAction::SetTrue)
+                .help("Document hidden items"),
+            clap::Arg::new(id::layout)
+                .long("layout")
+                .action(clap::ArgAction::SetTrue)
+                .help("Document the memory layout of types"),
+            clap::Arg::new(id::link_to_def)
+                .long("link-to-def")
+                .alias("ltd")
+                .action(clap::ArgAction::SetTrue)
+                .help("Generate links to definitions"),
+            clap::Arg::new(id::normalize)
+                .long("normalize")
+                .action(clap::ArgAction::SetTrue)
+                .help("Normalize types"),
+            clap::Arg::new(id::THEME).long("theme").default_value("ayu").help("Set the theme"),
+        ])
+        .args(extra_args())
+}
+
+fn source_arg() -> impl IntoIterator<Item = clap::Arg> {
+    [
+        // The path is intentionally optional to enable invocations like `rrc -V`, `rrc -- -h`,
+        // `rrc -- -Zhelp`, `rrc -- -Chelp`, etc.
+        clap::Arg::new(id::PATH)
+            .value_parser(clap::builder::ValueParser::path_buf())
+            .help("Path to the source file"),
+        clap::Arg::new(id::SOURCE)
+            .short(':')
+            .long("source")
+            .conflicts_with(id::PATH)
+            .help("Provide the source code"),
+        clap::Arg::new(id::extern_)
+            .short('x')
+            .long("extern")
+            .value_name("PATH")
+            .value_parser(clap::builder::ValueParser::path_buf())
+            .action(clap::ArgAction::Append)
+            // FIXME: Temporary limitation of the operation module.
+            .conflicts_with(id::directives)
+            .help("Add the source file path to an extern crate"),
+    ]
+}
+
+fn verbatim_arg() -> clap::Arg {
+    clap::Arg::new(id::verbatim).num_args(..).last(true).value_name("VERBATIM")
+}
+
+fn compiletest_args() -> impl IntoIterator<Item = clap::Arg> {
+    [
+        clap::Arg::new(id::directives)
+            .short('@')
+            .long("directives")
+            .value_name("FLAVOR")
+            .require_equals(true)
+            .num_args(..=1)
+            .default_missing_value("vanilla")
+            .value_parser(Flavor::parse_cli_style)
+            .help("Enable compiletest-like directives"),
+        clap::Arg::new(id::compiletest)
+            .short('T')
+            .long("compiletest")
+            .action(clap::ArgAction::SetTrue)
+            // FIXME: Maybe reject if flavor isn't vanilla (`-@=x`)?
+            .requires(id::directives)
+            .help("Check in a compiletest-esque manner"),
+        clap::Arg::new(id::bless)
+            .short('.')
+            .long("bless")
+            .requires(id::compiletest)
+            .action(clap::ArgAction::SetTrue)
+            .help("Update the test expectations"),
+    ]
+}
+
+fn crate_name_and_type_args() -> impl IntoIterator<Item = clap::Arg> {
+    [
+        clap::Arg::new(id::crate_name)
+            .short('n')
+            .long("crate-name")
+            .value_name("NAME")
+            .value_parser(CrateName::parse_cli_style)
+            .help("Set the name of the crate"),
+        clap::Arg::new(id::crate_type)
+            .short('t')
+            .long("crate-type")
+            .value_name("TYPE")
+            .help("Set the type of the crate"),
+    ]
+}
+
+fn edition_arg() -> clap::Arg {
+    clap::Arg::new(id::EDITION).short('e').long("edition").help("Set the edition of the crate")
+}
+
+fn cfg_args() -> impl IntoIterator<Item = clap::Arg> {
+    [
+        clap::Arg::new(id::cfgs)
+            .long("cfg")
+            // FIXME: This gets rendered as `<NAME[="VALUE"]>` by clap but ideally we'd print `<NAME>[="<VALUE>"]`.
+            .value_name(r#"NAME[="VALUE"]"#)
+            .action(clap::ArgAction::Append)
+            .help("Enable a configuration"),
+        clap::Arg::new(id::revision)
+            .short('R')
+            .long("revision")
+            .value_name("NAME")
+            .requires(id::directives)
+            .help("Enable a compiletest revision"),
+        // FIXME: This doesn't really belong in this "group" (`cfgs`)
+        clap::Arg::new(id::unstable_features)
+            .short('F')
+            .long("feature")
+            .value_name("NAME")
+            .value_parser(parse_unstable_feature_cli_style)
+            .action(clap::ArgAction::Append)
+            .help("Enable an experimental library or language feature"),
+    ]
+}
+
+fn extra_args() -> impl IntoIterator<Item = clap::Arg> {
+    [
+        clap::Arg::new(id::suppress_lints)
+            .short('/')
+            .long("suppress-lints")
+            .action(clap::ArgAction::SetTrue)
+            .help("Cap lints at allow level"),
+        clap::Arg::new(id::internals)
+            .short('#')
+            .long("internals")
+            .action(clap::ArgAction::SetTrue)
+            .help("Enable internal pretty-printing of data types"),
+        clap::Arg::new(id::next_solver)
+            .short('N')
+            .long("next-solver")
+            .action(clap::ArgAction::SetTrue)
+            .help("Enable the next-gen trait solver"),
+        clap::Arg::new(id::identity)
+            .short('I')
+            .long("identity")
+            .value_name("IDENTITY")
+            .value_parser(Identity::parse_cli_style)
+            .help("Force rust{,do}c's identity"),
+        // FIXME: Does this actually work for rustdoc?
+        clap::Arg::new(id::no_dedupe)
+            .short('D')
+            .long("no-dedupe")
+            .action(clap::ArgAction::SetTrue)
+            .help("Don't deduplicate diagnostics"),
+        clap::Arg::new(id::log)
+            .long("log")
+            .value_name("FILTER")
+            .require_equals(true)
+            .num_args(..=1)
+            .default_missing_value("debug")
+            .help("Enable rust{,do}c logging. FILTER defaults to `debug`"),
+        clap::Arg::new(id::no_backtrace)
+            .short('B')
+            .long("no-backtrace")
+            .action(clap::ArgAction::SetTrue)
+            .help("Override `RUST_BACKTRACE` to be `0`"),
+        clap::Arg::new(id::query_engine_version)
+            .short('V')
+            .long("version")
+            .action(clap::ArgAction::SetTrue)
+            .help("Print the underlying rust{,do}c version and halt"),
+        clap::Arg::new(id::verbose)
+            .short('v')
+            .long("verbose")
+            .action(clap::ArgAction::SetTrue)
+            .help("Use verbose output"),
+        clap::Arg::new(id::color)
+            .long("color")
+            .value_name("WHEN")
+            .default_value("auto")
+            .value_parser(clap::builder::EnumValueParser::<clap::ColorChoice>::new())
+            .help("Control when to use color"),
+    ]
+}
+
+fn extract_normal_operation(operation: &str, matches: &mut clap::ArgMatches) -> Operation {
+    let dir_opts = extract_dir_opts(matches);
+
+    match operation {
+        id::build => Operation::Compile {
+            run: match matches.remove_one::<bool>(id::run).unwrap_or_default() {
+                true => Run::Yes,
+                false => Run::No,
+            },
+            mode: match dir_opts {
+                Some(dir_opts) => CompileMode::DirectiveDriven(dir_opts),
+                None => CompileMode::Default,
+            },
+            options: CompileOptions {
+                check_only: matches.remove_one(id::check_only).unwrap_or_default(),
+                shallowness: matches.remove_one(id::shallow),
+                dump: matches.remove_one(id::dump),
+            },
+        },
+        id::doc => Operation::Document {
+            open: match matches.remove_one::<bool>(id::open).unwrap_or_default() {
+                true => Open::Yes,
+                false => Open::No,
+            },
+            mode: match (matches.remove_one(id::cross_crate).unwrap_or_default(), dir_opts) {
+                (true, None) => DocMode::CrossCrate,
+                (false, Some(dir_opts)) => DocMode::DirectiveDriven(dir_opts),
+                (false, None) => DocMode::Default,
+                (true, Some(_)) => unreachable!(), // Already caught by `clap`.
+            },
+            options: DocOptions {
+                backend: if matches.remove_one(id::json).unwrap_or_default() {
+                    DocBackend::Json
+                } else {
+                    DocBackend::Html
+                },
+                crate_version: matches.remove_one(id::crate_version),
+                private: matches.remove_one(id::private).unwrap_or_default(),
+                hidden: matches.remove_one(id::hidden).unwrap_or_default(),
+                layout: matches.remove_one(id::layout).unwrap_or_default(),
+                link_to_def: matches.remove_one(id::link_to_def).unwrap_or_default(),
+                normalize: matches.remove_one(id::normalize).unwrap_or_default(),
+                theme: matches.remove_one(id::THEME).unwrap(),
+                v_opts: default(),
+            },
+        },
+        id => panic!("unhandled subcommand `{id}`"),
+    }
+}
+
+fn extract_dir_opts(matches: &mut clap::ArgMatches) -> Option<DirectiveOptions> {
+    let flavor = matches.remove_one::<Flavor>(id::directives)?;
+    Some(DirectiveOptions {
+        flavor,
+        revision: matches.remove_one(id::revision),
+        test: match matches.remove_one(id::compiletest).unwrap_or_default() {
+            false => Test::No,
+            true => Test::Yes(match matches.remove_one(id::bless).unwrap_or_default() {
+                false => Bless::No,
+                true => Bless::Yes,
+            }),
+        },
+    })
 }
 
 pub(crate) struct Arguments {
@@ -641,6 +660,6 @@ ids! {
     bless, build, cfgs, check_only, color, compiletest, crate_name, crate_type, crate_version,
     cross_crate, directives, doc, dump, EDITION, extern_, hidden, identity, internals,
     json, layout, link_to_def, log, next_solver, normalize, no_backtrace, no_dedupe, open,
-    PATH, print_engine_version, private, revision, run, shallow, SOURCE, suppress_lints, THEME,
+    PATH, query_engine_version, private, revision, run, shallow, SOURCE, suppress_lints, THEME,
     unstable_features, verbatim, verbose,
 }
