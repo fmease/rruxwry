@@ -184,16 +184,28 @@ fn document<'a>(
 }
 
 fn open(krate: Crate<'_>, opts: &Options<'_>, cx: Context<'_>) -> Result<()> {
-    let crate_name = build::query_crate_name(krate, opts, cx).map_err(|error| {
-        // FIXME: Actually create a 'parent' error diagnostic with a message akin to
-        //        "failed to open the generated docs (requested …)" and smh.
-        //        'tuck' the QueryCrateNameError below it (i.e., more indented).
-        error.emit()
-    })?;
+    let Some(path) = krate.path else { return Ok(()) };
 
-    let path = format!("./doc/{crate_name}/index.html");
+    let mut artifact_path = PathBuf::from("./doc");
 
-    build::open(Path::new(&path), cx).map_err(|error| {
+    if let SourcePath::Regular(path) = path
+        && let Some(ext) = path.extension()
+        && (ext == "md" || ext == "markdown")
+    {
+        artifact_path.push(path.with_extension("html").file_name().unwrap());
+    } else {
+        let crate_name = build::query_crate_name(krate, opts, cx).map_err(|error| {
+            // FIXME: Actually create a 'parent' error diagnostic with a message akin to
+            //        "failed to open the generated docs (requested …)" and smh.
+            //        'tuck' the QueryCrateNameError below it (i.e., more indented).
+            error.emit()
+        })?;
+
+        artifact_path.push(crate_name.as_str());
+        artifact_path.push("index.html");
+    }
+
+    build::open(&artifact_path, cx).map_err(|error| {
         self::error(fmt!("failed to open the generated docs in a browser"))
             .note(fmt!("{error}"))
             .done()
