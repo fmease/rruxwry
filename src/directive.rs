@@ -31,7 +31,7 @@ pub(crate) fn gather<'cx>(
     scope: Scope,
     role: Role,
     flavor: Flavor,
-    revision: Option<&str>,
+    revision: Option<Revision<&str>>,
     cx: Context<'cx>,
 ) -> crate::error::Result<InstantiatedDirectives<'cx>> {
     // FIXME: The error handling is pretty awkward!
@@ -118,6 +118,9 @@ pub(crate) enum Flavor {
     Rruxwry,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Revision<T>(pub(crate) T);
+
 // FIXME: If possible get rid of the instantiated vs. uninstantiated separation.
 //        Users can no longer specify multiple revisions at once, so we don't
 //        need to care about "optimizing" unconditional directives.
@@ -151,12 +154,12 @@ impl<'src> Directives<'src> {
     /// Instantiate all directives that are conditional on a revision.
     fn instantiate(
         mut self,
-        active_revision: Option<&str>,
+        active_revision: Option<Revision<&str>>,
     ) -> Result<InstantiatedDirectives<'src>, InstantiationError<'src, '_>> {
         let revisions = mem::take(&mut self.revisions);
         let directives = mem::take(&mut self.uninstantiated);
 
-        if let Some(active_revision) = active_revision {
+        if let Some(Revision(active_revision)) = active_revision {
             if let Role::Principal = self.role
                 && !revisions.contains(active_revision)
             {

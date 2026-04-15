@@ -10,7 +10,7 @@ use crate::{
     context::Context,
     data::{Crate, CrateName, CrateType, DocBackend, Edition, ExtEdition},
     diagnostic::{error, fmt, warn},
-    directive,
+    directive::{self, Revision},
     error::Result,
     source::{SourcePath, SourcePathBuf, Spanned},
     utility::{OsStrExt as _, default, paint::Painter},
@@ -323,24 +323,24 @@ fn build_directive_driven<'a>(
             .done()
             .into());
         };
-        (SourcePath::Regular(Path::new(path)), Some(revision))
+        (SourcePath::Regular(Path::new(path)), Some(Revision(revision)))
     } else {
         (path, None)
     };
 
     match (revision_from_path, &dir_opts.revision) {
-        (Some(rev0), Some(rev1)) if rev0 == rev1 => {
+        (Some(Revision(rev0)), Some(Revision(rev1))) if rev0 == rev1 => {
             warn(fmt!("the active revision `{rev0}` was passed twice"))
                 .note(fmt!("once as a path suffix, once via a flag"))
                 .done();
         }
-        (Some(rev0), Some(rev1)) => {
+        (Some(Revision(rev0)), Some(Revision(rev1))) => {
             return Err(error(fmt!("two conflicting active revisions were passed"))
                 .note(fmt!("path suffix `{rev0}` and flag argument `{rev1}` do not match"))
                 .done()
                 .into());
         }
-        (Some(rev), None) => dir_opts.revision = Some(rev.to_owned()),
+        (Some(Revision(rev)), None) => dir_opts.revision = Some(Revision(rev.to_owned())),
         (None, _) => {}
     }
 
@@ -349,7 +349,7 @@ fn build_directive_driven<'a>(
         scope(e_opts),
         directive::Role::Principal,
         dir_opts.flavor,
-        dir_opts.revision.as_deref(),
+        dir_opts.revision.as_ref().map(|Revision(rev)| Revision(rev.as_str())),
         cx,
     )?;
 
@@ -377,8 +377,8 @@ fn build_directive_driven<'a>(
         )
     })?;
 
-    if let Some(revision) = dir_opts.revision {
-        opts.b_opts.cfgs.push(revision);
+    if let Some(rev) = dir_opts.revision {
+        opts.b_opts.cfgs.push(rev.into_cfg());
     }
 
     opts.b_opts.extern_crates.append(&mut extern_crates);
@@ -436,12 +436,12 @@ fn compile_auxiliary<'a>(
         scope(e_opts),
         directive::Role::Auxiliary,
         dir_opts.flavor,
-        dir_opts.revision.as_deref(),
+        dir_opts.revision.as_ref().map(|Revision(rev)| Revision(rev.as_str())),
         cx,
     )?;
 
     if let Some(revision) = dir_opts.revision {
-        opts.b_opts.cfgs.push(revision);
+        opts.b_opts.cfgs.push(revision.into_cfg());
     }
 
     let directive::InstantiatedDirectives {
@@ -567,6 +567,12 @@ fn render_engine_version(engine: Engine, opts: &Options<'_>, cx: Context<'_>) ->
     Ok(())
 }
 
+impl<S: AsRef<str>> Revision<S> {
+    fn into_cfg(self) -> String {
+        self.0.as_ref().replace("-", "_")
+    }
+}
+
 pub(crate) enum Operation {
     Compile { mode: CompileMode, run: Run, options: CompileOptions },
     Document { mode: DocMode, open: Open, options: DocOptions<'static> },
@@ -587,7 +593,7 @@ pub(crate) enum DocMode {
 #[derive(Clone)]
 pub(crate) struct DirectiveOptions {
     pub(crate) flavor: directive::Flavor,
-    pub(crate) revision: Option<String>,
+    pub(crate) revision: Option<Revision<String>>,
     #[expect(dead_code)] // FIXME
     pub(crate) test: Test,
 }

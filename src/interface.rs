@@ -5,7 +5,7 @@ use crate::{
     data::{
         CrateName, CrateType, DocBackend, Edition, ExtEdition, Identity, PlusPrefixedToolchain,
     },
-    directive::Flavor,
+    directive::{Flavor, Revision},
     operate::{Bless, CompileMode, DirectiveOptions, DocMode, Open, Operation, Run, Test},
     source::SourcePathBuf,
     utility::{Conjunction, ListingExt as _, default, parse},
@@ -454,7 +454,7 @@ fn extract_dir_opts(matches: &mut clap::ArgMatches) -> Option<DirectiveOptions> 
     let flavor = matches.remove_one::<Flavor>(id::directives)?;
     Some(DirectiveOptions {
         flavor,
-        revision: matches.remove_one(id::revision),
+        revision: matches.remove_one(id::revision).map(Revision),
         test: match matches.remove_one(id::compiletest).unwrap_or_default() {
             false => Test::No,
             true => Test::Yes(match matches.remove_one(id::bless).unwrap_or_default() {

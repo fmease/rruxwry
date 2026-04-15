@@ -337,7 +337,7 @@ fn instantiate_conditional_directives() {
         Flavor::Vanilla,
         &mut errors,
     )
-    .instantiate(Some("two"));
+    .instantiate(Some(Revision("two")));
     assert_eq!(errors, default());
     assert_eq!(
         directives,
@@ -413,7 +413,7 @@ fn conditional_directives_undeclared_revisions() {
 #[test]
 fn undeclared_active_revision() {
     assert_eq!(
-        Directives::new(Role::Principal).instantiate(Some("flag")),
+        Directives::new(Role::Principal).instantiate(Some(Revision("flag"))),
         Err(InstantiationError::UndeclaredActiveRevision {
             revision: "flag",
             available: default()
