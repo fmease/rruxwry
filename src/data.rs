@@ -18,6 +18,7 @@ use std::{
 #[cfg(test)]
 mod test;
 
+#[derive(Clone, Copy)]
 pub(crate) enum ExtEdition<'a> {
     EngineDefault,
     LatestStable,
@@ -48,9 +49,7 @@ pub(crate) enum Edition<'a> {
     Rust2024,
     // <rust-lang/rust#137606>
     Future,
-    // For forward compatibility with future versions of Rust. I don't want to assume that
-    // rruxwry gets *so* well maintained that it can keep pace with the development of Rust.
-    Unknown(&'a str),
+    Raw(&'a str),
 }
 
 impl<'a> Edition<'a> {
@@ -110,7 +109,7 @@ impl<'a> Edition<'a> {
             Self::Rust2021 => "2021",
             Self::Rust2024 => "2024",
             Self::Future => "future",
-            Self::Unknown(edition) => edition,
+            Self::Raw(edition) => edition,
         }
     }
 }

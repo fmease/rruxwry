@@ -396,7 +396,7 @@ fn build_directive_driven<'a>(
         //        for engine==rustdoc see comment above the other invocation of
         //        `resolve` in this module.
         Some(edition) => edition.resolve(e_opts.engine(), cx),
-        None => directives.edition.map(|edition| Edition::Unknown(edition.bare)),
+        None => directives.edition.map(|edition| Edition::Raw(edition.bare)),
     };
 
     let krate = Crate { path: Some(path), edition, ..krate };
@@ -465,7 +465,7 @@ fn compile_auxiliary<'a>(
         path: Some(SourcePath::Regular(&path.bare)),
         name: None,
         typ: prefer_dylib.apply(typ),
-        edition: edition.map(|edition| Edition::Unknown(edition.bare)),
+        edition: edition.map(|edition| Edition::Raw(edition.bare)),
     };
 
     // FIXME: Also register library search paths properly

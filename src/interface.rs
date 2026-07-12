@@ -75,9 +75,7 @@ pub(crate) fn arguments() -> Arguments {
         crate_type: matches
             .remove_one(id::crate_type)
             .map(|typ: String| CrateType::parse_cli_style(typ.leak())),
-        edition: matches
-            .remove_one(id::EDITION)
-            .map(|edition: String| ExtEdition::parse_cli_style(edition.leak())),
+        edition: matches.remove_one(id::EDITION),
         b_opts: BuildOptions {
             cfgs: matches.remove_many(id::cfgs).map(Iterator::collect).unwrap_or_default(),
             unstable_features: matches
@@ -312,7 +310,11 @@ fn crate_name_and_type_args() -> impl IntoIterator<Item = clap::Arg> {
 }
 
 fn edition_arg() -> clap::Arg {
-    clap::Arg::new(id::EDITION).short('e').long("edition").help("Set the edition of the crate")
+    clap::Arg::new(id::EDITION)
+        .short('e')
+        .long("edition")
+        .value_parser(ExtEdition::parse_cli_style)
+        .help("Set the edition of the crate")
 }
 
 fn cfg_args() -> impl IntoIterator<Item = clap::Arg> {
@@ -485,21 +487,19 @@ pub(crate) enum Source {
 }
 
 impl ExtEdition<'static> {
-    // FIXME: Take `<'a> &'a str` once clap is thrown out.
-    // FIXME: Somehow support `h`/`help` printing out rrx's superset of options
-    fn parse_cli_style(source: &'static str) -> Self {
-        Self::Fixed(match source {
-            "d" | "default" => return Self::EngineDefault,
-            "s" | "stable" => return Self::LatestStable,
-            "u" | "unstable" => return Self::LatestUnstable,
-            "l" | "latest" => return Self::Latest,
-            "15" | "2015" => Edition::Rust2015,
-            "18" | "2018" => Edition::Rust2018,
-            "21" | "2021" => Edition::Rust2021,
-            "24" | "2024" => Edition::Rust2024,
-            "f" | "future" => Edition::Future,
-            _ => Edition::Unknown(source),
-        })
+    fn parse_cli_style(source: &str) -> Result<Self, String> {
+        parse!(
+            "d" | "default" => Self::EngineDefault,
+            "s" | "stable" => Self::LatestStable,
+            "u" | "unstable" => Self::LatestUnstable,
+            "l" | "latest" => Self::Latest,
+            "15" | "2015" => Self::Fixed(Edition::Rust2015),
+            "18" | "2018" => Self::Fixed(Edition::Rust2018),
+            "21" | "2021" => Self::Fixed(Edition::Rust2021),
+            "24" | "2024" => Self::Fixed(Edition::Rust2024),
+            "f" | "future" =>Self::Fixed(Edition::Future),
+        )(source)
+        .map_err(possible_values)
     }
 }
 
