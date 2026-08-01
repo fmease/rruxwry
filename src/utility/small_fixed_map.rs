@@ -1,7 +1,8 @@
+use core::direct_const_arg as lift;
 use std::marker::PhantomData;
 
 pub(crate) struct SmallFixedMap<K: SmallKey, V> {
-    data: [Option<V>; K::LEN],
+    data: [Option<V>; lift!(K::LEN)],
     _marker: PhantomData<fn(&K)>,
 }
 
@@ -23,16 +24,14 @@ impl<K: SmallKey, V> Default for SmallFixedMap<K, V> {
 
 pub(crate) trait SmallKey: Copy {
     #[expect(dead_code)] // FIXME: rustc false positive
-    #[type_const]
-    const LEN: usize;
+    type const LEN: usize;
     fn index(self) -> usize;
 }
 
 pub(crate) macro SmallKey {
     derive() ($vis:vis enum $name:ident { $($variant:ident),* $(,)? }) => {
         impl SmallKey for $name {
-            #[type_const]
-            const LEN: usize = ${count($variant)};
+            type const LEN: usize = ${count($variant)};
 
             fn index(self) -> usize {
                 self as _
