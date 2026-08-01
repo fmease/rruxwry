@@ -468,8 +468,7 @@ impl Commit<&str> {
     }
 }
 
-#[derive(Clone)] // FIXME
-#[derive(PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 #[cfg_attr(test, derive(Debug))]
 pub(crate) struct Date {
     pub(crate) year: u16,
