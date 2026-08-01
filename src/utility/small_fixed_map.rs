@@ -1,4 +1,4 @@
-use core::direct_const_arg as lift;
+use crate::utility::lift;
 use std::marker::PhantomData;
 
 pub(crate) struct SmallFixedMap<K: SmallKey, V> {

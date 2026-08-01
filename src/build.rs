@@ -5,8 +5,8 @@
 use crate::{
     context::Context,
     data::{
-        Channel, Crate, CrateName, CrateType, D, DocBackend, Identity, PlusPrefixedToolchain, V,
-        Version,
+        Channel, Crate, CrateName, CrateType, D, Date, DocBackend, Identity, PlusPrefixedToolchain,
+        V, Version, VersionTriple,
     },
     diagnostic::{EmittedError, debug, error},
     error::Result,
@@ -18,6 +18,7 @@ use anstyle::AnsiColor;
 use command::Command;
 use std::{
     borrow::Cow,
+    cmp::Ordering,
     ffi::OsStr,
     io::{self, Write as _},
     path::{Path, PathBuf},
@@ -27,8 +28,6 @@ use std::{
 
 mod command;
 mod environment;
-
-const DEFAULT_THEME: &str = "ayu"; // personal preference
 
 pub(crate) fn perform(
     e_opts: &EngineOptions<'_>,
@@ -365,50 +364,51 @@ fn configure_early<'cx>(
     // Regarding crate name querying, the edition is vital. After all,
     // rustc needs to parse the crate root to find `#![crate_name]`.
     if let Some(edition) = krate.edition {
-        let version = version_for_opt(engine, "--edition", cx)?;
-
         // FIXME: These dates and versions have been manually verified *with rustc*.
         //        It's possible that there are differences to rustdoc. Audit!
-        let syntax = match version.channel {
-            // FIXME: Unimplemented!
-            Channel::Stable | Channel::Beta { prerelease: _ } => Some(Syntax::Edition),
-            Channel::Nightly | Channel::Dev => match version.commit {
-                Some(commit) => match () {
-                    // <rust-lang/rust#50080> was merged on 2018-04-21T07:42Z.
-                    // Thus it would've likely made it into *nightly-2018-04-22(2018-04-21).
+        let syntax = select_by_version(
+            &[
+                // <rust-lang/rust#50080>
+                Candidate {
+                    key: Syntax::Edition,
+                    version: Some(V!(1, 27, 0)),
+                    // The PR was merged on 2018-04-21T07:42Z.
+                    // Thus, it would've likely made it into *nightly-2018-04-21.
                     // However, since some tools didn't build this nightly doesn't exist.
-                    // In fact, nightly-2018-04-{20..26} don't exist, nightly-2018-04-27 is
-                    // the first to feature `--edition`.
+                    // In fact, nightly-2018-04-{20..26} don't exist,
+                    // nightly-2018-04-27 is the first to feature `--edition`.
                     // Regardless, I like this more precise date better.
-                    () if commit.date >= D!(2018, 04, 21) => Some(Syntax::Edition),
-                    // <rust-lang/rust#49035>
-                    () if commit.date >= D!(2018, 03, 23) => Some(Syntax::ZeeEdition),
-                    // <rust-lang/rust#48014>
-                    () if commit.date >= D!(2018, 02, 07) => Some(Syntax::ZeeEpoch),
-                    () => None,
+                    date: Some(D!(2018, 04, 21)),
+                    stable: true,
                 },
-                None => Some(Syntax::Edition), // FIXME: Unimplemented!
-            },
-        };
-
-        let syntax = syntax.ok_or_else(|| {
-            // FIXME: Print the actual version.
-            self::error(fmt!(
-                "the version of the underyling `{}` does not support editions",
-                engine.name()
-            ))
-            .done()
-        })?;
+                // <rust-lang/rust#49035>
+                Candidate {
+                    key: Syntax::ZeeEdition,
+                    version: Some(V!(1, 26, 0)),
+                    date: Some(D!(2018, 03, 23)),
+                    stable: false,
+                },
+                // <rust-lang/rust#48014>
+                Candidate {
+                    key: Syntax::ZeeEpoch,
+                    version: Some(V!(1, 25, 0)),
+                    date: Some(D!(2018, 02, 07)),
+                    stable: false,
+                },
+            ],
+            engine,
+            "--edition",
+            opts,
+            cx,
+        )??;
 
         match syntax {
-            Syntax::Edition => {
-                cmd.arg("--edition");
-                cmd.arg(edition.to_str())
-            }
+            Syntax::Edition => cmd.args(["--edition", edition.to_str()]),
             Syntax::ZeeEdition => cmd.arg(format!("-Zedition={}", edition.to_str())),
             Syntax::ZeeEpoch => cmd.arg(format!("-Zepoch={}", edition.to_str())),
         };
 
+        #[derive(Clone, Copy)]
         enum Syntax {
             Edition,
             ZeeEdition,
@@ -419,7 +419,7 @@ fn configure_early<'cx>(
     // Regarding crate name querying, let's better honor this option
     // since it may significantly affect rustc's behavior.
     if let Some(identity) = opts.b_opts.identity {
-        configure_forced_identity(cmd, identity, e_opts, cx)?;
+        configure_forced_identity(cmd, identity, e_opts, opts, cx)?;
     }
 
     configure_v_opts(cmd, &opts.v_opts);
@@ -482,49 +482,23 @@ fn configure_late(
     }
 
     if opts.b_opts.internals {
-        let version = version_for_opt(engine, "--internals", cx)?;
-
-        let syntax = match version.channel {
-            Channel::Stable => match () {
+        cmd.arg(select_by_version(
+            &[
                 // <rust-lang/rust#119129>
-                () if version.triple >= V!(1, 77, 0) => Syntax::ZeeVerboseInternals,
-                // FIXME Find the *actual* lower bound.
-                () => Syntax::ZeeVerbose,
-            },
-            Channel::Beta { prerelease: _ } => Syntax::ZeeVerboseInternals, // FIXME: actually unimpl'ed!
-            Channel::Nightly | Channel::Dev => match version.commit {
-                Some(commit) => match () {
-                    // <rust-lang/rust#119129>, base: 1.77
-                    () if commit.date >= D!(2023, 12, 26) => Syntax::ZeeVerboseInternals,
-                    // FIXME: Find the *actual* lower bound.
-                    () => Syntax::ZeeVerbose,
+                Candidate {
+                    key: "-Zverbose-internals",
+                    version: Some(V!(1, 77, 0)),
+                    date: Some(D!(2023, 12, 26)),
+                    stable: false,
                 },
-                None => match () {
-                    () if version.triple > V!(1, 77, 0) => Syntax::ZeeVerboseInternals,
-                    () if version.triple == V!(1, 77, 0) => {
-                        // FIXME: Improve wording (print the two candidates and the version).
-                        return Err(error(fmt!(
-                            "could not determine how to forward option `--internals` to the underlying `{}`",
-                            engine.name()
-                        ))
-                        .done()
-                        .into());
-                    }
-                    // FIXME: Find the *actual* lower bound
-                    () => Syntax::ZeeVerbose,
-                },
-            },
-        };
-
-        enum Syntax {
-            ZeeVerbose,
-            ZeeVerboseInternals,
-        }
-
-        cmd.arg(match syntax {
-            Syntax::ZeeVerbose => "-Zverbose",
-            Syntax::ZeeVerboseInternals => "-Zverbose-internals",
-        });
+                // 1.0.0, possibly earlier
+                Candidate { key: "-Zverbose", version: None, date: None, stable: false },
+            ],
+            engine,
+            "--internals",
+            opts,
+            cx,
+        )??);
     }
 
     if opts.b_opts.no_dedupe {
@@ -566,7 +540,7 @@ fn configure_e_opts(
             }
 
             if let Some(shallowness) = c_opts.shallowness {
-                configure_shallowness(cmd, shallowness, e_opts, cx)?;
+                configure_shallowness(cmd, shallowness, e_opts, opts, cx)?;
             }
 
             if let Some(ir) = c_opts.dump {
@@ -617,93 +591,43 @@ fn configure_e_opts(
             }
 
             if let Some(theme) = &d_opts.theme {
-                let version = version_for_opt(Engine::Rustdoc, "--theme", cx)?;
+                const DEFAULT_THEME: &str = "ayu"; // personal preference
 
                 // FIXME: Account for the period of time in which `--default-theme` didn't work due to a bug:
                 //        <https://github.com/rust-lang/rust/issues/87263>.
-                let support = match version.channel {
-                    Channel::Stable => match () {
-                        // <rust-lang/rust#79642>, nightly: 2020-12-27
-                        () if version.triple >= V!(1, 51, 0) => Support::Yes,
+                match select_by_version(
+                    &[
+                        // <rust-lang/rust#79642>
+                        Candidate {
+                            key: "--default-theme",
+                            version: Some(V!(1, 51, 0)),
+                            date: Some(D!(2020, 12, 27)),
+                            stable: true,
+                        },
                         // <rust-lang/rust#77213>
-                        // XXX FIXME: the fake identity shouldn't be queried *here*
-                        () if version.triple >= V!(1, 49, 0) => match probe_identity(opts) {
-                            Identity::True | Identity::Stable => Support::UNSTABLE,
-                            Identity::Nightly => Support::Yes,
+                        Candidate {
+                            key: "--default-theme",
+                            version: Some(V!(1, 49, 0)),
+                            date: Some(D!(2020, 10, 29)),
+                            stable: false,
                         },
-                        () => Support::UNIMPLEMENTED,
-                    },
-                    Channel::Beta { prerelease: _ } => Support::Yes, // FIXME
-                    Channel::Nightly | Channel::Dev => match version.commit {
-                        Some(commit) => match () {
-                            // <rust-lang/rust#77213>, base: 1.49.0
-                            () if commit.date >= D!(2020, 10, 29) => Support::Yes,
-                            () => Support::UNIMPLEMENTED,
-                        },
-                        None => match () {
-                            // <rust-lang/rust#77213>
-                            () if version.triple > V!(1, 49, 0) => Support::Yes,
-                            () if version.triple == V!(1, 49, 0) => {
-                                // FIXME: print candidates and version
-                                return Err(error(fmt!(
-                                "could not determine how to forward option `--theme` to the underlying `{}`",
-                                Engine::Rustdoc.name()
-                            ))
-                            .done()
-                            .into());
-                            }
-                            () => Support::UNIMPLEMENTED,
-                        },
-                    },
-                };
-
-                enum Support {
-                    Yes,
-                    No(UnsupportedReason),
-                }
-
-                impl Support {
-                    const UNIMPLEMENTED: Self = Self::No(UnsupportedReason::Unimplemented);
-                    const UNSTABLE: Self = Self::No(UnsupportedReason::Unstable);
-                }
-
-                enum UnsupportedReason {
-                    Unimplemented,
-                    Unstable,
-                }
-
-                match support {
-                    Support::Yes => {
-                        cmd.arg("--default-theme");
+                    ],
+                    Engine::Rustdoc,
+                    "--theme",
+                    opts,
+                    cx,
+                )? {
+                    Ok(opt) => {
+                        cmd.arg(opt);
                         cmd.arg(match theme {
                             Theme::Default => DEFAULT_THEME,
                             Theme::Fixed(theme) => theme,
                         });
                     }
-                    Support::No(reason) => {
-                        match theme {
-                            Theme::Default => {}
-                            // FIMXE: print the actual version
-                            Theme::Fixed(_) => {
-                                let (extra, help) = match reason {
-                                    UnsupportedReason::Unimplemented => ("", None),
-                                    UnsupportedReason::Unstable => {
-                                        (" on stable", Some("consider forcing a nightly identity"))
-                                    }
-                                };
-
-                                let error = error(fmt!(
-                                    "the version of the underlying `{}` does not support setting a default theme{extra}",
-                                    Engine::Rustdoc.name()
-                                ));
-                                let error = match help {
-                                    Some(help) => error.help(fmt!("{help}")),
-                                    None => error,
-                                };
-                                return Err(error.done().into());
-                            }
-                        }
-                    }
+                    Err(error) => match theme {
+                        Theme::Default => {}
+                        Theme::Fixed(_) => return Err(error.into()),
+                    },
                 }
             }
 
@@ -718,59 +642,35 @@ fn configure_shallowness(
     cmd: &mut Command<'_>,
     shallowness: Shallowness,
     e_opts: &EngineOptions<'_>,
+    opts: &Options<'_>,
     cx: Context<'_>,
 ) -> Result<()> {
     match shallowness {
-        Shallowness::ParseOnly => {}
+        Shallowness::ParseOnly => {
+            cmd.arg(select_by_version(
+                &[
+                    // <rust-lang/rust#133590>
+                    Candidate {
+                        key: "-Zparse-crate-root-only",
+                        version: Some(V!(1, 85, 0)),
+                        date: Some(D!(2024, 11, 29)),
+                        stable: false,
+                    },
+                    // 1.0.0, possibly earlier
+                    Candidate { key: "-Zparse-only", version: None, date: None, stable: false },
+                ],
+                e_opts.engine(),
+                "--shallow",
+                opts,
+                cx,
+            )??);
+        }
         Shallowness::CfgFalse => {
-            register_crate_attr(cmd, format_args!("cfg(false)"));
-            return Ok(());
+            // NOTE: We use `any()` over `false` to also support older engines. For simplicity, we do
+            //       so unconditionally instead of querying the version of the underlying engine.
+            register_crate_attr(cmd, format_args!("cfg(any())"));
         }
     }
-
-    let version = version_for_opt(e_opts.engine(), "--shallow", cx)?;
-
-    let syntax = match version.channel {
-        Channel::Stable => match () {
-            () if version.triple >= V!(1, 85, 0) => Syntax::ZeeParseCrateRootOnly,
-            // FIXME: Find the *actual* lower bound.
-            () => Syntax::ZeeParseOnly,
-        },
-        // FIXME: Unimplemented!
-        Channel::Beta { prerelease: _ } => Syntax::ZeeParseCrateRootOnly, // FIXME: Actually unimpl'ed!
-        Channel::Nightly | Channel::Dev => match version.commit {
-            Some(commit) => match () {
-                () if commit.date >= D!(2024, 11, 29) => Syntax::ZeeParseCrateRootOnly,
-                // FIXME: Find the *actual* lower bound.
-                () => Syntax::ZeeParseOnly,
-            },
-            None => match () {
-                () if version.triple > V!(1, 85, 0) => Syntax::ZeeParseCrateRootOnly,
-                () if version.triple == V!(1, 85, 0) => {
-                    // FIXME: Improve wording. Actually print the version and print
-                    //        the two candidates!
-                    return Err(error(fmt!(
-                                    "could not determine how to forward option `--shallow` to the underyling `{}`",
-                                    e_opts.engine().name()
-                                ))
-                                .done()
-                                .into());
-                }
-                // FIXME: Find the *actual* lower bound.
-                () => Syntax::ZeeParseOnly,
-            },
-        },
-    };
-
-    enum Syntax {
-        ZeeParseCrateRootOnly,
-        ZeeParseOnly,
-    }
-
-    cmd.arg(match syntax {
-        Syntax::ZeeParseCrateRootOnly => "-Zparse-crate-root-only",
-        Syntax::ZeeParseOnly => "-Zparse-only",
-    });
 
     Ok(())
 }
@@ -786,69 +686,55 @@ fn configure_forced_identity(
     cmd: &mut Command<'_>,
     identity: Identity,
     e_opts: &EngineOptions<'_>,
+    opts: &Options<'_>,
     cx: Context<'_>,
 ) -> Result<()> {
     let engine = e_opts.engine();
 
-    const ENV_VAR: &str = "RUSTC_BOOTSTRAP";
-    const LEGACY_ENV_VAR: &str = "RUSTC_BOOTSTRAP_KEY";
+    const KEY: &str = "RUSTC_BOOTSTRAP";
+    const LEGACY_KEY: &str = "RUSTC_BOOTSTRAP_KEY";
 
     let (key, value) = match identity {
         Identity::True => {
             // Forcing the true identity isn't a no-op, we want to overwrite any previously set value.
-            (ENV_VAR, "0")
+            (KEY, "0")
         }
         Identity::Stable => {
-            let version = version_for_opt(engine, "--identity", cx)?;
-
-            let supported = match version.channel {
-                Channel::Stable => match () {
-                    () if version.triple >= V!(1, 84, 0) => true,
-                    () => false,
-                },
-                Channel::Beta { prerelease: _ } => true, // FIXME
-                Channel::Nightly | Channel::Dev => match version.commit {
-                    Some(commit) => match () {
-                        // <https://github.com/rust-lang/rust/pull/132993>, base: 1.84.0
-                        () if commit.date >= D!(2024, 11, 18) => true,
-                        () => false,
+            select_by_version(
+                &[
+                    // <rust-lang/rust#132993>
+                    Candidate {
+                        key: (),
+                        version: Some(V!(1, 84, 0)),
+                        date: Some(D!(2024, 11, 18)),
+                        stable: true,
                     },
-                    None => match () {
-                        () if version.triple > V!(1, 84, 0) => true,
-                        () if version.triple == V!(1, 84, 0) => {
-                            // FIXME: print candidates and version
-                            return Err(error(fmt!(
-                                "could not determine how to forward option `--identity` to the underlying `{}`",
-                                engine.name()
-                            ))
-                            .done()
-                            .into());
-                        }
-                        () => false,
-                    },
-                },
-            };
+                ],
+                engine,
+                "--identity",
+                opts,
+                cx,
+            )??;
 
-            if !supported {
-                // FIMXE: print the actual version
-                return Err(error(fmt!(
-                    "the version of the underlying `{}` does not support faking a stable identity",
-                    engine.name()
-                ))
-                .done()
-                .into());
-            }
-
-            (ENV_VAR, "-1")
+            (KEY, "-1")
         }
         Identity::Nightly => {
             let version = version_for_opt(engine, "--identity", cx)?;
 
             match version.channel {
-                Channel::Stable => {
+                Channel::Stable | Channel::Beta { .. } => {
                     if version.triple >= V!(1, 13, 0) {
-                        cmd.env(ENV_VAR, Some("1"));
+                        cmd.env(KEY, Some("1"));
                         return Ok(());
+                    }
+
+                    // FIXME
+                    if let Channel::Beta { .. } = version.channel {
+                        return Err(error(fmt!(
+                            "`--identity` not supported for this engine version yet"
+                        ))
+                        .done()
+                        .into());
                     }
 
                     let secret = match version.triple {
@@ -860,7 +746,7 @@ fn configure_forced_identity(
                         _ => None,
                     };
                     if let Some(secret) = secret {
-                        cmd.env(LEGACY_ENV_VAR, Some(secret));
+                        cmd.env(LEGACY_KEY, Some(secret));
                         return Ok(());
                     }
 
@@ -960,19 +846,16 @@ fn configure_forced_identity(
                     };
 
                     if let Some(secret) = secret {
-                        (LEGACY_ENV_VAR, secret)
+                        (LEGACY_KEY, secret)
                     } else {
-                        // FIXME: proper error message
-                        // FIXME: customize diagnostic for "<1.0" case.
-                        return Err(error(fmt!(
-                            "`--identity` not supported for this engine version"
-                        ))
-                        .done()
+                        return Err(SelectionError {
+                            kind: SelectionErrorKind::Unsupported,
+                            engine,
+                            opt: "--identity",
+                        }
                         .into());
                     }
                 }
-                // FIXME: not yet implemented
-                Channel::Beta { prerelease: _ } => (ENV_VAR, "1"),
                 Channel::Nightly | Channel::Dev => {
                     // I'm not sure if there's an observable difference between nightly/dev and
                     // nightly/dev with a forced nightly identity – I highly doubt it.
@@ -981,7 +864,7 @@ fn configure_forced_identity(
                     // lot of work. Still, we can't just do nothing since we still need to
                     // overwrite any previously set forced stable identity (here we can ignore
                     // the legacy env var which doesn't support that).
-                    (ENV_VAR, "0")
+                    (KEY, "0")
                 }
             }
         }
@@ -1016,24 +899,11 @@ pub(crate) fn open(path: &Path, cx: Context<'_>) -> io::Result<()> {
     open::that(path)
 }
 
+// FIXME: turn this into a query
 pub(crate) fn probe_identity(opts: &Options<'_>) -> Identity {
     // FIXME: This doesn't take into account verbatim env vars (more specifically,
     //        `//@ rustc-env`).
     opts.b_opts.identity.or_else(environment::probe_identity).unwrap_or_default()
-}
-
-fn version_for_opt(engine: Engine, opt: &str, cx: Context<'_>) -> Result<Version<String>> {
-    let error = match engine.version(cx) {
-        Ok(version) => return Ok(version),
-        Err(error) => error,
-    };
-
-    Err(self::error(fmt!("failed to retrieve the version of the underyling `{}`", engine.name()))
-        // FIXME: Don't use the short description, use the proper one once we have one
-        .note(fmt!("caused by: {}", error.short_desc()))
-        .note(fmt!("required in order to correctly forward the option `{opt}`"))
-        .done()
-        .into())
 }
 
 /// Engine-specific build options.
@@ -1097,14 +967,12 @@ impl Engine {
                 AddRuntimeLibraryPath::Yes => true,
                 AddRuntimeLibraryPath::IfAncientVersion => {
                     self.version(cx).is_ok_and(|version| match version.channel {
-                        // NOTE: I couldn't fully verify the beta channel since the earliest beta
-                        // one can download (for my platform) is 1.75-beta at the time of writing.
                         Channel::Stable | Channel::Beta { .. } => version.triple < V!(1, 7, 0),
                         Channel::Nightly | Channel::Dev => match version.commit {
                             // NOTE: I couldn't fully verify this since the earliest nightly one can
                             // download (for my platform) is nightly-2016-03-08 at the time of writing.
                             // I presume the following PR made it unnecessary to add the path:
-                            // <https://github.com/rust-lang/rust/pull/30739>
+                            // <rust-lang/rust#30739>
                             Some(commit) => commit.date < D!(2016, 01, 08),
                             // Conservative choice; we certainly don't want to error out if we can't
                             // determine it (=1.7.0) since that would be annoying and entirely unnecessary.
@@ -1266,6 +1134,121 @@ trait TruncateExt {
 impl TruncateExt for Vec<u8> {
     fn truncate_ascii_end(&mut self) {
         self.truncate(self.trim_ascii_end().len());
+    }
+}
+
+struct Candidate<K> {
+    key: K,
+    version: Option<VersionTriple>,
+    date: Option<Date>,
+    stable: bool,
+}
+
+fn select_by_version<K: Copy>(
+    candidates: &[Candidate<K>],
+    engine: Engine,
+    opt: &'static str,
+    opts: &Options<'_>,
+    cx: Context<'_>,
+) -> Result<Result<K, SelectionError>> {
+    let version = version_for_opt(engine, opt, cx)?;
+
+    let result = 'select: {
+        for candidate in candidates {
+            match version.channel {
+                Channel::Stable | Channel::Beta { .. } => {
+                    if Some(version.triple) >= candidate.version {
+                        break 'select if !candidate.stable
+                            && probe_identity(opts) != Identity::Nightly
+                        {
+                            Err(SelectionErrorKind::Unstable)
+                        } else {
+                            Ok(candidate.key)
+                        };
+                    }
+                }
+                Channel::Nightly | Channel::Dev => {
+                    break 'select match &version.commit {
+                        Some(commit) if Some(commit.date) >= candidate.date => Ok(candidate.key),
+                        Some(_) => continue,
+                        None => match Some(version.triple).cmp(&candidate.version) {
+                            Ordering::Greater => Ok(candidate.key),
+                            Ordering::Equal => Err(SelectionErrorKind::Ambiguity),
+                            Ordering::Less => continue,
+                        },
+                    };
+                }
+            }
+        }
+
+        Err(SelectionErrorKind::Unsupported)
+    };
+
+    Ok(result.map_err(|kind| SelectionError { kind, engine, opt }))
+}
+
+fn version_for_opt(engine: Engine, opt: &str, cx: Context<'_>) -> Result<Version<String>> {
+    let error = match engine.version(cx) {
+        Ok(version) => return Ok(version),
+        Err(error) => error,
+    };
+
+    Err(self::error(fmt!("failed to retrieve the version of the underyling `{}`", engine.name()))
+        // FIXME: Don't use the short description, use the proper one once we have one
+        .note(fmt!("caused by: {}", error.short_desc()))
+        .note(fmt!("required in order to correctly forward the option `{opt}`"))
+        .done()
+        .into())
+}
+
+struct SelectionError {
+    kind: SelectionErrorKind,
+    engine: Engine,
+    opt: &'static str,
+}
+
+impl From<SelectionError> for crate::error::Error {
+    fn from(error: SelectionError) -> Self {
+        error.emit().into()
+    }
+}
+
+enum SelectionErrorKind {
+    Unsupported,
+    Unstable,
+    Ambiguity,
+}
+
+impl SelectionError {
+    // FIXME: Improve the wording of these error messages.
+    fn emit(self) -> EmittedError {
+        let engine = self.engine.name();
+
+        match self.kind {
+            SelectionErrorKind::Unsupported | SelectionErrorKind::Unstable => {
+                let unstable = matches!(self.kind, SelectionErrorKind::Unstable);
+
+                let stably = if unstable { "stably " } else { "" };
+                let error = error(fmt!(
+                    "option `{}` is not {stably}supported with this version of `{engine}`",
+                    self.opt
+                ));
+                let error = if unstable {
+                    error.help(fmt!("consider forcing a nightly identity if possible"))
+                } else {
+                    error
+                };
+                error.done()
+            }
+            SelectionErrorKind::Ambiguity => {
+                // FIXME: give more information
+                let error = error(fmt!(
+                    "could not determine how to forward option `{}` to the underlying {engine}",
+                    self.opt
+                ));
+                error.done()
+            }
+        }
     }
 }
 

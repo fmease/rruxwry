@@ -4,6 +4,7 @@ pub(crate) mod monotonic;
 pub(crate) mod paint;
 pub(crate) mod small_fixed_map;
 
+pub(crate) use core::direct_const_arg as lift;
 pub(crate) use rustc_hash::FxHashMap as HashMap;
 
 pub(crate) fn default<T: Default>() -> T {
