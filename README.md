@@ -15,6 +15,7 @@ Commands:
   build   Compile the given crate with rustc
   clippy  Check the given crate with Clippy
   doc     Document the given crate with rustdoc
+  fmt     Format the given crate with rustfmt
   help    Print this message or the help of the given subcommand(s)
 
 Options:
@@ -144,6 +145,26 @@ Options:
   -v, --verbose                  Use verbose output
       --color <WHEN>             Control when to use color [default: auto] [possible values: auto, always, never]
   -h, --help                     Print help
+```
+<!--COMMAND}-->
+
+<!--{COMMAND-->
+`rruxwry fmt -h`:
+```
+Format the given crate with rustfmt
+
+Usage: rruxwry fmt [OPTIONS] [PATH] [-- [VERBATIM]...]
+
+Arguments:
+  [PATH]         Path to the source file
+  [VERBATIM]...  Flags passed to `rustfmt` verbatim
+
+Options:
+  -e, --edition <EDITION>  Set the edition of the crate
+  -V, --version            Print the underlying rust{,do}c version and halt
+  -v, --verbose            Use verbose output
+      --color <WHEN>       Control when to use color [default: auto] [possible values: auto, always, never]
+  -h, --help               Print help
 ```
 <!--COMMAND}-->
 

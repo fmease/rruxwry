@@ -282,7 +282,8 @@ impl<'src> Version<&'src str> {
         };
 
         let channel = match channel {
-            None => Channel::Stable,
+            // Only rustfmt explicitly writes out "stable" for stable releases.
+            None | Some("stable") => Channel::Stable,
             Some(channel) if let Some(tail) = channel.strip_prefix("beta") => Channel::Beta {
                 prerelease: match tail {
                     "" => None,

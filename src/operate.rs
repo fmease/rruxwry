@@ -30,7 +30,7 @@ pub(crate) fn perform(
     mut opts: Options<'_>,
     deps: Vec<SourcePathBuf>,
     cx: Context<'_>,
-) -> Result<()> {
+) -> Result {
     let mut reads_from_stdin = false;
 
     // FIXME: We currently also reject `printf '…' | rrc -: '…' -x-` since we 'desugar'
@@ -60,6 +60,7 @@ pub(crate) fn perform(
         Operation::Document { mode, open, options: d_opts } => {
             document(mode, open, krate, opts, d_opts, cx)
         }
+        Operation::Format => format(krate, opts, cx),
         Operation::QueryEngineVersion(_) => Ok(()),
     }
 }
@@ -97,7 +98,7 @@ fn clippy(
     opts: Options<'_>,
     cx: Context<'_>,
 ) -> Result {
-    let mut e_opts = EngineOptions::Clippy;
+    let mut e_opts = EngineOptions::ClippyDriver;
     match mode {
         CompileMode::Default => {
             let typ = krate.typ.or(Some(CrateType::LIB));
@@ -183,7 +184,7 @@ fn document<'a>(
     opts: Options<'a>,
     d_opts: DocOptions<'a>,
     cx: Context<'a>,
-) -> Result<()> {
+) -> Result {
     let (krate, opts) = match mode {
         DocMode::Default => build_default(&EngineOptions::Rustdoc(d_opts), krate, opts, cx)?,
         DocMode::CrossCrate => return document_cross_crate(krate, opts, d_opts, open, cx),
@@ -204,7 +205,20 @@ fn document<'a>(
     }
 }
 
-fn open(krate: Crate<'_>, opts: &Options<'_>, cx: Context<'_>) -> Result<()> {
+fn format(krate: Crate<'_, ExtEdition<'_>>, opts: Options<'_>, cx: Context<'_>) -> Result {
+    if let Some(SourcePath::Stdin) = krate.path {
+        return Err(error(fmt!("rustfmt doesn't support passing source code via STDIN"))
+            .done()
+            .into());
+    }
+
+    let e_opts = EngineOptions::Rustfmt;
+    let edition = krate.edition.unwrap_or(ExtEdition::LatestStable).resolve(e_opts.engine(), cx);
+    let krate = Crate { edition, ..krate };
+    build::perform(&e_opts, krate, &opts, ImplyUnstableOptions::No, cx)
+}
+
+fn open(krate: Crate<'_>, opts: &Options<'_>, cx: Context<'_>) -> Result {
     let Some(path) = krate.path else { return Ok(()) };
 
     let mut artifact_path = PathBuf::from("./doc");
@@ -240,7 +254,7 @@ fn document_cross_crate(
     d_opts: DocOptions<'_>,
     open: Open,
     cx: Context<'_>,
-) -> Result<()> {
+) -> Result {
     let path = krate.path.ok_or_else(|| {
         error(fmt!(
             "the `PATH` argument was not provided but it's required under `-X`, `--cross-crate`"
@@ -424,9 +438,10 @@ fn build_directive_driven<'a>(
 
     opts.v_opts.extend(directives.v_opts);
     match e_opts {
-        EngineOptions::Clippy => {}
-        EngineOptions::Rustc(..) => {} // rustc-exclusive (verbatim) flags is not a thing.
         EngineOptions::Rustdoc(d_opts) => d_opts.v_opts.extend(directives.v_d_opts),
+        // compiletest doesn't feature directives for exclusively
+        // passing verbatim flags to these engines
+        EngineOptions::ClippyDriver | EngineOptions::Rustc(..) | EngineOptions::Rustfmt => {}
     }
 
     build::perform(e_opts, krate, &opts, ImplyUnstableOptions::No, cx)?;
@@ -450,7 +465,7 @@ fn compile_auxiliary<'a>(
     doc: bool,
     cx: Context<'a>,
     parent_extern_crates: &mut Vec<String>,
-) -> Result<()> {
+) -> Result {
     let path = path.map(|path| base_path.join(path));
 
     let directives = directive::gather(
@@ -504,7 +519,7 @@ fn compile_auxiliary<'a>(
             //        get checked-only and everything working out (linking correctly etc)?
             //        I suspect is doesn't because we need to s%/rlib/rmeta/
             EngineOptions::Rustc(..) => e_opts,
-            EngineOptions::Clippy | EngineOptions::Rustdoc(_) => {
+            EngineOptions::ClippyDriver | EngineOptions::Rustdoc(_) | EngineOptions::Rustfmt => {
                 const { &EngineOptions::Rustc(CompileOptions::default()) }
             }
         },
@@ -530,7 +545,11 @@ fn compile_auxiliary<'a>(
 
 fn scope(e_opts: &EngineOptions<'_>) -> directive::Scope {
     match e_opts {
-        EngineOptions::Clippy | EngineOptions::Rustc(..) => directive::Scope::Base,
+        // FIXME: The scope for rustfmt should be much smaller (it obv. doesn't even support
+        //        opts like `--extern` and `-L`, so auxiliaries can't be a thing!).
+        EngineOptions::ClippyDriver | EngineOptions::Rustc(..) | EngineOptions::Rustfmt => {
+            directive::Scope::Base
+        }
         // FIXME: Do we actually want to treat !`-j` as `rustdoc/` (Scope::HtmlDocCk)
         //        instead of `rustdoc-ui/` ("Scope::Rustdoc")
         EngineOptions::Rustdoc(d_opts) => match d_opts.backend {
@@ -573,16 +592,15 @@ fn render_engine_version(engine: Engine, opts: &Options<'_>, cx: Context<'_>) ->
     let mut p = Painter::new(io::stdout().lock(), io::BufWriter::new);
 
     let engines: &[_] = match engine {
-        Engine::Clippy => &[engine],
         Engine::Rustc => &[engine],
-        Engine::Rustdoc => &[engine, Engine::Rustc],
+        Engine::ClippyDriver | Engine::Rustdoc | Engine::Rustfmt => &[engine, Engine::Rustc],
     };
 
     let padding = engines.iter().map(|engine| engine.name().len()).max().unwrap_or_default();
 
     for &engine in engines {
         write!(p, "{:>padding$}: ", engine.name())?;
-        match engine.version(cx) {
+        match engine.real_version(cx) {
             Ok(version) => version.paint(build::probe_identity(opts), &mut p),
             Err(error) => p.with(AnsiColor::Red, |p| write!(p, "[{}]", error.short_desc())),
         }?;
@@ -599,9 +617,10 @@ impl<S: AsRef<str>> Revision<S> {
 }
 
 pub(crate) enum Operation {
-    Compile { mode: CompileMode, run: Run, options: CompileOptions },
     Clippy { mode: CompileMode },
+    Compile { mode: CompileMode, run: Run, options: CompileOptions },
     Document { mode: DocMode, open: Open, options: DocOptions<'static> },
+    Format,
     QueryEngineVersion(Engine),
 }
 
