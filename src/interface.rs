@@ -41,63 +41,80 @@ pub(crate) fn arguments() -> Arguments {
                 .alias("d")
                 .about("Document the given crate with rustdoc")
                 .defer(with_doc_args),
+            clap::Command::new(id::fmt)
+                .alias("f")
+                .about("Format the given crate with rustfmt")
+                .defer(with_fmt_args),
         ])
         .get_matches_from(args);
 
     // unwrap: handled by `clap`.
-    let (operation, mut matches) = matches.remove_subcommand().unwrap();
+    let (op, mut matches) = matches.remove_subcommand().unwrap();
 
-    let query_engine_version: bool =
-        matches.remove_one(id::query_engine_version).unwrap_or_default();
+    let op = extract_operation(&op, &mut matches);
 
-    let operation = match query_engine_version {
-        true => Operation::QueryEngineVersion(match operation.as_str() {
-            id::build => Engine::Rustc,
-            id::clippy => Engine::Clippy,
-            id::doc => Engine::Rustdoc,
-
-            id => panic!("unhandled operation `{id}`"),
-        }),
-        false => extract_normal_operation(&operation, &mut matches),
-    };
-
-    // FIXME: Don't leak the crate type and the edition!
-    //        Sadly, clap doesn't support zero-copy deserialization /
-    //        deserializing from borrowed program arguments and providing &strs.
-    //        Fix: Throw out clap and do it manually.
-
-    let source = matches.remove_one(id::SOURCE).map(Source::String);
     let path = matches.remove_one(id::PATH).map(SourcePathBuf::new);
-    let source = source.xor(path.map(Source::Path));
+
+    let source = matches
+        .try_remove_one(id::SOURCE)
+        .map(|source| source.map(Source::String))
+        .unwrap_or_default();
+    let source = path.map(Source::Path).or(source);
 
     Arguments {
         toolchain,
         source,
         dependencies: matches
-            .remove_many(id::extern_)
-            .map(|paths| paths.into_iter().map(SourcePathBuf::new).collect())
+            .try_remove_many(id::extern_)
+            .map(|paths| paths.map(|paths| paths.into_iter().map(SourcePathBuf::new).collect()))
+            .unwrap_or_default()
             .unwrap_or_default(),
         verbatim: matches.remove_many(id::verbatim).map(Iterator::collect).unwrap_or_default(),
-        operation,
-        crate_name: matches.remove_one(id::crate_name),
+        operation: op,
+        crate_name: matches.try_remove_one(id::crate_name).unwrap_or_default(),
+        // FIXME: Don't leak the crate type!
+        //        Sadly, clap doesn't support zero-copy deserialization /
+        //        deserializing from borrowed program arguments and providing &strs.
+        //        Fix: Throw out clap and do it manually.
         crate_type: matches
-            .remove_one(id::crate_type)
-            .map(|typ: String| CrateType::parse_cli_style(typ.leak())),
+            .try_remove_one(id::crate_type)
+            .map(|typ| typ.map(|typ| CrateType::parse_cli_style(String::leak(typ))))
+            .unwrap_or_default(),
         edition: matches.remove_one(id::EDITION),
         b_opts: BuildOptions {
-            cfgs: matches.remove_many(id::cfgs).map(Iterator::collect).unwrap_or_default(),
+            cfgs: matches
+                .try_remove_many(id::cfgs)
+                .map(|cfgs| cfgs.map(Iterator::collect))
+                .unwrap_or_default()
+                .unwrap_or_default(),
             unstable_features: matches
-                .remove_many(id::unstable_features)
-                .map(Iterator::collect)
+                .try_remove_many(id::unstable_features)
+                .map(|features| features.map(Iterator::collect))
+                .unwrap_or_default()
                 .unwrap_or_default(),
             extern_crates: default(),
-            suppress_lints: matches.remove_one(id::suppress_lints).unwrap_or_default(),
-            internals: matches.remove_one(id::internals).unwrap_or_default(),
-            next_solver: matches.remove_one(id::next_solver).unwrap_or_default(),
-            identity: matches.remove_one(id::identity),
-            no_dedupe: matches.remove_one(id::no_dedupe).unwrap_or_default(),
-            log: matches.remove_one(id::log),
-            no_backtrace: matches.remove_one(id::no_backtrace).unwrap_or_default(),
+            suppress_lints: matches
+                .try_remove_one(id::suppress_lints)
+                .unwrap_or_default()
+                .unwrap_or_default(),
+            internals: matches
+                .try_remove_one(id::internals)
+                .unwrap_or_default()
+                .unwrap_or_default(),
+            next_solver: matches
+                .try_remove_one(id::next_solver)
+                .unwrap_or_default()
+                .unwrap_or_default(),
+            identity: matches.try_remove_one(id::identity).unwrap_or_default(),
+            no_dedupe: matches
+                .try_remove_one(id::no_dedupe)
+                .unwrap_or_default()
+                .unwrap_or_default(),
+            log: matches.try_remove_one(id::log).unwrap_or_default(),
+            no_backtrace: matches
+                .try_remove_one(id::no_backtrace)
+                .unwrap_or_default()
+                .unwrap_or_default(),
         },
         dbg_opts: DebugOptions { verbose: matches.remove_one(id::verbose).unwrap() },
         color: matches.remove_one(id::color).unwrap(),
@@ -131,9 +148,9 @@ fn extract_toolchain(mut args: std::env::ArgsOs) -> (Option<PlusPrefixedToolchai
     (toolchain, result)
 }
 
-fn with_build_args(command: clap::Command) -> clap::Command {
-    command
-        .args(source_args())
+fn with_build_args(cmd: clap::Command) -> clap::Command {
+    cmd.args(source_args())
+        .arg(extern_arg())
         .arg(verbatim_arg().help("Flags passed to `rustc` verbatim"))
         .arg(
             clap::Arg::new(id::run)
@@ -180,9 +197,11 @@ fn with_build_args(command: clap::Command) -> clap::Command {
 }
 
 // FIXME: Audit. Currently, this is an MVP only.
-fn with_clippy_args(command: clap::Command) -> clap::Command {
-    command
-        .args(source_args())
+// FIXME: Does clippy actually support forced identities?
+// FIXME: Does Clippy actually support tracing/logging?
+fn with_clippy_args(cmd: clap::Command) -> clap::Command {
+    cmd.args(source_args())
+        .arg(extern_arg())
         .arg(verbatim_arg().help("Flags passed to `rustc` and `clippy-driver` verbatim"))
         .args(compiletest_args())
         .args(crate_name_and_type_args())
@@ -191,9 +210,9 @@ fn with_clippy_args(command: clap::Command) -> clap::Command {
         .args(extra_args())
 }
 
-fn with_doc_args(command: clap::Command) -> clap::Command {
-    command
-        .args(source_args())
+fn with_doc_args(cmd: clap::Command) -> clap::Command {
+    cmd.args(source_args())
+        .arg(extern_arg())
         .arg(verbatim_arg().help("Flags passed to `rustc` and `rustdoc` verbatim"))
         .arg(
             clap::Arg::new(id::open)
@@ -258,28 +277,47 @@ fn with_doc_args(command: clap::Command) -> clap::Command {
         .args(extra_args())
 }
 
+// FIXME: Audit. Currently, this is an MVP only.
+// FIXME: Add `-c, --check-only`
+fn with_fmt_args(cmd: clap::Command) -> clap::Command {
+    // FIXME: Does rustfmt support forced identities?
+    // FIXME: Does rustfmt support no-dedupe?
+    // FIXME: Does rustfmt support tracing/logging?
+    cmd.arg(path_arg())
+        .arg(verbatim_arg().help("Flags passed to `rustfmt` verbatim"))
+        .arg(edition_arg())
+        .args(dbg_args())
+}
+
 fn source_args() -> impl IntoIterator<Item = clap::Arg> {
     [
-        // The path is intentionally optional to enable invocations like `rrc -V`, `rrc -- -h`,
-        // `rrc -- -Zhelp`, `rrc -- -Chelp`, etc.
-        clap::Arg::new(id::PATH)
-            .value_parser(clap::builder::ValueParser::path_buf())
-            .help("Path to the source file"),
+        path_arg(),
         clap::Arg::new(id::SOURCE)
             .short(':')
             .long("source")
             .conflicts_with(id::PATH)
             .help("Provide the source code"),
-        clap::Arg::new(id::extern_)
-            .short('x')
-            .long("extern")
-            .value_name("PATH")
-            .value_parser(clap::builder::ValueParser::path_buf())
-            .action(clap::ArgAction::Append)
-            // FIXME: Temporary limitation of the operation module.
-            .conflicts_with(id::directives)
-            .help("Add the source file path to an extern crate"),
     ]
+}
+
+fn path_arg() -> clap::Arg {
+    // The path is intentionally optional to enable invocations like `rrc -V`, `rrc -- -h`,
+    // `rrc -- -Zhelp`, `rrc -- -Chelp`, etc.
+    clap::Arg::new(id::PATH)
+        .value_parser(clap::builder::ValueParser::path_buf())
+        .help("Path to the source file")
+}
+
+fn extern_arg() -> clap::Arg {
+    clap::Arg::new(id::extern_)
+        .short('x')
+        .long("extern")
+        .value_name("PATH")
+        .value_parser(clap::builder::ValueParser::path_buf())
+        .action(clap::ArgAction::Append)
+        // FIXME: Temporary limitation of the operation module.
+        .conflicts_with(id::directives)
+        .help("Add the source file path to an extern crate")
 }
 
 fn verbatim_arg() -> clap::Arg {
@@ -363,46 +401,54 @@ fn cfg_args() -> impl IntoIterator<Item = clap::Arg> {
 }
 
 fn extra_args() -> impl IntoIterator<Item = clap::Arg> {
+    std::iter::chain(
+        [
+            clap::Arg::new(id::suppress_lints)
+                .short('/')
+                .long("suppress-lints")
+                .action(clap::ArgAction::SetTrue)
+                .help("Cap lints at allow level"),
+            clap::Arg::new(id::internals)
+                .short('#')
+                .long("internals")
+                .action(clap::ArgAction::SetTrue)
+                .help("Enable internal pretty-printing of data types"),
+            clap::Arg::new(id::next_solver)
+                .short('N')
+                .long("next-solver")
+                .action(clap::ArgAction::SetTrue)
+                .help("Enable the next-gen trait solver"),
+            clap::Arg::new(id::identity)
+                .short('I')
+                .long("identity")
+                .value_name("IDENTITY")
+                .value_parser(Identity::parse_cli_style)
+                .help("Force rust{,do}c's identity"),
+            // FIXME: Does this actually work for rustdoc?
+            clap::Arg::new(id::no_dedupe)
+                .short('D')
+                .long("no-dedupe")
+                .action(clap::ArgAction::SetTrue)
+                .help("Don't deduplicate diagnostics"),
+            clap::Arg::new(id::log)
+                .long("log")
+                .value_name("FILTER")
+                .require_equals(true)
+                .num_args(..=1)
+                .default_missing_value("debug")
+                .help("Enable rust{,do}c logging. FILTER defaults to `debug`"),
+            clap::Arg::new(id::no_backtrace)
+                .short('B')
+                .long("no-backtrace")
+                .action(clap::ArgAction::SetTrue)
+                .help("Override `RUST_BACKTRACE` to be `0`"),
+        ],
+        dbg_args(),
+    )
+}
+
+fn dbg_args() -> impl IntoIterator<Item = clap::Arg> {
     [
-        clap::Arg::new(id::suppress_lints)
-            .short('/')
-            .long("suppress-lints")
-            .action(clap::ArgAction::SetTrue)
-            .help("Cap lints at allow level"),
-        clap::Arg::new(id::internals)
-            .short('#')
-            .long("internals")
-            .action(clap::ArgAction::SetTrue)
-            .help("Enable internal pretty-printing of data types"),
-        clap::Arg::new(id::next_solver)
-            .short('N')
-            .long("next-solver")
-            .action(clap::ArgAction::SetTrue)
-            .help("Enable the next-gen trait solver"),
-        clap::Arg::new(id::identity)
-            .short('I')
-            .long("identity")
-            .value_name("IDENTITY")
-            .value_parser(Identity::parse_cli_style)
-            .help("Force rust{,do}c's identity"),
-        // FIXME: Does this actually work for rustdoc?
-        clap::Arg::new(id::no_dedupe)
-            .short('D')
-            .long("no-dedupe")
-            .action(clap::ArgAction::SetTrue)
-            .help("Don't deduplicate diagnostics"),
-        clap::Arg::new(id::log)
-            .long("log")
-            .value_name("FILTER")
-            .require_equals(true)
-            .num_args(..=1)
-            .default_missing_value("debug")
-            .help("Enable rust{,do}c logging. FILTER defaults to `debug`"),
-        clap::Arg::new(id::no_backtrace)
-            .short('B')
-            .long("no-backtrace")
-            .action(clap::ArgAction::SetTrue)
-            .help("Override `RUST_BACKTRACE` to be `0`"),
         clap::Arg::new(id::query_engine_version)
             .short('V')
             .long("version")
@@ -422,16 +468,29 @@ fn extra_args() -> impl IntoIterator<Item = clap::Arg> {
     ]
 }
 
-fn extract_normal_operation(operation: &str, matches: &mut clap::ArgMatches) -> Operation {
-    let dir_opts = extract_dir_opts(matches);
+fn extract_operation(op: &str, matches: &mut clap::ArgMatches) -> Operation {
+    let engine = match op {
+        id::build => Engine::Rustc,
+        id::clippy => Engine::ClippyDriver,
+        id::doc => Engine::Rustdoc,
+        id::fmt => Engine::Rustfmt,
+        id => panic!("unhandled operation `{id}`"),
+    };
 
-    match operation {
-        id::build => Operation::Compile {
+    let query_engine_version: bool =
+        matches.remove_one(id::query_engine_version).unwrap_or_default();
+
+    if query_engine_version {
+        return Operation::QueryEngineVersion(engine);
+    }
+
+    match engine {
+        Engine::Rustc => Operation::Compile {
             run: match matches.remove_one::<bool>(id::run).unwrap_or_default() {
                 true => Run::Yes,
                 false => Run::No,
             },
-            mode: match dir_opts {
+            mode: match extract_dir_opts(matches) {
                 Some(dir_opts) => CompileMode::DirectiveDriven(dir_opts),
                 None => CompileMode::Default,
             },
@@ -441,18 +500,21 @@ fn extract_normal_operation(operation: &str, matches: &mut clap::ArgMatches) -> 
                 dump: matches.remove_one(id::dump),
             },
         },
-        id::clippy => Operation::Clippy {
-            mode: match dir_opts {
+        Engine::ClippyDriver => Operation::Clippy {
+            mode: match extract_dir_opts(matches) {
                 Some(dir_opts) => CompileMode::DirectiveDriven(dir_opts),
                 None => CompileMode::Default,
             },
         },
-        id::doc => Operation::Document {
+        Engine::Rustdoc => Operation::Document {
             open: match matches.remove_one::<bool>(id::open).unwrap_or_default() {
                 true => Open::Yes,
                 false => Open::No,
             },
-            mode: match (matches.remove_one(id::cross_crate).unwrap_or_default(), dir_opts) {
+            mode: match (
+                matches.remove_one(id::cross_crate).unwrap_or_default(),
+                extract_dir_opts(matches),
+            ) {
                 (true, None) => DocMode::CrossCrate,
                 (false, Some(dir_opts)) => DocMode::DirectiveDriven(dir_opts),
                 (false, None) => DocMode::Default,
@@ -479,7 +541,7 @@ fn extract_normal_operation(operation: &str, matches: &mut clap::ArgMatches) -> 
                 v_opts: default(),
             },
         },
-        id => panic!("unhandled subcommand `{id}`"),
+        Engine::Rustfmt => Operation::Format,
     }
 }
 
@@ -706,6 +768,7 @@ ids! {
     doc,
     dump,
     extern_,
+    fmt,
     hidden,
     identity,
     internals,

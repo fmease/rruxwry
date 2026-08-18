@@ -71,6 +71,20 @@ fn version_beta_channel_prerelease() {
 }
 
 #[test]
+fn version_explicit_stable_channel() {
+    // This form is only used by rustfmt as far as I'm aware.
+    assert_eq!(
+        Version::parse("1.9.0-stable (8bab26f4f 2026-07-14)"),
+        Some(Version {
+            triple: V!(1, 9, 0),
+            channel: Channel::Stable,
+            commit: Some(Commit { short_sha: "8bab26f4f", date: D!(2026, 07, 14) }),
+            tag: "",
+        })
+    );
+}
+
+#[test]
 fn version_commit_info() {
     assert_eq!(
         Version::parse("0.0.0-dev (123456789 2000-01-01)"),

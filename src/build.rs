@@ -42,23 +42,13 @@ pub(crate) fn perform(
         .command(cx, AddRuntimeLibraryPath::IfAncientVersion)
         .map_err(|error| error.emit(engine))?;
     configure_early(&mut cmd, e_opts, krate, opts, cx)?;
-    configure_late(&mut cmd, engine, opts, cx)?;
-
-    if let ImplyUnstableOptions::Yes = imply_u_opts
-        && match probe_identity(opts) {
-            Identity::True => engine.version(cx).is_ok_and(|v| v.channel.allows_unstable()),
-            Identity::Stable => false,
-            Identity::Nightly => true,
-        }
-    {
-        cmd.arg("-Zunstable-options");
-    }
+    configure_late(&mut cmd, engine, opts, imply_u_opts, cx)?;
 
     cmd.execute()?.exit_ok().map_err(io::Error::other)?;
     Ok(())
 }
 
-/// Don't call this directly! Use [`EngineKind::path`] instead.
+/// Don't call this directly! Use [`Engine::path`] instead.
 fn query_engine_path(engine: Engine, cx: Context<'_>) -> Result<PathBuf, QueryEnginePathError> {
     use QueryEnginePathError as Error;
 
@@ -166,25 +156,15 @@ impl QueryEnginePathError {
     }
 }
 
-/// Don't call this directly! Use [`EngineKind::version`] instead.
+/// Don't call this directly! Use [`Engine::version`] instead.
 fn query_engine_version(
     engine: Engine,
     cx: Context<'_>,
 ) -> Result<Version<String>, QueryEngineVersionError> {
-    use QueryEngineVersionError as Error;
+    // Reminder: You can set the env var `RUSTC_OVERRIDE_VERSION_STRING` to
+    // overwrite the version output by rust{,do}c (for the purpose of testing).
 
-    let engine = match engine {
-        // For now for simplicity we're just gonna use the version of the "corresponding" rustc.
-        //
-        // Clippy maintains its own versioning system whose version triple seems to be rustc's
-        // but shifted one to the right & zero-extended (so 1.97.1 => 0.1.97).
-        //
-        // I don't feel like digging deeper into this & updating all version-dependent lowerings
-        // to account for that new scheme. Using rustc's version should be good enough for the
-        // time being.
-        Engine::Clippy => Engine::Rustc,
-        _ => engine,
-    };
+    use QueryEngineVersionError as Error;
 
     let mut cmd = engine.command(cx, AddRuntimeLibraryPath::Yes).map_err(Error::EnginePathError)?;
 
@@ -202,7 +182,7 @@ fn query_engine_version(
     // The name of the engine *has* to exist for the version string to be considered valid!
     let (name, source) = source.split_once(' ').ok_or(Error::Malformed)?;
 
-    if name != engine.name() {
+    if name != engine.name_for_version_string() {
         return Err(Error::Malformed);
     }
 
@@ -451,6 +431,7 @@ fn configure_late(
     cmd: &mut Command<'_>,
     engine: Engine,
     opts: &Options<'_>,
+    imply_u_opts: ImplyUnstableOptions,
     cx: Context<'_>,
 ) -> Result<()> {
     // The crate name can't depend on any dependency crates, it's fine to skip this.
@@ -461,8 +442,11 @@ fn configure_late(
     // and even if that were to change at some point, rustc will never expand macros
     // in order to find `#![crate_name]` (ruled by T-lang).
 
-    // FIXME: Only add this when requested by `operate`.
-    cmd.arg("-Lcrate=.");
+    match engine {
+        // FIXME: Only add this when smh. requested by `operate`.
+        Engine::ClippyDriver | Engine::Rustc | Engine::Rustdoc => cmd.arg("-Lcrate=."),
+        Engine::Rustfmt => {}
+    }
 
     for ext in &opts.b_opts.extern_crates {
         cmd.arg("--extern");
@@ -527,6 +511,16 @@ fn configure_late(
         cmd.env(key, Some(filter));
     }
 
+    if let ImplyUnstableOptions::Yes = imply_u_opts
+        && match probe_identity(opts) {
+            Identity::True => engine.version(cx).is_ok_and(|v| v.channel.allows_unstable()),
+            Identity::Stable => false,
+            Identity::Nightly => true,
+        }
+    {
+        cmd.arg("-Zunstable-options");
+    }
+
     Ok(())
 }
 
@@ -546,7 +540,7 @@ fn configure_e_opts(
     cx: Context<'_>,
 ) -> Result<()> {
     match e_opts {
-        EngineOptions::Clippy => {}
+        EngineOptions::ClippyDriver => {}
         EngineOptions::Rustc(c_opts) => {
             if c_opts.check_only {
                 // FIXME: Should we `-o $null`?
@@ -647,6 +641,7 @@ fn configure_e_opts(
 
             cmd.args(&d_opts.v_opts.arguments);
         }
+        EngineOptions::Rustfmt => {}
     }
 
     Ok(())
@@ -922,41 +917,52 @@ pub(crate) fn probe_identity(opts: &Options<'_>) -> Identity {
 
 /// Engine-specific build options.
 pub(crate) enum EngineOptions<'a> {
-    Clippy,
+    ClippyDriver,
     Rustc(CompileOptions),
     Rustdoc(DocOptions<'a>),
+    Rustfmt,
 }
 
 impl EngineOptions<'_> {
     pub(crate) fn engine(&self) -> Engine {
         match self {
-            Self::Clippy => Engine::Clippy,
+            Self::ClippyDriver => Engine::ClippyDriver,
             Self::Rustc(_) => Engine::Rustc,
             Self::Rustdoc(_) => Engine::Rustdoc,
+            Self::Rustfmt => Engine::Rustfmt,
         }
     }
 }
 
 #[derive(Clone, Copy, SmallKey)]
 pub(crate) enum Engine {
-    Clippy,
+    ClippyDriver,
     Rustc,
     Rustdoc,
+    Rustfmt,
 }
 
 impl Engine {
     pub(crate) const fn name(self) -> &'static str {
         match self {
-            Self::Clippy => "clippy-driver",
+            Self::ClippyDriver => "clippy-driver",
             Self::Rustc => "rustc",
             Self::Rustdoc => "rustdoc",
+            Self::Rustfmt => "rustfmt",
+        }
+    }
+
+    const fn name_for_version_string(self) -> &'static str {
+        match self {
+            Self::ClippyDriver => "clippy",
+            _ => self.name(),
         }
     }
 
     const fn logging_env_key(self) -> Option<&'static str> {
         match self {
-            // FIXME: Figure out the name of the key if there's any.
-            Self::Clippy => None,
+            // FIXME: Figure out the name of these keys if there're any.
+            Self::ClippyDriver | Self::Rustfmt => None,
             Self::Rustc => Some("RUSTC_LOG"),
             // FIXME: Shouldn't we *also* set RUSTC_LOG? After all, both can be built from source &
             //        they have two separate logging setups that are both run (right?).
@@ -966,9 +972,10 @@ impl Engine {
 
     fn env_opts(self) -> Option<&'static [String]> {
         match self {
-            Self::Clippy => None, // FIXME: Introduce CLIPPY_FLAGS
+            Self::ClippyDriver => None, // FIXME: Introduce CLIPPY_FLAGS
             Self::Rustc => environment::rustc_options(),
             Self::Rustdoc => environment::rustdoc_options(),
+            Self::Rustfmt => None,
         }
     }
 
@@ -1015,9 +1022,26 @@ impl Engine {
         Ok(cmd)
     }
 
-    // Reminder: You can set the env var `RUSTC_OVERRIDE_VERSION_STRING` to
-    // overwrite the version output by rust{,do}c (for the purpose of testing).
     pub(crate) fn version(
+        self,
+        cx: Context<'_>,
+    ) -> Result<Version<String>, QueryEngineVersionError> {
+        // For now for simplicity we're just gonna use the version of the "corresponding" rustc for
+        // engines that use a "wildly different" versioning system since I don't feel like digging
+        // deeper into this matter & updating all version-dependent lowerings to account for every
+        // custom scheme. Using rustc's version should be good enough for the time being.
+        let engine = match self {
+            // For context, the version triple seems to be rustc's but shifted one to the right and
+            // zero-extended (so, 1.97.1 => 0.1.97).
+            Self::ClippyDriver => Self::Rustc,
+            Self::Rustfmt => Self::Rustc,
+            _ => self,
+        };
+
+        engine.real_version(cx)
+    }
+
+    pub(crate) fn real_version(
         self,
         cx: Context<'_>,
     ) -> Result<Version<String>, QueryEngineVersionError> {
