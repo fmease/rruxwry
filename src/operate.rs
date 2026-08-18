@@ -53,6 +53,7 @@ pub(crate) fn perform(
     compile_deps(deps, &mut opts.b_opts.extern_crates, cx)?;
 
     match op {
+        Operation::Clippy { mode } => clippy(mode, krate, opts, cx),
         Operation::Compile { mode, run, options: c_opts } => {
             compile(mode, run, krate, opts, c_opts, cx)
         }
@@ -87,6 +88,26 @@ fn compile_deps(deps: Vec<SourcePathBuf>, registry: &mut Vec<String>, cx: Contex
         registry.push(name.into_inner());
     }
 
+    Ok(())
+}
+
+fn clippy(
+    mode: CompileMode,
+    krate: Crate<'_, ExtEdition<'_>>,
+    opts: Options<'_>,
+    cx: Context<'_>,
+) -> Result {
+    let mut e_opts = EngineOptions::Clippy;
+    match mode {
+        CompileMode::Default => {
+            let typ = krate.typ.or(Some(CrateType::LIB));
+            let krate = Crate { typ, ..krate };
+            build_default(&e_opts, krate, opts, cx)?;
+        }
+        CompileMode::DirectiveDriven(dir_opts) => {
+            build_directive_driven(&mut e_opts, krate, dir_opts, opts, cx)?;
+        }
+    }
     Ok(())
 }
 
@@ -403,6 +424,7 @@ fn build_directive_driven<'a>(
 
     opts.v_opts.extend(directives.v_opts);
     match e_opts {
+        EngineOptions::Clippy => {}
         EngineOptions::Rustc(..) => {} // rustc-exclusive (verbatim) flags is not a thing.
         EngineOptions::Rustdoc(d_opts) => d_opts.v_opts.extend(directives.v_d_opts),
     }
@@ -482,7 +504,9 @@ fn compile_auxiliary<'a>(
             //        get checked-only and everything working out (linking correctly etc)?
             //        I suspect is doesn't because we need to s%/rlib/rmeta/
             EngineOptions::Rustc(..) => e_opts,
-            EngineOptions::Rustdoc(_) => const { &EngineOptions::Rustc(CompileOptions::default()) },
+            EngineOptions::Clippy | EngineOptions::Rustdoc(_) => {
+                const { &EngineOptions::Rustc(CompileOptions::default()) }
+            }
         },
         krate,
         &opts,
@@ -506,7 +530,7 @@ fn compile_auxiliary<'a>(
 
 fn scope(e_opts: &EngineOptions<'_>) -> directive::Scope {
     match e_opts {
-        EngineOptions::Rustc(..) => directive::Scope::Base,
+        EngineOptions::Clippy | EngineOptions::Rustc(..) => directive::Scope::Base,
         // FIXME: Do we actually want to treat !`-j` as `rustdoc/` (Scope::HtmlDocCk)
         //        instead of `rustdoc-ui/` ("Scope::Rustdoc")
         EngineOptions::Rustdoc(d_opts) => match d_opts.backend {
@@ -549,8 +573,9 @@ fn render_engine_version(engine: Engine, opts: &Options<'_>, cx: Context<'_>) ->
     let mut p = Painter::new(io::stdout().lock(), io::BufWriter::new);
 
     let engines: &[_] = match engine {
-        Engine::Rustc => &[Engine::Rustc],
-        Engine::Rustdoc => &[Engine::Rustdoc, Engine::Rustc],
+        Engine::Clippy => &[engine],
+        Engine::Rustc => &[engine],
+        Engine::Rustdoc => &[engine, Engine::Rustc],
     };
 
     let padding = engines.iter().map(|engine| engine.name().len()).max().unwrap_or_default();
@@ -575,6 +600,7 @@ impl<S: AsRef<str>> Revision<S> {
 
 pub(crate) enum Operation {
     Compile { mode: CompileMode, run: Run, options: CompileOptions },
+    Clippy { mode: CompileMode },
     Document { mode: DocMode, open: Open, options: DocOptions<'static> },
     QueryEngineVersion(Engine),
 }

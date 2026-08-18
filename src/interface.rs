@@ -33,6 +33,10 @@ pub(crate) fn arguments() -> Arguments {
                 .alias("b")
                 .about("Compile the given crate with rustc")
                 .defer(with_build_args),
+            clap::Command::new(id::clippy)
+                .alias("c")
+                .about("Check the given crate with Clippy")
+                .defer(with_clippy_args),
             clap::Command::new(id::doc)
                 .alias("d")
                 .about("Document the given crate with rustdoc")
@@ -49,7 +53,9 @@ pub(crate) fn arguments() -> Arguments {
     let operation = match query_engine_version {
         true => Operation::QueryEngineVersion(match operation.as_str() {
             id::build => Engine::Rustc,
+            id::clippy => Engine::Clippy,
             id::doc => Engine::Rustdoc,
+
             id => panic!("unhandled operation `{id}`"),
         }),
         false => extract_normal_operation(&operation, &mut matches),
@@ -127,7 +133,7 @@ fn extract_toolchain(mut args: std::env::ArgsOs) -> (Option<PlusPrefixedToolchai
 
 fn with_build_args(command: clap::Command) -> clap::Command {
     command
-        .args(source_arg())
+        .args(source_args())
         .arg(verbatim_arg().help("Flags passed to `rustc` verbatim"))
         .arg(
             clap::Arg::new(id::run)
@@ -173,9 +179,21 @@ fn with_build_args(command: clap::Command) -> clap::Command {
         .args(extra_args())
 }
 
+// FIXME: Audit. Currently, this is an MVP only.
+fn with_clippy_args(command: clap::Command) -> clap::Command {
+    command
+        .args(source_args())
+        .arg(verbatim_arg().help("Flags passed to `rustc` and `clippy-driver` verbatim"))
+        .args(compiletest_args())
+        .args(crate_name_and_type_args())
+        .arg(edition_arg())
+        .args(cfg_args())
+        .args(extra_args())
+}
+
 fn with_doc_args(command: clap::Command) -> clap::Command {
     command
-        .args(source_arg())
+        .args(source_args())
         .arg(verbatim_arg().help("Flags passed to `rustc` and `rustdoc` verbatim"))
         .arg(
             clap::Arg::new(id::open)
@@ -240,7 +258,7 @@ fn with_doc_args(command: clap::Command) -> clap::Command {
         .args(extra_args())
 }
 
-fn source_arg() -> impl IntoIterator<Item = clap::Arg> {
+fn source_args() -> impl IntoIterator<Item = clap::Arg> {
     [
         // The path is intentionally optional to enable invocations like `rrc -V`, `rrc -- -h`,
         // `rrc -- -Zhelp`, `rrc -- -Chelp`, etc.
@@ -421,6 +439,12 @@ fn extract_normal_operation(operation: &str, matches: &mut clap::ArgMatches) -> 
                 check_only: matches.remove_one(id::check_only).unwrap_or_default(),
                 shallowness: matches.remove_one(id::shallow),
                 dump: matches.remove_one(id::dump),
+            },
+        },
+        id::clippy => Operation::Clippy {
+            mode: match dir_opts {
+                Some(dir_opts) => CompileMode::DirectiveDriven(dir_opts),
+                None => CompileMode::Default,
             },
         },
         id::doc => Operation::Document {
@@ -662,11 +686,45 @@ macro_rules! ids {
     };
 }
 
-#[rustfmt::skip]
 ids! {
-    bless, build, cfgs, check_only, color, compiletest, crate_name, crate_type, crate_version,
-    cross_crate, directives, doc, dump, EDITION, extern_, hidden, identity, internals,
-    json, layout, link_to_def, log, next_solver, normalize, no_backtrace, no_dedupe, open,
-    PATH, query_engine_version, private, revision, run, shallow, SOURCE, suppress_lints, THEME,
-    unstable_features, verbatim, verbose,
+    EDITION,
+    PATH,
+    SOURCE,
+    THEME,
+    bless,
+    build,
+    cfgs,
+    check_only,
+    clippy,
+    color,
+    compiletest,
+    crate_name,
+    crate_type,
+    crate_version,
+    cross_crate,
+    directives,
+    doc,
+    dump,
+    extern_,
+    hidden,
+    identity,
+    internals,
+    json,
+    layout,
+    link_to_def,
+    log,
+    next_solver,
+    no_backtrace,
+    no_dedupe,
+    normalize,
+    open,
+    private,
+    query_engine_version,
+    revision,
+    run,
+    shallow,
+    suppress_lints,
+    unstable_features,
+    verbatim,
+    verbose,
 }

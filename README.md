@@ -12,9 +12,10 @@ A wrapper around rust{,do}c for rust{,do}c devs
 Usage: rruxwry <COMMAND>
 
 Commands:
-  build  Compile the given crate with rustc
-  doc    Document the given crate with rustdoc
-  help   Print this message or the help of the given subcommand(s)
+  build   Compile the given crate with rustc
+  clippy  Check the given crate with Clippy
+  doc     Document the given crate with rustdoc
+  help    Print this message or the help of the given subcommand(s)
 
 Options:
   -h, --help  Print help
@@ -48,6 +49,43 @@ Options:
   -F, --feature <NAME>         Enable an experimental library or language feature
   -s, --shallow[=<MODE>]       Halt after parsing the source file
   -d, --dump <IR>              Print the given compiler IR
+  -/, --suppress-lints         Cap lints at allow level
+  -#, --internals              Enable internal pretty-printing of data types
+  -N, --next-solver            Enable the next-gen trait solver
+  -I, --identity <IDENTITY>    Force rust{,do}c's identity
+  -D, --no-dedupe              Don't deduplicate diagnostics
+      --log[=<FILTER>]         Enable rust{,do}c logging. FILTER defaults to `debug`
+  -B, --no-backtrace           Override `RUST_BACKTRACE` to be `0`
+  -V, --version                Print the underlying rust{,do}c version and halt
+  -v, --verbose                Use verbose output
+      --color <WHEN>           Control when to use color [default: auto] [possible values: auto, always, never]
+  -h, --help                   Print help
+```
+<!--COMMAND}-->
+
+<!--{COMMAND-->
+`rruxwry clippy -h`:
+```
+Check the given crate with Clippy
+
+Usage: rruxwry clippy [OPTIONS] [PATH] [-- [VERBATIM]...]
+
+Arguments:
+  [PATH]         Path to the source file
+  [VERBATIM]...  Flags passed to `rustc` and `clippy-driver` verbatim
+
+Options:
+  -:, --source <SOURCE>        Provide the source code
+  -x, --extern <PATH>          Add the source file path to an extern crate
+  -@, --directives[=<FLAVOR>]  Enable compiletest-like directives
+  -T, --compiletest            Check in a compiletest-esque manner
+  -., --bless                  Update the test expectations
+  -n, --crate-name <NAME>      Set the name of the crate
+  -t, --crate-type <TYPE>      Set the type of the crate
+  -e, --edition <EDITION>      Set the edition of the crate
+      --cfg <NAME[="VALUE"]>   Enable a configuration
+  -R, --revision <NAME>        Enable a compiletest revision
+  -F, --feature <NAME>         Enable an experimental library or language feature
   -/, --suppress-lints         Cap lints at allow level
   -#, --internals              Enable internal pretty-printing of data types
   -N, --next-solver            Enable the next-gen trait solver

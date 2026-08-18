@@ -56,7 +56,7 @@ impl<'a> Edition<'a> {
     // FIXME: These dates and versions have been manually verified *with rustc*.
     //        It's possible that there are differences to rustdoc. Audit!
     fn latest_stable(engine: Engine, cx: Context<'_>) -> Option<Self> {
-        // FIXME: Should we warn on failure?
+        // FIXME: Error out on failure.
         let version = engine.version(cx).ok()?;
         match version.channel {
             Channel::Stable => match () {
