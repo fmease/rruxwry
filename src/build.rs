@@ -173,6 +173,19 @@ fn query_engine_version(
 ) -> Result<Version<String>, QueryEngineVersionError> {
     use QueryEngineVersionError as Error;
 
+    let engine = match engine {
+        // For now for simplicity we're just gonna use the version of the "corresponding" rustc.
+        //
+        // Clippy maintains its own versioning system whose version triple seems to be rustc's
+        // but shifted one to the right & zero-extended (so 1.97.1 => 0.1.97).
+        //
+        // I don't feel like digging deeper into this & updating all version-dependent lowerings
+        // to account for that new scheme. Using rustc's version should be good enough for the
+        // time being.
+        Engine::Clippy => Engine::Rustc,
+        _ => engine,
+    };
+
     let mut cmd = engine.command(cx, AddRuntimeLibraryPath::Yes).map_err(Error::EnginePathError)?;
 
     cmd.arg("-V");
@@ -186,10 +199,10 @@ fn query_engine_version(
     output.stdout.truncate_ascii_end();
     let source = String::from_utf8(output.stdout).map_err(|_| Error::Malformed)?;
 
-    // The name of the binary *has* to exist for the version string to be considered valid!
-    let (binary_name, source) = source.split_once(' ').ok_or(Error::Malformed)?;
+    // The name of the engine *has* to exist for the version string to be considered valid!
+    let (name, source) = source.split_once(' ').ok_or(Error::Malformed)?;
 
-    if binary_name != engine.name() {
+    if name != engine.name() {
         return Err(Error::Malformed);
     }
 
@@ -451,11 +464,9 @@ fn configure_late(
     // FIXME: Only add this when requested by `operate`.
     cmd.arg("-Lcrate=.");
 
-    if !opts.b_opts.extern_crates.is_empty() {
-        for ext in &opts.b_opts.extern_crates {
-            cmd.arg("--extern");
-            cmd.arg(ext);
-        }
+    for ext in &opts.b_opts.extern_crates {
+        cmd.arg("--extern");
+        cmd.arg(ext);
     }
 
     // The crate name can't depend on any cfgs, it's fine to skip this.
@@ -510,8 +521,10 @@ fn configure_late(
     }
 
     // The logging output would just get thrown away.
-    if let Some(filter) = &opts.b_opts.log {
-        cmd.env(engine.logging_env_var(), Some(filter));
+    if let Some(filter) = &opts.b_opts.log
+        && let Some(key) = engine.logging_env_key()
+    {
+        cmd.env(key, Some(filter));
     }
 
     Ok(())
@@ -533,6 +546,7 @@ fn configure_e_opts(
     cx: Context<'_>,
 ) -> Result<()> {
     match e_opts {
+        EngineOptions::Clippy => {}
         EngineOptions::Rustc(c_opts) => {
             if c_opts.check_only {
                 // FIXME: Should we `-o $null`?
@@ -908,6 +922,7 @@ pub(crate) fn probe_identity(opts: &Options<'_>) -> Identity {
 
 /// Engine-specific build options.
 pub(crate) enum EngineOptions<'a> {
+    Clippy,
     Rustc(CompileOptions),
     Rustdoc(DocOptions<'a>),
 }
@@ -915,6 +930,7 @@ pub(crate) enum EngineOptions<'a> {
 impl EngineOptions<'_> {
     pub(crate) fn engine(&self) -> Engine {
         match self {
+            Self::Clippy => Engine::Clippy,
             Self::Rustc(_) => Engine::Rustc,
             Self::Rustdoc(_) => Engine::Rustdoc,
         }
@@ -923,6 +939,7 @@ impl EngineOptions<'_> {
 
 #[derive(Clone, Copy, SmallKey)]
 pub(crate) enum Engine {
+    Clippy,
     Rustc,
     Rustdoc,
 }
@@ -930,21 +947,26 @@ pub(crate) enum Engine {
 impl Engine {
     pub(crate) const fn name(self) -> &'static str {
         match self {
+            Self::Clippy => "clippy-driver",
             Self::Rustc => "rustc",
             Self::Rustdoc => "rustdoc",
         }
     }
 
-    // FIXME: Investigate if we should also set RUSTC_LOG for rustdoc or if it doesn't make a difference.
-    const fn logging_env_var(self) -> &'static str {
+    const fn logging_env_key(self) -> Option<&'static str> {
         match self {
-            Self::Rustc => "RUSTC_LOG",
-            Self::Rustdoc => "RUSTDOC_LOG",
+            // FIXME: Figure out the name of the key if there's any.
+            Self::Clippy => None,
+            Self::Rustc => Some("RUSTC_LOG"),
+            // FIXME: Shouldn't we *also* set RUSTC_LOG? After all, both can be built from source &
+            //        they have two separate logging setups that are both run (right?).
+            Self::Rustdoc => Some("RUSTDOC_LOG"),
         }
     }
 
     fn env_opts(self) -> Option<&'static [String]> {
         match self {
+            Self::Clippy => None, // FIXME: Introduce CLIPPY_FLAGS
             Self::Rustc => environment::rustc_options(),
             Self::Rustdoc => environment::rustdoc_options(),
         }
