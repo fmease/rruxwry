@@ -72,14 +72,7 @@ pub(crate) fn arguments() -> Arguments {
         verbatim: matches.remove_many(id::verbatim).map(Iterator::collect).unwrap_or_default(),
         operation: op,
         crate_name: matches.try_remove_one(id::crate_name).unwrap_or_default(),
-        // FIXME: Don't leak the crate type!
-        //        Sadly, clap doesn't support zero-copy deserialization /
-        //        deserializing from borrowed program arguments and providing &strs.
-        //        Fix: Throw out clap and do it manually.
-        crate_type: matches
-            .try_remove_one(id::crate_type)
-            .map(|typ| typ.map(|typ| CrateType::parse_cli_style(String::leak(typ))))
-            .unwrap_or_default(),
+        crate_type: matches.try_remove_one(id::crate_type).unwrap_or_default(),
         edition: matches.remove_one(id::EDITION),
         b_opts: BuildOptions {
             cfgs: matches
@@ -151,7 +144,7 @@ fn extract_toolchain(mut args: std::env::ArgsOs) -> (Option<PlusPrefixedToolchai
 fn with_build_args(cmd: clap::Command) -> clap::Command {
     cmd.args(source_args())
         .arg(extern_arg())
-        .arg(verbatim_arg().help("Flags passed to `rustc` verbatim"))
+        .arg(verbatim_arg("Flags passed to `rustc` verbatim"))
         .arg(
             clap::Arg::new(id::run)
                 .short('r')
@@ -202,7 +195,7 @@ fn with_build_args(cmd: clap::Command) -> clap::Command {
 fn with_clippy_args(cmd: clap::Command) -> clap::Command {
     cmd.args(source_args())
         .arg(extern_arg())
-        .arg(verbatim_arg().help("Flags passed to `rustc` and `clippy-driver` verbatim"))
+        .arg(verbatim_arg("Flags passed to `rustc` and `clippy-driver` verbatim"))
         .args(compiletest_args())
         .args(crate_name_and_type_args())
         .arg(edition_arg())
@@ -213,7 +206,7 @@ fn with_clippy_args(cmd: clap::Command) -> clap::Command {
 fn with_doc_args(cmd: clap::Command) -> clap::Command {
     cmd.args(source_args())
         .arg(extern_arg())
-        .arg(verbatim_arg().help("Flags passed to `rustc` and `rustdoc` verbatim"))
+        .arg(verbatim_arg("Flags passed to `rustc` and `rustdoc` verbatim"))
         .arg(
             clap::Arg::new(id::open)
                 .short('o')
@@ -284,7 +277,7 @@ fn with_fmt_args(cmd: clap::Command) -> clap::Command {
     // FIXME: Does rustfmt support no-dedupe?
     // FIXME: Does rustfmt support tracing/logging?
     cmd.arg(path_arg())
-        .arg(verbatim_arg().help("Flags passed to `rustfmt` verbatim"))
+        .arg(verbatim_arg("Flags passed to `rustfmt` verbatim"))
         .arg(edition_arg())
         .args(dbg_args())
 }
@@ -320,8 +313,8 @@ fn extern_arg() -> clap::Arg {
         .help("Add the source file path to an extern crate")
 }
 
-fn verbatim_arg() -> clap::Arg {
-    clap::Arg::new(id::verbatim).num_args(..).last(true).value_name("VERBATIM")
+fn verbatim_arg(help: &'static str) -> clap::Arg {
+    clap::Arg::new(id::verbatim).num_args(..).last(true).value_name("VERBATIM").help(help)
 }
 
 fn compiletest_args() -> impl IntoIterator<Item = clap::Arg> {
@@ -363,6 +356,7 @@ fn crate_name_and_type_args() -> impl IntoIterator<Item = clap::Arg> {
             .short('t')
             .long("crate-type")
             .value_name("TYPE")
+            .value_parser(CrateType::parse_cli_style)
             .help("Set the type of the crate"),
     ]
 }
@@ -603,14 +597,13 @@ impl CrateName<String> {
 }
 
 impl CrateType {
-    // FIXME: Take <'a> &'a str string once clap is thrown out.
-    fn parse_cli_style(source: &'static str) -> Self {
-        match source {
-            "b" => Self("bin"),
-            "l" => Self("lib"),
-            "m" => Self("proc-macro"),
-            _ => Self(source),
-        }
+    fn parse_cli_style(source: &str) -> Result<Self, String> {
+        parse!(
+            "b" | "bin" => Self::Bin,
+            "l" | "lib" | "rlib" => Self::Lib,
+            "m" | "proc-macro" => Self::ProcMacro,
+        )(source)
+        .map_err(possible_values)
     }
 }
 

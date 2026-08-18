@@ -56,6 +56,8 @@ impl<'a> Edition<'a> {
     // FIXME: These dates and versions have been manually verified *with rustc*.
     //        It's possible that there are differences to rustdoc. Audit!
     fn latest_stable(engine: Engine, cx: Context<'_>) -> Option<Self> {
+        // FIXME: Simplify the impl using something like `select_by_version`
+
         // FIXME: Error out on failure.
         let version = engine.version(cx).ok()?;
         match version.channel {
@@ -114,26 +116,13 @@ impl<'a> Edition<'a> {
     }
 }
 
-// FIXME: Everywhere: Experiment with "inverting" this mapping for maintainability.
-//        I.e., have a map from ResultTy (e.g., Edition, Syntax) to a struct of the
-//        rough form { stable: Result<Triple, Unsupported>,
-//                       beta: Result<(Triple, Result<Pre, Unsupported>), Unsupported>,
-//                       nightly: Result<(Date, Result<Triple, Ambiguous>), Unsupported> }.
-//        And have a helper function for the performing the actual match
-
-// This is just a wrapper around a string. An enum listing all crate types which are
-// valid at the time of writing wouldn't be forward compatible with future versions
-// of rust{,do}c. I don't want to assume that rruxwry gets *so* well maintained that
-// it can keep pace with rust{,do}c.
+// FIXME: Add support for the other types, too.
 #[derive(Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(test, derive(Debug))]
-// FIXME: Switch to <'a> &'a str once we've thrown out clap.
-pub(crate) struct CrateType(pub &'static str);
-
-impl CrateType {
-    pub(crate) const LIB: Self = Self("lib");
-    pub(crate) const BIN: Self = Self("bin");
-    pub(crate) const PROC_MACRO: Self = Self("proc-macro");
+pub(crate) enum CrateType {
+    Bin,
+    Lib,
+    ProcMacro,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]

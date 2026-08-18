@@ -349,9 +349,13 @@ fn configure_early<'cx>(
 
     // FIXME: IINM older versions of rustdoc don't support this flag. Do something smarter
     //        in that case or at least emit a proper error diagnostic.
-    if let Some(CrateType(typ)) = krate.typ {
+    if let Some(typ) = krate.typ {
         cmd.arg("--crate-type");
-        cmd.arg(typ);
+        cmd.arg(match typ {
+            CrateType::Bin => "bin",
+            CrateType::Lib => "lib",
+            CrateType::ProcMacro => "proc-macro",
+        });
     }
 
     // Regarding crate name querying, the edition is vital. After all,

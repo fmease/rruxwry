@@ -239,7 +239,7 @@ impl<'src> InstantiatedDirectives<'src> {
             SimpleDirective::Aux(directive) => self.auxes.push(match directive {
                 // FIXME: Audit this!
                 AuxiliaryDirective::Bin { path } => {
-                    Auxiliary { prefix: None, path, typ: Some(CrateType::BIN) }
+                    Auxiliary { prefix: None, path, typ: Some(CrateType::Bin) }
                 }
                 AuxiliaryDirective::Build { path } => Auxiliary { prefix: None, path, typ: None },
                 AuxiliaryDirective::Crate { prefix, path } => {
@@ -255,7 +255,7 @@ impl<'src> InstantiatedDirectives<'src> {
                     Auxiliary {
                         prefix: Some(prefix.into_inner().into()),
                         path,
-                        typ: Some(CrateType::PROC_MACRO),
+                        typ: Some(CrateType::ProcMacro),
                     }
                 }
             }),

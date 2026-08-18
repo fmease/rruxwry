@@ -77,7 +77,7 @@ fn compile_deps(deps: Vec<SourcePathBuf>, registry: &mut Vec<String>, cx: Contex
         let krate = Crate {
             path: Some(path.as_ref()),
             name: None,
-            typ: Some(CrateType::LIB),
+            typ: Some(CrateType::Lib),
             edition: None,
         };
         // FIXME: `build_directive_driven` under `-@`! Don't forget to set Role to Auxiliary!
@@ -101,7 +101,7 @@ fn clippy(
     let mut e_opts = EngineOptions::ClippyDriver;
     match mode {
         CompileMode::Default => {
-            let typ = krate.typ.or(Some(CrateType::LIB));
+            let typ = krate.typ.or(Some(CrateType::Lib));
             let krate = Crate { typ, ..krate };
             build_default(&e_opts, krate, opts, cx)?;
         }
@@ -123,7 +123,7 @@ fn compile<'a>(
     let mut e_opts = EngineOptions::Rustc(c_opts);
     let (krate, opts, run_v_opts) = match mode {
         CompileMode::Default => {
-            let typ = krate.typ.or_else(|| matches!(run, Run::No).then_some(CrateType::LIB));
+            let typ = krate.typ.or_else(|| matches!(run, Run::No).then_some(CrateType::Lib));
             let krate = Crate { typ, ..krate };
             let (krate, opts) = build_default(&e_opts, krate, opts, cx)?;
             (krate, opts, default())
@@ -262,7 +262,7 @@ fn document_cross_crate(
         .done()
     })?;
 
-    let krate = Crate { typ: krate.typ.or(Some(CrateType::LIB)), ..krate };
+    let krate = Crate { typ: krate.typ.or(Some(CrateType::Lib)), ..krate };
     // FIXME: The clone is awful!
     let (krate, _) = build_default(&EngineOptions::Rustc(default()), krate, opts.clone(), cx)?;
 
@@ -567,7 +567,7 @@ impl directive::PreferDylib {
             // doesn't support dynamic linking in which case it also uses `lib`.
             // Since we don't have any "infrastructure" in place for checking
             // target architectures, let's fall back to the "safer" option.
-            (Self::Yes, None) => Some(CrateType::LIB),
+            (Self::Yes, None) => Some(CrateType::Lib),
             (Self::No, None) => None,
         }
     }
@@ -577,7 +577,7 @@ fn populate_extern_prelude(typ: Option<CrateType>, extern_crates: &mut Vec<Strin
     match typ {
         // For convenience and just like Cargo we add `proc_macro` to the external prelude.
         // FIXME: Don't to_string, use Cow
-        Some(CrateType::PROC_MACRO) => extern_crates.push("proc_macro".to_string()),
+        Some(CrateType::ProcMacro) => extern_crates.push("proc_macro".to_string()),
         _ => {}
     }
 }
