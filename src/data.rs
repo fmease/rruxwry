@@ -61,7 +61,8 @@ impl<'a> Edition<'a> {
         // FIXME: Error out on failure.
         let version = engine.version(cx).ok()?;
         match version.channel {
-            Channel::Stable => match () {
+            // FIXME: Audit beta channel.
+            Channel::Stable | Channel::Beta { .. } => match () {
                 () if version.triple >= V!(1, 85, 0) => Some(Self::Rust2024), // branched: 2025-01-03
                 () if version.triple >= V!(1, 56, 0) => Some(Self::Rust2021), // branched: 2021-09-03
                 () if version.triple >= V!(1, 31, 0) => Some(Self::Rust2018), // branched: 2018-10-19
@@ -70,7 +71,6 @@ impl<'a> Edition<'a> {
                 () if version.triple >= V!(1, 27, 0) => Some(Self::Rust2015), // branched: 2018-05-04
                 () => None,
             },
-            Channel::Beta { prerelease: _ } => None, // FIXME: Unimplemented.
             Channel::Nightly | Channel::Dev => match &version.commit {
                 Some(commit) => {
                     match () {
