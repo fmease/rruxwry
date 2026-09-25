@@ -35,7 +35,7 @@ pub(crate) fn perform(
     opts: &Options<'_>,
     imply_u_opts: ImplyUnstableOptions,
     cx: Context<'_>,
-) -> Result<()> {
+) -> Result {
     let engine = e_opts.engine();
 
     let mut cmd = engine
@@ -328,7 +328,7 @@ fn configure_early<'cx>(
     krate: Crate<'_>,
     opts: &Options<'_>,
     cx: Context<'cx>,
-) -> Result<()> {
+) -> Result {
     let engine = e_opts.engine();
 
     match krate.path {
@@ -437,7 +437,7 @@ fn configure_late(
     opts: &Options<'_>,
     imply_u_opts: ImplyUnstableOptions,
     cx: Context<'_>,
-) -> Result<()> {
+) -> Result {
     // The crate name can't depend on any dependency crates, it's fine to skip this.
     // The opposite used to be the case actually prior to rust-lang/rust#117584.
     // E.g., via `#![crate_name = dependency::generate!()]`.
@@ -466,9 +466,7 @@ fn configure_late(
         cmd.arg(cfg);
     }
 
-    for feature in &opts.b_opts.unstable_features {
-        register_crate_attr(cmd, format_args!("feature({feature})"));
-    }
+    configure_unstable_features(cmd, &opts.b_opts.unstable_features, engine, opts, cx)?;
 
     if opts.b_opts.suppress_lints {
         cmd.arg("--cap-lints=allow");
@@ -542,7 +540,7 @@ fn configure_e_opts(
     e_opts: &EngineOptions<'_>,
     opts: &Options<'_>,
     cx: Context<'_>,
-) -> Result<()> {
+) -> Result {
     match e_opts {
         EngineOptions::ClippyDriver => {}
         EngineOptions::Rustc(c_opts) => {
@@ -651,13 +649,129 @@ fn configure_e_opts(
     Ok(())
 }
 
+fn configure_unstable_features(
+    cmd: &mut Command<'_>,
+    features: &[ExtFeature],
+    engine: Engine,
+    opts: &Options<'_>,
+    cx: Context<'_>,
+) -> Result {
+    let select = |candidates: &[_]| -> Result<_> {
+        Ok(select_by_version(
+            &candidates
+                .iter()
+                .map(|&(key, version, date)| Candidate { key, version, date, stable: false })
+                .collect::<Vec<_>>(),
+            engine,
+            "--feature",
+            opts,
+            cx,
+        )??)
+    };
+
+    for feature in features {
+        let feature = match &feature.raw {
+            "ace" => "associated_const_equality",
+            "acp" | "adt" => "adt_const_params",
+            "afidt" => "async_fn_in_dyn_trait",
+            "ast" => "arbitrary_self_types",
+            "at" | "auto_trait" => "auto_traits",
+            "atd" => "associated_type_defaults",
+            "bs" => "builtin_syntax",
+            "cia" => "custom_inner_attributes",
+            "clb" => "closure_lifetime_binder",
+            "co" => "coroutines",
+            "cptt" => "const_param_ty_trait",
+            "cta" => "checked_type_aliases",
+            "cti" => "const_trait_impl",
+            "dm" => "decl_macro",
+            "dp" => "deref_patterns",
+            "ec" => "ergonomic_clones",
+            "eii" => "extern_item_impls",
+            "et" => "extern_types",
+            "faf" => "final_associated_functions",
+            "fd" => "fn_delegation",
+            "fp" => "field_projections",
+            "frtr" | "frt" => "field_representing_type_raw",
+            "gca" => select(&[
+                // <rust-lang/rust#163306>
+                ("gca_const_items", Some(V!(1, 100, 0)), Some(D!(2026, 09, 25))),
+                ("generic_const_args", None, None),
+            ])?,
+            "gcamla" => "gca_macroless_args",
+            "gcamli" => "gca_macroless_items",
+            "gce" => "generic_const_exprs",
+            "gci" => "generic_const_items",
+            "gcpt" | "gcg" => "generic_const_parameter_types",
+            "gen" => "gen_blocks",
+            "gpt" => "generic_pattern_types",
+            "iat" => "inherent_associated_types",
+            "ir" => "impl_restriction",
+            "itaf" => "import_trait_associated_functions",
+            "itiat" | "atpit" => "impl_trait_in_assoc_type",
+            "itib" => "impl_trait_in_bindings",
+            "itiftr" => "impl_trait_in_fn_trait_return",
+            "li" => "lang_items",
+            "lta" => "lazy_type_alias",
+            "macp" | "madt" => "min_adt_const_params",
+            "me" => "move_expr",
+            "mgca" => select(&[
+                // <rust-lang/rust#163306>
+                ("gca_min_const_items", Some(V!(1, 100, 0)), Some(D!(2026, 09, 25))),
+                ("min_generic_const_args", None, None),
+            ])?,
+            "mlgca" => select(&[
+                // <rust-lang/rust#163306>
+                ("gca_macroless_args", Some(V!(1, 100, 0)), Some(D!(2026, 09, 25))),
+                ("macroless_generic_const_args", None, None),
+            ])?,
+            "mmb" => "more_maybe_bounds",
+            "mme" => "macro_metavar_expr",
+            "mmec" => "macro_metavar_expr_concat",
+            "mqp" => "more_qualified_paths",
+            "ms" => "min_specialization",
+            "mta" => "marker_trait_attr",
+            "nb" => "negative_bounds",
+            "nftp" => "named_fn_trait_parameters",
+            "ni" => "negative_impls",
+            "nlb" => "non_lifetime_binders",
+            "np" => "never_patterns",
+            "nt" => "never_type",
+            "pmh" => "proc_macro_hygiene",
+            "pt" => "pattern_types",
+            "ra" | "rustc_attr" => "rustc_attrs",
+            "rtn" => "return_type_notation",
+            "s" => "specialization",
+            "sa" => "staged_api",
+            "sea" => "stmt_expr_attributes",
+            "sh" => "sized_hierarchy",
+            "sis" => "supertrait_item_shadowing",
+            "ta" | "trait_aliases" => "trait_alias",
+            "tait" => "type_alias_impl_trait",
+            "tb" => "trivial_bounds",
+            "try" => "try_blocks",
+            "tcsu" => "type_changing_struct_update",
+            "uc" => "unboxed_closures",
+            "ucp" => "unsized_const_params",
+            "uf" => "unsafe_fields",
+            "wca" => "where_clause_attrs",
+            "wnc" => "with_negative_coherence",
+            feature => feature,
+        };
+
+        register_crate_attr(cmd, format_args!("feature({feature})"));
+    }
+
+    Ok(())
+}
+
 fn configure_shallowness(
     cmd: &mut Command<'_>,
     shallowness: Shallowness,
     e_opts: &EngineOptions<'_>,
     opts: &Options<'_>,
     cx: Context<'_>,
-) -> Result<()> {
+) -> Result {
     match shallowness {
         Shallowness::ParseOnly => {
             cmd.arg(select_by_version(
@@ -701,7 +815,7 @@ fn configure_forced_identity(
     e_opts: &EngineOptions<'_>,
     opts: &Options<'_>,
     cx: Context<'_>,
-) -> Result<()> {
+) -> Result {
     let engine = e_opts.engine();
 
     const KEY: &str = "RUSTC_BOOTSTRAP";
@@ -1117,7 +1231,7 @@ pub(crate) enum Theme {
 #[allow(clippy::struct_excessive_bools)] // not worth to address
 pub(crate) struct BuildOptions {
     pub(crate) cfgs: Vec<String>,
-    pub(crate) unstable_features: Vec<String>,
+    pub(crate) unstable_features: Vec<ExtFeature>,
     pub(crate) extern_crates: Vec<String>,
     pub(crate) suppress_lints: bool,
     pub(crate) internals: bool,
@@ -1126,6 +1240,11 @@ pub(crate) struct BuildOptions {
     pub(crate) no_dedupe: bool,
     pub(crate) log: Option<String>,
     pub(crate) no_backtrace: bool,
+}
+
+#[derive(Clone)]
+pub(crate) struct ExtFeature {
+    pub(crate) raw: String,
 }
 
 #[derive(Clone, Copy)]

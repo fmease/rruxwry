@@ -2,7 +2,8 @@
 
 use crate::{
     build::{
-        BuildOptions, CompileOptions, DebugOptions, DocOptions, Engine, Ir, Shallowness, Theme,
+        BuildOptions, CompileOptions, DebugOptions, DocOptions, Engine, ExtFeature, Ir,
+        Shallowness, Theme,
     },
     data::{
         CrateName, CrateType, DocBackend, Edition, ExtEdition, Identity, PlusPrefixedToolchain,
@@ -81,8 +82,10 @@ pub(crate) fn arguments() -> Arguments {
                 .unwrap_or_default()
                 .unwrap_or_default(),
             unstable_features: matches
-                .try_remove_many(id::unstable_features)
-                .map(|features| features.map(Iterator::collect))
+                .try_remove_many::<String>(id::unstable_features)
+                .map(|feats| {
+                    feats.map(|feats| feats.map(|feat| ExtFeature { raw: feat }).collect())
+                })
                 .unwrap_or_default()
                 .unwrap_or_default(),
             extern_crates: default(),
@@ -388,7 +391,6 @@ fn cfg_args() -> impl IntoIterator<Item = clap::Arg> {
             .short('F')
             .long("feature")
             .value_name("NAME")
-            .value_parser(parse_unstable_feature_cli_style)
             .action(clap::ArgAction::Append)
             .help("Enable an experimental library or language feature"),
     ]
@@ -654,85 +656,6 @@ impl Ir {
         )(source)
         .map_err(possible_values)
     }
-}
-
-// FIXME: clap requires the ret ty to be ~owned, ideally we'd just return `&'input str`.
-#[expect(clippy::unnecessary_wraps)] // not in our control
-fn parse_unstable_feature_cli_style(source: &str) -> Result<String, String> {
-    Ok(match source {
-        "ace" => "associated_const_equality",
-        "acp" | "adt" => "adt_const_params",
-        "afidt" => "async_fn_in_dyn_trait",
-        "ast" => "arbitrary_self_types",
-        "at" | "auto_trait" => "auto_traits",
-        "atd" => "associated_type_defaults",
-        "bs" => "builtin_syntax",
-        "cia" => "custom_inner_attributes",
-        "clb" => "closure_lifetime_binder",
-        "co" => "coroutines",
-        "cptt" => "const_param_ty_trait",
-        "cta" => "checked_type_aliases",
-        "cti" => "const_trait_impl",
-        "dm" => "decl_macro",
-        "dp" => "deref_patterns",
-        "ec" => "ergonomic_clones",
-        "eii" => "extern_item_impls",
-        "et" => "extern_types",
-        "faf" => "final_associated_functions",
-        "fd" => "fn_delegation",
-        "fp" => "field_projections",
-        "frtr" | "frt" => "field_representing_type_raw",
-        "gb" => "gen_blocks",
-        "gca" => "generic_const_args",
-        "gce" => "generic_const_exprs",
-        "gci" => "generic_const_items",
-        "gcpt" | "gcg" => "generic_const_parameter_types",
-        "gpt" => "generic_pattern_types",
-        "iat" => "inherent_associated_types",
-        "ir" => "impl_restriction",
-        "itaf" => "import_trait_associated_functions",
-        "itiat" | "atpit" => "impl_trait_in_assoc_type",
-        "itib" => "impl_trait_in_bindings",
-        "itiftr" => "impl_trait_in_fn_trait_return",
-        "li" => "lang_items",
-        "lta" => "lazy_type_alias",
-        "marker" => "marker_trait_attr",
-        "me" => "move_expr",
-        "mgca" => "min_generic_const_args",
-        "mlgca" => "macroless_generic_const_args",
-        "mmb" => "more_maybe_bounds",
-        "mme" => "macro_metavar_expr",
-        "mmec" => "macro_metavar_expr_concat",
-        "mqp" => "more_qualified_paths",
-        "ms" => "min_specialization",
-        "nb" => "negative_bounds",
-        "nftp" => "named_fn_trait_parameters",
-        "ni" => "negative_impls",
-        "nlb" => "non_lifetime_binders",
-        "np" => "never_patterns",
-        "nt" => "never_type",
-        "ogca" => "opaque_generic_const_args",
-        "pt" => "pattern_types",
-        "ra" | "rustc_attr" => "rustc_attrs",
-        "rtn" => "return_type_notation",
-        "s" => "specialization",
-        "sa" => "staged_api",
-        "sea" => "stmt_expr_attributes",
-        "sh" => "sized_hierarchy",
-        "sis" => "supertrait_item_shadowing",
-        "try" => "try_blocks",
-        "ta" | "trait_aliases" => "trait_alias",
-        "tait" => "type_alias_impl_trait",
-        "tb" => "trivial_bounds",
-        "tcsu" => "type_changing_struct_update",
-        "uc" => "unboxed_closures",
-        "ucp" => "unsized_const_params",
-        "uf" => "unsafe_fields",
-        "wca" => "where_clause_attrs",
-        "wnc" => "with_negative_coherence",
-        _ => source,
-    }
-    .to_string())
 }
 
 fn possible_values(values: impl Iterator<Item: std::fmt::Display> + Clone) -> String {
