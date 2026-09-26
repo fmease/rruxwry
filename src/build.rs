@@ -565,14 +565,36 @@ fn configure_c_opts(
     }
 
     if let Some(ir) = c_opts.dump {
+        let select = |candidates: &[_]| -> Result<_> {
+            Ok(select_by_version(
+                &candidates
+                    .iter()
+                    .map(|&(key, version, date)| Candidate { key, version, date, stable: false })
+                    .collect::<Vec<_>>(),
+                Engine::Rustc,
+                "--dump",
+                opts,
+                cx,
+            )??)
+        };
+
         cmd.arg(match ir {
-            Ir::Ast => "-Zunpretty=ast-tree",
+            Ir::Ast => select(&[
+                // <rust-lang/rust#82304>
+                ("-Zunpretty=ast-tree", Some(V!(1, 52, 0)), Some(D!(2021, 03, 04))),
+                ("-Zast-json-noexpand", None, None),
+            ])?,
             Ir::Astpp => "-Zunpretty=normal",
-            Ir::Xast => "-Zunpretty=ast-tree,expanded",
+            Ir::Xast => select(&[
+                // <rust-lang/rust#82304>
+                ("-Zunpretty=ast-tree,expanded", Some(V!(1, 52, 0)), Some(D!(2021, 03, 04))),
+                ("-Zast-json", None, None),
+            ])?,
             Ir::Xastpp => "-Zunpretty=expanded",
             Ir::Hir => "-Zunpretty=hir-tree",
             Ir::Hirpp => "-Zunpretty=hir",
             Ir::Thir => "-Zunpretty=thir-tree",
+            // FIXME: Use `-Zdump-mir=…` in older versions (e.g., 1.40)
             Ir::Mir => "-Zunpretty=mir",
             Ir::Lir => "--emit=llvm-ir=-",
             Ir::Asm => "--emit=asm=-",
@@ -665,7 +687,7 @@ fn configure_d_opts(
 
 fn configure_unstable_features(
     cmd: &mut Command<'_>,
-    features: &[ExtFeature],
+    features: &[Feature],
     engine: Engine,
     opts: &Options<'_>,
     cx: Context<'_>,
@@ -684,7 +706,7 @@ fn configure_unstable_features(
     };
 
     for feature in features {
-        let feature = match &feature.raw {
+        let feature = match &feature.feat_or_feat_shorthand {
             "ace" => "associated_const_equality",
             "acp" | "adt" => "adt_const_params",
             "afidt" => "async_fn_in_dyn_trait",
@@ -1244,7 +1266,7 @@ pub(crate) enum Theme {
 #[allow(clippy::struct_excessive_bools)] // not worth to address
 pub(crate) struct BuildOptions {
     pub(crate) cfgs: Vec<String>,
-    pub(crate) unstable_features: Vec<ExtFeature>,
+    pub(crate) unstable_features: Vec<Feature>,
     pub(crate) extern_crates: Vec<String>,
     pub(crate) suppress_lints: bool,
     pub(crate) internals: bool,
@@ -1256,8 +1278,8 @@ pub(crate) struct BuildOptions {
 }
 
 #[derive(Clone)]
-pub(crate) struct ExtFeature {
-    pub(crate) raw: String,
+pub(crate) struct Feature {
+    pub(crate) feat_or_feat_shorthand: String,
 }
 
 #[derive(Clone, Copy)]

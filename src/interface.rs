@@ -2,8 +2,8 @@
 
 use crate::{
     build::{
-        BuildOptions, CompileOptions, DebugOptions, DocOptions, Engine, ExtFeature, Ir,
-        Shallowness, Theme,
+        BuildOptions, CompileOptions, DebugOptions, DocOptions, Engine, Feature, Ir, Shallowness,
+        Theme,
     },
     data::{
         CrateName, CrateType, DocBackend, Edition, ExtEdition, Identity, PlusPrefixedToolchain,
@@ -84,7 +84,9 @@ pub(crate) fn arguments() -> Arguments {
             unstable_features: matches
                 .try_remove_many::<String>(id::unstable_features)
                 .map(|feats| {
-                    feats.map(|feats| feats.map(|feat| ExtFeature { raw: feat }).collect())
+                    feats.map(|feats| {
+                        feats.map(|feat| Feature { feat_or_feat_shorthand: feat }).collect()
+                    })
                 })
                 .unwrap_or_default()
                 .unwrap_or_default(),
