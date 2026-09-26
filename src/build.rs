@@ -542,109 +542,123 @@ fn configure_e_opts(
     cx: Context<'_>,
 ) -> Result {
     match e_opts {
-        EngineOptions::ClippyDriver => {}
-        EngineOptions::Rustc(c_opts) => {
-            if c_opts.check_only {
-                // FIXME: Should we `-o $null`?
-                cmd.arg("--emit=metadata");
-            }
+        EngineOptions::ClippyDriver => Ok(()),
+        EngineOptions::Rustc(c_opts) => configure_c_opts(cmd, c_opts, opts, cx),
+        EngineOptions::Rustdoc(d_opts) => configure_d_opts(cmd, d_opts, opts, cx),
+        EngineOptions::Rustfmt => Ok(()),
+    }
+}
 
-            if let Some(shallowness) = c_opts.shallowness {
-                configure_shallowness(cmd, shallowness, e_opts, opts, cx)?;
-            }
+fn configure_c_opts(
+    cmd: &mut Command<'_>,
+    c_opts: &CompileOptions,
+    opts: &Options<'_>,
+    cx: Context<'_>,
+) -> Result {
+    if c_opts.check_only {
+        // FIXME: Should we `-o $null` smh?
+        cmd.arg("--emit=metadata");
+    }
 
-            if let Some(ir) = c_opts.dump {
-                // FIXME: Repr "identified", "expanded,identified", "expanded,hygiene",
-                //        hir,typed", "thir-flar", "mir-cfg".
-                cmd.arg(match ir {
-                    Ir::Ast => "-Zunpretty=ast-tree",
-                    Ir::Astpp => "-Zunpretty=normal",
-                    Ir::Xast => "-Zunpretty=ast-tree,expanded",
-                    Ir::Xastpp => "-Zunpretty=expanded",
-                    Ir::Hir => "-Zunpretty=hir-tree",
-                    Ir::Hirpp => "-Zunpretty=hir",
-                    Ir::Thir => "-Zunpretty=thir-tree",
-                    Ir::Mir => "-Zunpretty=mir",
-                    Ir::Lir => "--emit=llvm-ir=-",
-                    Ir::Asm => "--emit=asm=-",
+    if let Some(shallowness) = c_opts.shallowness {
+        configure_shallowness(cmd, shallowness, opts, cx)?;
+    }
+
+    if let Some(ir) = c_opts.dump {
+        cmd.arg(match ir {
+            Ir::Ast => "-Zunpretty=ast-tree",
+            Ir::Astpp => "-Zunpretty=normal",
+            Ir::Xast => "-Zunpretty=ast-tree,expanded",
+            Ir::Xastpp => "-Zunpretty=expanded",
+            Ir::Hir => "-Zunpretty=hir-tree",
+            Ir::Hirpp => "-Zunpretty=hir",
+            Ir::Thir => "-Zunpretty=thir-tree",
+            Ir::Mir => "-Zunpretty=mir",
+            Ir::Lir => "--emit=llvm-ir=-",
+            Ir::Asm => "--emit=asm=-",
+        });
+    }
+
+    Ok(())
+}
+
+fn configure_d_opts(
+    cmd: &mut Command<'_>,
+    d_opts: &DocOptions<'_>,
+    opts: &Options<'_>,
+    cx: Context<'_>,
+) -> Result {
+    if let DocBackend::Json = d_opts.backend {
+        cmd.arg("--output-format=json");
+    }
+
+    if let Some(crate_version) = &d_opts.crate_version {
+        cmd.arg("--crate-version");
+        cmd.arg(crate_version);
+    }
+
+    if d_opts.private {
+        cmd.arg("--document-private-items");
+    }
+
+    if d_opts.hidden {
+        cmd.arg("--document-hidden-items");
+    }
+
+    if d_opts.layout {
+        cmd.arg("--show-type-layout");
+    }
+
+    if d_opts.link_to_def {
+        cmd.arg("--generate-link-to-definition");
+    }
+
+    if d_opts.normalize {
+        cmd.arg("-Znormalize-docs");
+    }
+
+    if let Some(theme) = &d_opts.theme {
+        const DEFAULT_THEME: &str = "ayu"; // personal preference
+
+        // FIXME: Account for the period of time in which `--default-theme` didn't work due to a bug:
+        //        <https://github.com/rust-lang/rust/issues/87263>.
+        match select_by_version(
+            &[
+                // <rust-lang/rust#79642>
+                Candidate {
+                    key: "--default-theme",
+                    version: Some(V!(1, 51, 0)),
+                    date: Some(D!(2020, 12, 27)),
+                    stable: true,
+                },
+                // <rust-lang/rust#77213>
+                Candidate {
+                    key: "--default-theme",
+                    version: Some(V!(1, 49, 0)),
+                    date: Some(D!(2020, 10, 29)),
+                    stable: false,
+                },
+            ],
+            Engine::Rustdoc,
+            "--theme",
+            opts,
+            cx,
+        )? {
+            Ok(opt) => {
+                cmd.arg(opt);
+                cmd.arg(match theme {
+                    Theme::Default => DEFAULT_THEME,
+                    Theme::Fixed(theme) => theme,
                 });
             }
+            Err(error) => match theme {
+                Theme::Default => {}
+                Theme::Fixed(_) => return Err(error.into()),
+            },
         }
-        EngineOptions::Rustdoc(d_opts) => {
-            if let DocBackend::Json = d_opts.backend {
-                cmd.arg("--output-format=json");
-            }
-
-            if let Some(crate_version) = &d_opts.crate_version {
-                cmd.arg("--crate-version");
-                cmd.arg(crate_version);
-            }
-
-            if d_opts.private {
-                cmd.arg("--document-private-items");
-            }
-
-            if d_opts.hidden {
-                cmd.arg("--document-hidden-items");
-            }
-
-            if d_opts.layout {
-                cmd.arg("--show-type-layout");
-            }
-
-            if d_opts.link_to_def {
-                cmd.arg("--generate-link-to-definition");
-            }
-
-            if d_opts.normalize {
-                cmd.arg("-Znormalize-docs");
-            }
-
-            if let Some(theme) = &d_opts.theme {
-                const DEFAULT_THEME: &str = "ayu"; // personal preference
-
-                // FIXME: Account for the period of time in which `--default-theme` didn't work due to a bug:
-                //        <https://github.com/rust-lang/rust/issues/87263>.
-                match select_by_version(
-                    &[
-                        // <rust-lang/rust#79642>
-                        Candidate {
-                            key: "--default-theme",
-                            version: Some(V!(1, 51, 0)),
-                            date: Some(D!(2020, 12, 27)),
-                            stable: true,
-                        },
-                        // <rust-lang/rust#77213>
-                        Candidate {
-                            key: "--default-theme",
-                            version: Some(V!(1, 49, 0)),
-                            date: Some(D!(2020, 10, 29)),
-                            stable: false,
-                        },
-                    ],
-                    Engine::Rustdoc,
-                    "--theme",
-                    opts,
-                    cx,
-                )? {
-                    Ok(opt) => {
-                        cmd.arg(opt);
-                        cmd.arg(match theme {
-                            Theme::Default => DEFAULT_THEME,
-                            Theme::Fixed(theme) => theme,
-                        });
-                    }
-                    Err(error) => match theme {
-                        Theme::Default => {}
-                        Theme::Fixed(_) => return Err(error.into()),
-                    },
-                }
-            }
-
-            cmd.args(&d_opts.v_opts.arguments);
-        }
-        EngineOptions::Rustfmt => {}
     }
+
+    cmd.args(&d_opts.v_opts.arguments);
 
     Ok(())
 }
@@ -768,7 +782,6 @@ fn configure_unstable_features(
 fn configure_shallowness(
     cmd: &mut Command<'_>,
     shallowness: Shallowness,
-    e_opts: &EngineOptions<'_>,
     opts: &Options<'_>,
     cx: Context<'_>,
 ) -> Result {
@@ -786,7 +799,7 @@ fn configure_shallowness(
                     // 1.0.0, possibly earlier
                     Candidate { key: "-Zparse-only", version: None, date: None, stable: false },
                 ],
-                e_opts.engine(),
+                Engine::Rustc,
                 "--shallow",
                 opts,
                 cx,
