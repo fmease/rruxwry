@@ -722,6 +722,7 @@ fn configure_unstable_features(
             "cti" => "const_trait_impl",
             "dm" => "decl_macro",
             "dp" => "deref_patterns",
+            "dfv" => "default_field_values",
             "ec" => "ergonomic_clones",
             "eii" => "extern_item_impls",
             "et" => "extern_types",
