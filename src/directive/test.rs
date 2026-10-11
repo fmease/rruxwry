@@ -7,6 +7,7 @@ use crate::{source::SourcePath, utility::default};
 // FIXME: Test non-alphanum revision "names" in `revisions` directive (what does compiletest do??).
 // FIXME: Test shell-escaping for compile-flags etc once the parser supports it
 // FIXME: Test CRLF.
+// FIXME: Test edition ranges.
 
 fn parse_directives<'cx>(
     source: &'cx str,
@@ -24,10 +25,16 @@ fn parse_directives<'cx>(
     )
 }
 
-fn parse_directive(source: &str, scope: Scope) -> Result<Directive<'_>, Error<'_>> {
+fn parse_directive(source: &str, scope: Scope) -> Result<Directive<'_>, Vec<Error<'_>>> {
+    let mut errors = Errors::default();
     // FIXME: Make role and flavor a parameter.
     // FIXME: Actually set the offset to 1 from 0 make room for Span::SHAM.
-    Parser::new(source, scope, Role::Principal, Flavor::Vanilla, 0).parse_directive()
+    let parser = Parser::new(source, scope, Role::Principal, Flavor::Vanilla, 0, &mut errors);
+    match parser.parse_directive() {
+        Ok(_) if !errors.raw.is_empty() => unreachable!(),
+        Ok(dir) => Ok(dir),
+        Err(()) => Err(errors.raw),
+    }
 }
 
 fn span(start: u32, end: u32) -> Span {
@@ -40,14 +47,17 @@ fn spanned<T>(start: u32, end: u32, bare: T) -> Spanned<T> {
 
 #[test]
 fn empty_directive() {
-    assert_eq!(parse_directive("", Scope::Base), Err(Error::UnexpectedEndOfInput(span(0, 0))));
+    assert_eq!(
+        parse_directive("", Scope::Base),
+        Err(vec![Error::UnexpectedEndOfInput(span(0, 0))])
+    );
 }
 
 #[test]
 fn blank_directive() {
     assert_eq!(
         parse_directive("  \t   ", Scope::Base),
-        Err(Error::UnexpectedEndOfInput(span(6, 6)))
+        Err(vec![Error::UnexpectedEndOfInput(span(6, 6))])
     );
 }
 
@@ -55,11 +65,11 @@ fn blank_directive() {
 fn unavailable_htmldocck_directive_base() {
     assert_eq!(
         parse_directive("!has", Scope::Base),
-        Err(Error::UnavailableDirective {
+        Err(vec![Error::UnavailableDirective {
             name: spanned(0, 4, "!has"),
             actual: Scope::Base.into(),
             expected: Scope::HtmlDocCk.into(), // FIXME: This should be "Rustdoc"
-        })
+        }])
     );
 }
 
@@ -67,11 +77,11 @@ fn unavailable_htmldocck_directive_base() {
 fn unavailable_rruxwry_directive_base() {
     assert_eq!(
         parse_directive("crate inner {", Scope::Base),
-        Err(Error::UnavailableDirective {
+        Err(vec![Error::UnavailableDirective {
             name: spanned(0, 5, "crate"),
             actual: Flavor::Vanilla.into(),
             expected: Flavor::Rruxwry.into(),
-        })
+        }])
     );
 }
 
@@ -79,11 +89,11 @@ fn unavailable_rruxwry_directive_base() {
 fn unavailable_jsondocck_directive_htmldocck() {
     assert_eq!(
         parse_directive("is", Scope::HtmlDocCk),
-        Err(Error::UnavailableDirective {
+        Err(vec![Error::UnavailableDirective {
             name: spanned(0, 2, "is"),
             actual: Scope::HtmlDocCk.into(),
             expected: Scope::HtmlDocCk.into(), // FIXME: Should be Scope::JsonDocCk
-        })
+        }])
     );
 }
 
@@ -91,7 +101,7 @@ fn unavailable_jsondocck_directive_htmldocck() {
 fn unsupported_directive() {
     assert_eq!(
         parse_directive("check-pass", Scope::Base),
-        Err(Error::UnsupportedDirective(spanned(0, 10, "check-pass")))
+        Err(vec![Error::UnsupportedDirective(spanned(0, 10, "check-pass"))])
     );
 }
 
@@ -99,7 +109,7 @@ fn unsupported_directive() {
 fn unknown_directive() {
     assert_eq!(
         parse_directive("  undefined ", Scope::Base),
-        Err(Error::UnknownDirective(spanned(2, 11, "undefined",)))
+        Err(vec![Error::UnknownDirective(spanned(2, 11, "undefined",))])
     );
 }
 
@@ -127,7 +137,7 @@ fn edition_directive_no_colon() {
     // FIXME: This should only warn (under -@) and discard the whole directive
     assert_eq!(
         parse_directive("edition 2018", Scope::Base),
-        Err(Error::UnexpectedToken { actual: spanned(8, 9, '2'), expected: ':' })
+        Err(vec![Error::UnexpectedToken { actual: spanned(8, 9, '2'), expected: ':'.into() }])
     );
 }
 
@@ -146,7 +156,7 @@ fn revisions_directive() {
 fn revisions_directive_duplicate_revisions() {
     assert_eq!(
         parse_directive("revisions: repeat repeat", Scope::Base),
-        Err(Error::DuplicateRevisions(span(11, 24)))
+        Err(vec![Error::DuplicateRevisions(span(11, 24))])
     );
 }
 
@@ -167,7 +177,7 @@ fn conditional_directive() {
 fn empty_conditional_directive() {
     assert_eq!(
         parse_directive("[predicate]", Scope::Base),
-        Err(Error::UnexpectedEndOfInput(span(11, 11)))
+        Err(vec![Error::UnexpectedEndOfInput(span(11, 11))])
     );
 }
 
@@ -175,7 +185,7 @@ fn empty_conditional_directive() {
 fn unknown_conditional_directive() {
     assert_eq!(
         parse_directive("[whatever] unknown", Scope::Base),
-        Err(Error::UnknownDirective(spanned(11, 18, "unknown")))
+        Err(vec![Error::UnknownDirective(spanned(11, 18, "unknown"))])
     );
 }
 
@@ -186,7 +196,10 @@ fn empty_revision() {
         parse_directive("[] edition: 2021", Scope::Base),
         Ok(Directive {
             revision: Some(spanned(1, 1, "")),
-            bare: SimpleDirective::Edition(spanned(12, 16, "2021"))
+            bare: SimpleDirective::Edition(EditionRange {
+                start: spanned(12, 16, Edition::Numeric(2021)),
+                end: None
+            })
         })
     );
 }
@@ -198,7 +211,10 @@ fn padded_revision_not_trimmed() {
         parse_directive(" [  padded \t] edition: 2015", Scope::Base),
         Ok(Directive {
             revision: Some(spanned(2, 12, "  padded \t")),
-            bare: SimpleDirective::Edition(spanned(23, 27, "2015"))
+            bare: SimpleDirective::Edition(EditionRange {
+                start: spanned(23, 27, Edition::Numeric(2015)),
+                end: None
+            })
         })
     );
 }
@@ -244,7 +260,7 @@ fn conditional_directives_directive() {
 fn unterminated_revision_condition() {
     assert_eq!(
         parse_directive("[half-open", Scope::Base),
-        Err(Error::UnexpectedEndOfInput(span(10, 10)))
+        Err(vec![Error::UnexpectedEndOfInput(span(10, 10))])
     );
 }
 
@@ -309,7 +325,13 @@ fn conditional_directives() {
                 ..default()
             },
             uninstantiated: vec![
-                (spanned(27, 30, "one"), SimpleDirective::Edition(spanned(41, 45, "2018"))),
+                (
+                    spanned(27, 30, "one"),
+                    SimpleDirective::Edition(EditionRange {
+                        start: spanned(41, 45, Edition::Numeric(2018)),
+                        end: None
+                    })
+                ),
                 (
                     spanned(86, 89, "two"),
                     SimpleDirective::Flags(
@@ -396,17 +418,31 @@ fn conditional_directives_undeclared_revisions() {
                     spanned(4, 9, "block"),
                     SimpleDirective::Flags("--crate-type lib", Stage::CompileTime, FlagScope::Base)
                 ),
-                (spanned(47, 51, "wall"), SimpleDirective::Edition(spanned(62, 66, "2021"))),
+                (
+                    spanned(47, 51, "wall"),
+                    SimpleDirective::Edition(EditionRange {
+                        start: spanned(62, 66, Edition::Numeric(2021)),
+                        end: None,
+                    })
+                ),
             ],
             role: Role::Principal
         }
     );
     assert_eq!(
         errors,
-        Errors(vec![
-            Error::UndeclaredRevision { revision: spanned(4, 9, "block"), available: default() },
-            Error::UndeclaredRevision { revision: spanned(47, 51, "wall"), available: default() },
-        ])
+        Errors {
+            raw: vec![
+                Error::UndeclaredRevision {
+                    revision: spanned(4, 9, "block"),
+                    available: default()
+                },
+                Error::UndeclaredRevision {
+                    revision: spanned(47, 51, "wall"),
+                    available: default()
+                },
+            ]
+        }
     );
 }
 

@@ -78,6 +78,12 @@ impl SourceMap {
             // FIXME: Safety comment.
             .map(|file| unsafe { file.as_ref() })
     }
+
+    pub(crate) fn source(&self, span: Span) -> Option<&str> {
+        let file = self.by_span(span)?;
+        let span = span.local(file);
+        Some(&file.contents[span.range()])
+    }
 }
 
 struct SourceFileBuf {
@@ -186,12 +192,17 @@ impl<const L: Locality> Span<L> {
         Self::new(self.start + offset, self.end + offset)
     }
 
+    pub(crate) fn to(self, other: Self) -> Self {
+        Self::new(self.start, other.end)
+    }
+
     pub(crate) const fn reinterpret<const P: Locality>(self) -> Span<P> {
         Span::new(self.start, self.end)
     }
 }
 
 impl Span {
+    // FIXME: get rid of shams!
     pub(crate) const SHAM: Self = Self::new(0, 0);
 
     pub(crate) const fn local(self, file: SourceFile<'_>) -> LocalSpan {
@@ -203,7 +214,6 @@ impl Span {
     }
 }
 
-#[cfg(test)]
 impl<const L: Locality> fmt::Debug for Span<L> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}..{}", self.start, self.end)
@@ -257,7 +267,12 @@ impl<T> Spanned<T> {
     }
 }
 
-#[cfg(test)]
+impl<T, E> Spanned<Result<T, E>> {
+    pub(crate) fn transpose(self) -> Result<Spanned<T>, E> {
+        self.bare.map(|bare| Spanned::new(self.span, bare))
+    }
+}
+
 impl<T: fmt::Debug> fmt::Debug for Spanned<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "@{:?} {:?}", self.span, self.bare)

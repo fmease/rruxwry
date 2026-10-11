@@ -49,6 +49,7 @@ pub(crate) enum Edition<'a> {
     Rust2024,
     // <rust-lang/rust#137606>
     Future,
+    // FIXME: get rid of this.
     Raw(&'a str),
 }
 

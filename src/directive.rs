@@ -21,7 +21,10 @@ use crate::{
     source::{LocalSpan, SourceFile, SourcePath, Span, Spanned},
     utility::{Conjunction, ListingExt, default},
 };
-use std::{borrow::Cow, collections::BTreeSet, fmt, mem, path::Path, str::CharIndices};
+use std::{
+    borrow::Cow, collections::BTreeSet, fmt, io::Write as _, mem, num::ParseIntError, path::Path,
+    str::CharIndices,
+};
 
 #[cfg(test)]
 mod test;
@@ -68,9 +71,9 @@ fn parse<'cx>(
             // FIXME: Add support for hard error, too!
             //        For example, DuplicateRevisions should lead to a hard error (unless `--force`d).
             //        Also, under Flavor::Rruxwry a lot of the warnings should become hard errors, too.
-            match Parser::new(directive, scope, role, flavor, offset).parse_directive() {
-                Ok(directive) => directives.add(directive),
-                Err(error) => errors.insert(error),
+            let parser = Parser::new(directive, scope, role, flavor, offset, errors);
+            if let Ok(directive) = parser.parse_directive() {
+                directives.add(directive)
             }
         }
 
@@ -225,7 +228,7 @@ impl InstantiationError<'_, '_> {
 pub(crate) struct InstantiatedDirectives<'src> {
     pub(crate) build_aux_docs: bool,
     pub(crate) auxes: Vec<Auxiliary<'src>>,
-    pub(crate) edition: Option<Spanned<&'src str>>,
+    pub(crate) edition: Option<EditionRange>,
     pub(crate) v_opts: VerbatimOptions<'src>,
     pub(crate) v_d_opts: VerbatimOptions<'src, ()>,
     pub(crate) run_v_opts: VerbatimOptions<'src>,
@@ -260,7 +263,7 @@ impl<'src> InstantiatedDirectives<'src> {
                 }
             }),
             SimpleDirective::BuildAuxDocs => self.build_aux_docs = true,
-            // FIXME: Emit an error if multiple `edition` directives were specified just like `compiletest` does.
+            // FIXME: Emit a warning if multiple `edition` directives were specified.
             // FIXME: When encountering unconditional+conditional, emit a warning.
             SimpleDirective::Edition(edition) => self.edition = Some(edition),
             SimpleDirective::EnvVar(key, value, stage) => {
@@ -324,7 +327,7 @@ struct Directive<'src> {
 enum SimpleDirective<'src> {
     Aux(AuxiliaryDirective<'src>),
     BuildAuxDocs,
-    Edition(Spanned<&'src str>),
+    Edition(EditionRange),
     EnvVar(&'src str, Option<&'src str>, Stage),
     // FIXME: Badly modeled: Stage::Runtime is incompatible with Receiver::Rustdoc.
     //        Make this state unrepresentable!
@@ -386,7 +389,7 @@ pub(crate) enum Polarity {
     Positive,
 }
 
-struct Parser<'src> {
+struct Parser<'a, 'src> {
     chars: CharIndices<'src>,
     peeked: Option<Option<(usize, char)>>,
     source: &'src str,
@@ -394,14 +397,31 @@ struct Parser<'src> {
     role: Role,
     flavor: Flavor,
     offset: u32,
+    errors: &'a mut Errors<'src>,
 }
 
-impl<'src> Parser<'src> {
-    fn new(source: &'src str, scope: Scope, role: Role, flavor: Flavor, offset: u32) -> Self {
-        Self { chars: source.char_indices(), peeked: None, source, scope, role, flavor, offset }
+impl<'a, 'src> Parser<'a, 'src> {
+    fn new(
+        source: &'src str,
+        scope: Scope,
+        role: Role,
+        flavor: Flavor,
+        offset: u32,
+        errors: &'a mut Errors<'src>,
+    ) -> Self {
+        Self {
+            chars: source.char_indices(),
+            peeked: None,
+            source,
+            scope,
+            role,
+            flavor,
+            offset,
+            errors,
+        }
     }
 
-    fn parse_directive(mut self) -> Result<Directive<'src>, Error<'src>> {
+    fn parse_directive(mut self) -> Result<Directive<'src>, ()> {
         self.parse_whitespace();
 
         let revision = if self.consume(|char| char == '[') {
@@ -416,7 +436,7 @@ impl<'src> Parser<'src> {
             let revision = self.parse_while(|char| char != ']');
             self.expect(']')?;
 
-            Some(revision)
+            Some(self.spanned(revision))
         } else {
             None
         };
@@ -434,11 +454,9 @@ impl<'src> Parser<'src> {
     fn parse_simple_directive(
         &mut self,
         source: Spanned<&'src str>,
-    ) -> Result<SimpleDirective<'src>, Error<'src>> {
-        match self.parse_base_directive(source) {
-            Ok(Some(directive)) => return Ok(directive),
-            Ok(None) => {}
-            Err(error) => return Err(error),
+    ) -> Result<SimpleDirective<'src>, ()> {
+        if let Some(directive) = self.parse_base_directive(source)? {
+            return Ok(directive);
         }
         let htmldocck = Self::parse_htmldocck_directive(source.bare);
         let jsondocck = Self::parse_jsondocck_directive(source.bare);
@@ -451,7 +469,7 @@ impl<'src> Parser<'src> {
             | (Scope::JsonDocCk | Scope::Base, Some(_), None)
             | (Scope::Base, Some(_), Some(_)) => {
                 // FIXME: Mark this as hard error somehow.
-                return Err(Error::UnavailableDirective {
+                return self.fatal(Error::UnavailableDirective {
                     name: source,
                     actual: self.scope.into(),
                     // FIXME: This is incorrect: Should be one of Rustdoc, Html or Json
@@ -463,7 +481,7 @@ impl<'src> Parser<'src> {
         if let Some(directive) = rruxwry {
             return match self.flavor {
                 // FIXME: Mark this as hard error somehow.
-                Flavor::Vanilla => Err(Error::UnavailableDirective {
+                Flavor::Vanilla => self.fatal(Error::UnavailableDirective {
                     name: source,
                     actual: self.flavor.into(),
                     expected: Flavor::Rruxwry.into(),
@@ -471,13 +489,13 @@ impl<'src> Parser<'src> {
                 Flavor::Rruxwry => Ok(directive),
             };
         }
-        Err(Error::UnknownDirective(source))
+        self.fatal(Error::UnknownDirective(source))
     }
 
     fn parse_base_directive(
         &mut self,
         source: Spanned<&'src str>,
-    ) -> Result<Option<SimpleDirective<'src>>, Error<'src>> {
+    ) -> Result<Option<SimpleDirective<'src>>, ()> {
         Ok(Some(match source.bare {
             "aux-bin" => {
                 self.parse_separator(Padding::Yes)?; // FIXME: Audit Padding::Yes.
@@ -510,7 +528,7 @@ impl<'src> Parser<'src> {
                     Scope::HtmlDocCk | Scope::JsonDocCk => {}
                     Scope::Base => {
                         // FIXME: Mark this as a "soft error" (warning) somehow.
-                        return Err(Error::UnavailableDirective {
+                        self.error(Error::UnavailableDirective {
                             name: source,
                             actual: self.scope.into(),
                             // FIXME: Expected scope should be "Rustdoc" (=Html|Json)
@@ -525,29 +543,72 @@ impl<'src> Parser<'src> {
                 return self.parse_flags(Stage::CompileTime, FlagScope::Base).map(Some);
             }
             "doc-flags" => {
+                let dir = self.parse_flags(Stage::CompileTime, FlagScope::Rustdoc);
+
                 match self.scope {
                     Scope::HtmlDocCk | Scope::JsonDocCk => {}
                     Scope::Base => {
                         // FIXME: Mark this as a "soft error" (warning) somehow.
-                        return Err(Error::UnavailableDirective {
+                        self.error(Error::UnavailableDirective {
                             name: source,
                             actual: self.scope.into(),
                             // FIXME: Expected scope should be "Rustdoc" (=Html|Json)
                             expected: Scope::HtmlDocCk.into(),
                         });
+                        return Ok(None);
                     }
                 }
 
-                return self.parse_flags(Stage::CompileTime, FlagScope::Rustdoc).map(Some);
+                return dir.map(Some);
             }
             "edition" => {
                 // FIXME: To be fully "compliant", under Flavor::Vanilla this should be
                 //        "PaddingStart::NoIgnoreDirectiveEntirelyAndWarn, PaddingEnd::Yes"
                 self.parse_separator(Padding::Yes)?;
 
-                // While tempting, don't validate the edition.
-                // Indeed, we parse until a line break and include things like whitespace!
-                SimpleDirective::Edition(self.parse_until_line_break())
+                let start = self.parse_while(|char| char != '.' && !char.is_whitespace());
+                self.parse_whitespace();
+
+                let end = match self.peek() {
+                    Some('.') => {
+                        self.advance();
+                        self.expect('.')?;
+                        let end = self.parse_while(|char| !char.is_whitespace());
+                        Some(end)
+                    }
+                    Some(char) => {
+                        // FIXME: Intro helper.
+                        let span = self.span(LocalSpan::with_len(self.index(), len_utf8(char)));
+                        return self.fatal(Error::UnexpectedToken {
+                            actual: Spanned::new(span, char),
+                            expected: ExpectedToken::DoubleDotOrEndOfLine,
+                        });
+                    }
+                    None => None,
+                };
+
+                let start = self.spanned(start);
+                let start = start
+                    .map(Edition::parse)
+                    .transpose()
+                    .map_err(|_| self.error(Error::InvalidEdition(start)));
+
+                let end = end
+                    .map(|end| {
+                        let end = self.spanned(end);
+                        let end = EditionBound::parse(end)
+                            .map_err(|_| self.error(Error::InvalidEdition(end)))?;
+                        if let Ok(start) = start
+                            && let EditionBound::Excluded(end) = end
+                            && start.bare >= end.bare
+                        {
+                            self.error(Error::InvalidEditionRange(start, end));
+                        }
+                        Ok(end)
+                    })
+                    .transpose()?;
+
+                SimpleDirective::Edition(EditionRange { start: start?, end })
             }
             "exec-env" => {
                 self.limit(source, Scope::Base)?;
@@ -568,7 +629,7 @@ impl<'src> Parser<'src> {
             "revisions" => {
                 // FIXME: Add a unit test for this!
                 if let Role::Auxiliary = self.role {
-                    return Err(Error::AuxiliaryRevisionDeclaration(source.span));
+                    return self.fatal(Error::AuxiliaryRevisionDeclaration(source.span));
                 }
 
                 self.parse_separator(Padding::Yes)?; // FIXME: audit AllowPadding
@@ -579,7 +640,7 @@ impl<'src> Parser<'src> {
                 revisions.dedup();
                 if count != revisions.len() {
                     // FIXME: Provide a more precise message and span.
-                    return Err(Error::DuplicateRevisions(line.span));
+                    return self.fatal(Error::DuplicateRevisions(line.span));
                 }
                 SimpleDirective::Revisions(revisions)
             }
@@ -646,21 +707,21 @@ impl<'src> Parser<'src> {
             | "test-mir-pass"
             | "unique-doc-out-dir"
             | "unused-revision-names" => {
-                return Err(Error::UnsupportedDirective(source));
+                return self.fatal(Error::UnsupportedDirective(source));
             }
             _ if source.bare.starts_with("ignore-")
                 || source.bare.starts_with("needs-")
                 || source.bare.starts_with("only-") =>
             {
-                return Err(Error::UnsupportedDirective(source));
+                return self.fatal(Error::UnsupportedDirective(source));
             }
             _ => return Ok(None),
         }))
     }
 
-    fn limit(&mut self, name: Spanned<&'src str>, scope: Scope) -> Result<(), Error<'src>> {
+    fn limit(&mut self, name: Spanned<&'src str>, scope: Scope) -> Result<(), ()> {
         if self.scope != scope {
-            return Err(Error::UnavailableDirective {
+            return self.fatal(Error::UnavailableDirective {
                 name,
                 actual: self.scope.into(),
                 expected: scope.into(),
@@ -670,28 +731,24 @@ impl<'src> Parser<'src> {
         Ok(())
     }
 
-    fn parse_flags(
-        &mut self,
-        stage: Stage,
-        scope: FlagScope,
-    ) -> Result<SimpleDirective<'src>, Error<'src>> {
+    fn parse_flags(&mut self, stage: Stage, scope: FlagScope) -> Result<SimpleDirective<'src>, ()> {
         self.parse_separator(Padding::Yes)?; // FIXME: audit AllowPadding (before)
         Ok(SimpleDirective::Flags(self.parse_until_line_break().bare, stage, scope))
     }
 
-    fn parse_set_env_var(&mut self, stage: Stage) -> Result<SimpleDirective<'src>, Error<'src>> {
+    fn parse_set_env_var(&mut self, stage: Stage) -> Result<SimpleDirective<'src>, ()> {
         self.parse_separator(Padding::No)?;
         let line = self.parse_until_line_break().bare;
 
         // FIXME: How does `compiletest` handle the edge cases here?
         let Some((key, value)) = line.split_once('=') else {
             // FIXME: This should be UnexpectedToken(expected="=") instead!
-            return Err(Error::InvalidValue(line));
+            return self.fatal(Error::InvalidValue(line));
         };
         Ok(SimpleDirective::EnvVar(key, Some(value), stage))
     }
 
-    fn parse_unset_env_var(&mut self, stage: Stage) -> Result<SimpleDirective<'src>, Error<'src>> {
+    fn parse_unset_env_var(&mut self, stage: Stage) -> Result<SimpleDirective<'src>, ()> {
         self.parse_separator(Padding::No)?;
         Ok(SimpleDirective::EnvVar(self.parse_until_line_break().bare, None, stage))
     }
@@ -774,13 +831,18 @@ impl<'src> Parser<'src> {
         false
     }
 
-    fn expect(&mut self, expected: char) -> Result<(), Error<'src>> {
+    fn expect(&mut self, expected: char) -> Result<(), ()> {
         let Some(actual) = self.peek() else {
-            return Err(Error::UnexpectedEndOfInput(self.span(LocalSpan::empty(self.index()))));
+            let error = Error::UnexpectedEndOfInput(self.span(LocalSpan::empty(self.index())));
+            return self.fatal(error);
         };
         if actual != expected {
             let span = self.span(LocalSpan::with_len(self.index(), len_utf8(actual)));
-            return Err(Error::UnexpectedToken { actual: Spanned::new(span, actual), expected });
+            let error = Error::UnexpectedToken {
+                actual: Spanned::new(span, actual),
+                expected: expected.into(),
+            };
+            return self.fatal(error);
         }
         self.advance();
         Ok(())
@@ -799,7 +861,7 @@ impl<'src> Parser<'src> {
         self.advance_while(char::is_whitespace);
     }
 
-    fn parse_separator(&mut self, padding: Padding) -> Result<(), Error<'src>> {
+    fn parse_separator(&mut self, padding: Padding) -> Result<(), ()> {
         if let Padding::Yes = padding {
             self.parse_whitespace();
         }
@@ -813,18 +875,15 @@ impl<'src> Parser<'src> {
         Ok(())
     }
 
-    fn expect_many(
-        &mut self,
-        predicate: impl Fn(char) -> bool,
-    ) -> Result<Spanned<&'src str>, Error<'src>> {
-        let result = self.parse_while(predicate);
-        if result.span.is_empty() {
-            return Err(Error::UnexpectedEndOfInput(result.span));
+    fn expect_many(&mut self, predicate: impl Fn(char) -> bool) -> Result<Spanned<&'src str>, ()> {
+        let span = self.parse_while(predicate);
+        if span.is_empty() {
+            return self.fatal(Error::UnexpectedEndOfInput(self.span(span)));
         }
-        Ok(result)
+        Ok(self.spanned(span))
     }
 
-    fn parse_while(&mut self, predicate: impl Fn(char) -> bool) -> Spanned<&'src str> {
+    fn parse_while(&mut self, predicate: impl Fn(char) -> bool) -> LocalSpan {
         let mut span = LocalSpan::empty(self.index());
 
         while let Some(char) = self.peek() {
@@ -835,12 +894,13 @@ impl<'src> Parser<'src> {
             self.advance();
         }
 
-        self.spanned(span)
+        span
     }
 
     // FIXME: Should we bail on empty lines?
     fn parse_until_line_break(&mut self) -> Spanned<&'src str> {
-        self.parse_while(|char| char != '\n')
+        let span = self.parse_while(|char| char != '\n');
+        self.spanned(span)
     }
 
     fn spanned(&self, span: LocalSpan) -> Spanned<&'src str> {
@@ -856,6 +916,15 @@ impl<'src> Parser<'src> {
         //        here once we no longer need to shift by offset.
         span.shift(self.offset).reinterpret()
     }
+
+    fn error(&mut self, error: Error<'src>) {
+        self.errors.insert(error);
+    }
+
+    fn fatal<T>(&mut self, error: Error<'src>) -> Result<T, ()> {
+        self.error(error);
+        Err(())
+    }
 }
 
 #[allow(clippy::cast_possible_truncation)] // False positive, `len_utf8`'s result is always in 0..=4.
@@ -865,16 +934,18 @@ fn len_utf8(char: char) -> u32 {
 
 #[derive(Default)]
 #[cfg_attr(test, derive(PartialEq, Eq, Debug))]
-struct Errors<'src>(Vec<Error<'src>>);
+struct Errors<'src> {
+    raw: Vec<Error<'src>>,
+}
 
 impl<'src> Errors<'src> {
     fn insert(&mut self, error: Error<'src>) {
-        self.0.push(error);
+        self.raw.push(error);
     }
 
     // FIXME: Shouldn't all these errors be emitted as (non-fatal) errors instead of warnings?
     fn emit(self, cx: Context<'_>) {
-        self.0.into_iter().for_each(|error| error.emit(cx));
+        self.raw.into_iter().for_each(|error| error.emit(cx));
     }
 }
 
@@ -902,9 +973,16 @@ impl Error<'_> {
             Self::UnknownDirective(name) => {
                 warn(fmt!("unknown directive: `{name}`")).highlight(name.span, cx)
             }
-            Self::UnexpectedToken { actual, expected } => {
-                error(fmt!("found `{actual}` but expected `{expected}`")).highlight(actual.span, cx)
-            }
+            Self::UnexpectedToken { actual, expected } => error(|p| {
+                write!(p, "found `{actual}` but expected ")?;
+                match expected {
+                    ExpectedToken::Char(char) => write!(p, "`{char}`"),
+                    ExpectedToken::DoubleDotOrEndOfLine => {
+                        write!(p, "`..` or end of line")
+                    }
+                }
+            })
+            .highlight(actual.span, cx),
             Self::UnexpectedEndOfInput(span) => {
                 error(fmt!("unexpected end of input")).highlight(span, cx)
             }
@@ -938,6 +1016,13 @@ impl Error<'_> {
                     .highlight(span, cx)
                     .note(fmt!("declared revisions are inherited from the principal file"))
             }
+            Self::InvalidEdition(edition) => {
+                error(fmt!("invalid edition: `{edition}`")).highlight(edition.span, cx)
+            }
+            Self::InvalidEditionRange(start, end) => error(fmt!(
+                "invalid edition range: upper bound not strictly greater than lower bound"
+            ))
+            .highlight(start.span.to(end.span), cx),
         }
         .done();
     }
@@ -954,7 +1039,7 @@ enum Error<'src> {
     UnknownDirective(Spanned<&'src str>),
     UnexpectedToken {
         actual: Spanned<char>,
-        expected: char,
+        expected: ExpectedToken,
     },
     UnexpectedEndOfInput(Span),
     InvalidValue(&'src str),
@@ -964,6 +1049,21 @@ enum Error<'src> {
         available: BTreeSet<&'src str>,
     },
     AuxiliaryRevisionDeclaration(Span),
+    InvalidEdition(Spanned<&'src str>),
+    InvalidEditionRange(Spanned<Edition>, Spanned<Edition>),
+}
+
+#[cfg_attr(test, derive(PartialEq, Eq, Debug))]
+enum ExpectedToken {
+    Char(char),
+    // FIXME: overly specific; generalize!
+    DoubleDotOrEndOfLine,
+}
+
+impl From<char> for ExpectedToken {
+    fn from(char: char) -> Self {
+        Self::Char(char)
+    }
 }
 
 // FIXME: Overly general name for this.
@@ -1015,4 +1115,43 @@ enum Stage {
 enum FlagScope {
     Base,
     Rustdoc,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) enum Edition {
+    Numeric(u16),
+    Future,
+}
+
+impl Edition {
+    fn parse(source: &str) -> Result<Self, ParseIntError> {
+        match source {
+            "future" => Ok(Self::Future),
+            _ => source.parse().map(Self::Numeric),
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+#[cfg_attr(test, derive(PartialEq, Eq))]
+pub(crate) enum EditionBound {
+    Excluded(Spanned<Edition>),
+    Unbounded,
+}
+
+impl EditionBound {
+    fn parse(source: Spanned<&str>) -> Result<Self, ParseIntError> {
+        match source.bare {
+            "" => Ok(Self::Unbounded),
+            _ => Ok(Self::Excluded(source.map(Edition::parse).transpose()?)),
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+#[cfg_attr(test, derive(PartialEq, Eq))]
+pub(crate) struct EditionRange {
+    pub(crate) start: Spanned<Edition>,
+    #[cfg_attr(not(test), expect(dead_code))]
+    pub(crate) end: Option<EditionBound>,
 }
