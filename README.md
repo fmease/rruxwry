@@ -38,6 +38,7 @@ Options:
   -:, --source <SOURCE>        Provide the source code
   -x, --extern <PATH>          Add the source file path to an extern crate
   -r, --run                    Also run the built binary
+  -E, --evaluate               Evaluate the given expression and print the result
   -c, --check-only             Don't fully compile, only check the crate
   -@, --directives[=<FLAVOR>]  Enable compiletest-like directives
   -T, --compiletest            Check in a compiletest-esque manner

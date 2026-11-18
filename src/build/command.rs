@@ -5,6 +5,7 @@ use crate::{
 };
 use anstyle::Effects;
 use std::{
+    borrow::Cow,
     ffi::OsStr,
     io::{self, Write as _},
     process,
@@ -12,7 +13,7 @@ use std::{
 
 pub(crate) struct Command<'cx> {
     raw: process::Command,
-    feed: Option<&'cx str>,
+    feed: Option<Cow<'cx, str>>,
     cx: Context<'cx>,
 }
 
@@ -36,12 +37,12 @@ impl<'cx> Command<'cx> {
         };
     }
 
-    pub(crate) fn feed(&mut self, contents: &'cx str) {
+    pub(crate) fn feed(&mut self, contents: Cow<'cx, str>) {
         let previous = self.feed.replace(contents);
         debug_assert!(previous.is_none());
     }
 
-    fn spawn_with_feed(&mut self, feed: &str) -> io::Result<process::Child> {
+    fn spawn_with_feed(&mut self, feed: Cow<'_, str>) -> io::Result<process::Child> {
         self.raw.stdin(process::Stdio::piped());
         let mut child = self.raw.spawn()?;
         write!(child.stdin.take().unwrap(), "{feed}")?;
@@ -50,7 +51,7 @@ impl<'cx> Command<'cx> {
 
     pub(crate) fn execute_capturing_output(mut self) -> io::Result<process::Output> {
         self.log();
-        match self.feed {
+        match self.feed.take() {
             Some(feed) => {
                 self.raw.stdout(process::Stdio::piped());
                 self.raw.stderr(process::Stdio::piped());
@@ -62,7 +63,7 @@ impl<'cx> Command<'cx> {
 
     pub(crate) fn execute(mut self) -> io::Result<process::ExitStatus> {
         self.log();
-        match self.feed {
+        match self.feed.take() {
             Some(feed) => self.spawn_with_feed(feed)?.wait(),
             None => self.raw.status(),
         }

@@ -335,7 +335,7 @@ fn configure_early<'cx>(
         Some(SourcePath::Regular(path)) => cmd.arg(path),
         Some(path @ SourcePath::Stdin) => {
             if let Some(file) = cx.map().get(path) {
-                cmd.feed(file.contents);
+                cmd.feed(transform_source(file.contents, e_opts));
             }
             cmd.arg("-")
         }
@@ -535,6 +535,8 @@ fn configure_v_opts(cmd: &mut Command<'_>, v_opts: &VerbatimOptions<'_>) {
     cmd.args(&v_opts.arguments);
 }
 
+// FIXME: As this one is called in "configure_early", this is effectively "configure_early_e_opts"
+// but I'm pretty sure that most of these options aren't needed early...
 fn configure_e_opts(
     cmd: &mut Command<'_>,
     e_opts: &EngineOptions<'_>,
@@ -555,6 +557,16 @@ fn configure_c_opts(
     opts: &Options<'_>,
     cx: Context<'_>,
 ) -> Result {
+    match c_opts.fragment {
+        FragmentKind::File => {}
+        FragmentKind::Expr => {
+            // These work just fine on stable toolchains, too, so we don't need to account for that.
+            cmd.env("UNSTABLE_RUSTDOC_TEST_PATH", Some("")); // necessary to override the line
+            cmd.env("UNSTABLE_RUSTDOC_TEST_LINE", Some("-1")); // hide extra line added by `transform_source`
+            cmd.arg("--error-format=short");
+        }
+    }
+
     if c_opts.check_only {
         // FIXME: Should we `-o $null` smh?
         cmd.arg("--emit=metadata");
@@ -1218,9 +1230,17 @@ mod palette {
 
 #[derive_const(Default)]
 pub(crate) struct CompileOptions {
+    pub(crate) fragment: FragmentKind,
     pub(crate) check_only: bool,
     pub(crate) shallowness: Option<Shallowness>,
     pub(crate) dump: Option<Ir>,
+}
+
+#[derive_const(Default)]
+pub(crate) enum FragmentKind {
+    #[default]
+    File,
+    Expr,
 }
 
 #[derive(Clone, Copy)]
@@ -1455,6 +1475,14 @@ impl SelectionError {
             }
         }
     }
+}
+
+fn transform_source<'a>(source: &'a str, e_opts: &EngineOptions<'_>) -> Cow<'a, str> {
+    if let EngineOptions::Rustc(CompileOptions { fragment: FragmentKind::Expr, .. }) = e_opts {
+        return format!("fn main() {{ println!(\"{{:?}}\", {{\n{source}\n}}) }}").into();
+    }
+
+    source.into()
 }
 
 // Helpful resources for working with older versions:

@@ -2,8 +2,8 @@
 
 use crate::{
     build::{
-        BuildOptions, CompileOptions, DebugOptions, DocOptions, Engine, Feature, Ir, Shallowness,
-        Theme,
+        BuildOptions, CompileOptions, DebugOptions, DocOptions, Engine, Feature, FragmentKind, Ir,
+        Shallowness, Theme,
     },
     data::{
         CrateName, CrateType, DocBackend, Edition, ExtEdition, Identity, PlusPrefixedToolchain,
@@ -51,11 +51,9 @@ pub(crate) fn arguments() -> Arguments {
 
     // unwrap: handled by `clap`.
     let (op, mut matches) = matches.remove_subcommand().unwrap();
-
     let op = extract_operation(&op, &mut matches);
 
     let path = matches.remove_one(id::PATH).map(SourcePathBuf::new);
-
     let source = matches
         .try_remove_one(id::SOURCE)
         .map(|source| source.map(Source::String))
@@ -157,6 +155,14 @@ fn with_build_args(cmd: clap::Command) -> clap::Command {
                 .action(clap::ArgAction::SetTrue)
                 .conflicts_with(id::compiletest)
                 .help("Also run the built binary"),
+        )
+        .arg(
+            clap::Arg::new(id::evaluate)
+                .short('E')
+                .long("evaluate")
+                .action(clap::ArgAction::SetTrue)
+                .conflicts_with_all([id::run, id::PATH, id::compiletest])
+                .help("Evaluate the given expression and print the result"),
         )
         .arg(
             clap::Arg::new(id::check_only)
@@ -483,21 +489,27 @@ fn extract_operation(op: &str, matches: &mut clap::ArgMatches) -> Operation {
     }
 
     match engine {
-        Engine::Rustc => Operation::Compile {
-            run: match matches.remove_one::<bool>(id::run).unwrap_or_default() {
-                true => Run::Yes,
-                false => Run::No,
-            },
-            mode: match extract_dir_opts(matches) {
-                Some(dir_opts) => CompileMode::DirectiveDriven(dir_opts),
-                None => CompileMode::Default,
-            },
-            options: CompileOptions {
-                check_only: matches.remove_one(id::check_only).unwrap_or_default(),
-                shallowness: matches.remove_one(id::shallow),
-                dump: matches.remove_one(id::dump),
-            },
-        },
+        Engine::Rustc => {
+            let evaluate = matches.remove_one(id::evaluate).unwrap_or_default();
+
+            Operation::Compile {
+                run: if evaluate || matches.remove_one::<bool>(id::run).unwrap_or_default() {
+                    Run::Yes
+                } else {
+                    Run::No
+                },
+                mode: match extract_dir_opts(matches) {
+                    Some(dir_opts) => CompileMode::DirectiveDriven(dir_opts),
+                    None => CompileMode::Default,
+                },
+                options: CompileOptions {
+                    fragment: if evaluate { FragmentKind::Expr } else { FragmentKind::File },
+                    check_only: matches.remove_one(id::check_only).unwrap_or_default(),
+                    shallowness: matches.remove_one(id::shallow),
+                    dump: matches.remove_one(id::dump),
+                },
+            }
+        }
         Engine::ClippyDriver => Operation::Clippy {
             mode: match extract_dir_opts(matches) {
                 Some(dir_opts) => CompileMode::DirectiveDriven(dir_opts),
@@ -695,6 +707,7 @@ ids! {
     directives,
     doc,
     dump,
+    evaluate,
     extern_,
     fmt,
     hidden,
