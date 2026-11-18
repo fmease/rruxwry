@@ -2,12 +2,9 @@ use crate::{
     build::{DebugOptions, Engine, QueryEnginePathError, QueryEngineVersionError},
     data::{PlusPrefixedToolchain, Version},
     source::SourceMap,
-    utility::{
-        default,
-        small_fixed_map::{SmallFixedMap, SmallKey},
-    },
+    utility::small_fixed_map::{SmallFixedMap, SmallKey},
 };
-use std::{cell::RefCell, path::PathBuf};
+use std::{cell::RefCell, default::Default::default, path::PathBuf};
 
 pub(crate) macro new($opts:expr) {{
     super let cx = ContextData::new($opts);

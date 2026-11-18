@@ -1,5 +1,6 @@
 use super::*;
-use crate::{source::SourcePath, utility::default};
+use crate::source::SourcePath;
+use std::default::Default::default;
 
 // FIXME: Test trailing colons `:` (1) on argument-taking directives (2) on argument-less directivess.
 // FIXME: Test padded colons `  :  `.

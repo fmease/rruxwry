@@ -1,8 +1,7 @@
-use crate::utility::default;
 use anstream::{AutoStream, ColorChoice, stream::RawStream};
 use anstyle::{AnsiColor, Effects, Style};
 use smallvec::SmallVec;
-use std::io;
+use std::{default::Default::default, io};
 
 fn colorize(stream: &impl RawStream) -> bool {
     AutoStream::choice(stream) != ColorChoice::Never

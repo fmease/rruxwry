@@ -19,11 +19,11 @@ use crate::{
     data::{CrateName, CrateType},
     diagnostic::{EmittedError, error, fmt, warn},
     source::{LocalSpan, SourceFile, SourcePath, Span, Spanned},
-    utility::{Conjunction, ListingExt, default},
+    utility::{Conjunction, ListingExt},
 };
 use std::{
-    borrow::Cow, collections::BTreeSet, fmt, io::Write as _, mem, num::ParseIntError, path::Path,
-    str::CharIndices,
+    borrow::Cow, collections::BTreeSet, default::Default::default, fmt, io::Write as _, mem,
+    num::ParseIntError, path::Path, str::CharIndices,
 };
 
 #[cfg(test)]

@@ -13,12 +13,13 @@ use crate::{
     directive::{self, Revision},
     error::Result,
     source::{SourcePath, SourcePathBuf, Spanned},
-    utility::{OsStrExt as _, default, paint::Painter},
+    utility::{OsStrExt as _, paint::Painter},
 };
 use anstyle::AnsiColor;
 use std::{
     ascii::Char,
     cell::LazyCell,
+    default::Default::default,
     io::{self, Write as _},
     mem,
     path::{Path, PathBuf},
@@ -98,15 +99,15 @@ fn clippy(
     opts: Options<'_>,
     cx: Context<'_>,
 ) -> Result {
-    let mut e_opts = EngineOptions::ClippyDriver;
+    const E_OPTS: EngineOptions<'_> = EngineOptions::ClippyDriver;
     match mode {
         CompileMode::Default => {
             let typ = krate.typ.or(Some(CrateType::Lib));
             let krate = Crate { typ, ..krate };
-            build_default(&e_opts, krate, opts, cx)?;
+            build_default(&E_OPTS, krate, opts, cx)?;
         }
         CompileMode::DirectiveDriven(dir_opts) => {
-            build_directive_driven(&mut e_opts, krate, dir_opts, opts, cx)?;
+            build_directive_driven(E_OPTS, krate, dir_opts, opts, cx)?;
         }
     }
     Ok(())
@@ -120,7 +121,7 @@ fn compile<'a>(
     c_opts: CompileOptions,
     cx: Context<'a>,
 ) -> Result {
-    let mut e_opts = EngineOptions::Rustc(c_opts);
+    let e_opts = EngineOptions::Rustc(c_opts.clone()); // FIXME: clone
     let (krate, opts, run_v_opts) = match mode {
         CompileMode::Default => {
             let typ = krate.typ.or_else(|| matches!(run, Run::No).then_some(CrateType::Lib));
@@ -129,22 +130,23 @@ fn compile<'a>(
             (krate, opts, default())
         }
         CompileMode::DirectiveDriven(dir_opts) => {
-            build_directive_driven(&mut e_opts, krate, dir_opts, opts, cx)?
+            build_directive_driven(e_opts, krate, dir_opts, opts, cx)?
         }
     };
     match run {
-        Run::Yes => self::run(krate, &opts, &run_v_opts, cx),
+        Run::Yes => self::run(krate, opts, c_opts, run_v_opts, cx),
         Run::No => Ok(()),
     }
 }
 
 fn run(
     krate: Crate<'_>,
-    opts: &Options<'_>,
-    run_v_opts: &VerbatimOptions<'_>,
+    opts: Options<'_>,
+    c_opts: CompileOptions,
+    run_v_opts: VerbatimOptions<'_>,
     cx: Context<'_>,
 ) -> Result {
-    let crate_name = build::query_crate_name(krate, opts, cx).map_err(|error| {
+    let crate_name = build::query_crate_name(krate, &opts, c_opts, cx).map_err(|error| {
         // FIXME: Actually create a 'parent' error diagnostic with a message akin to
         //        "failed to run the built binary (requested …)" and smh.
         //        'tuck' the QueryCrateNameError below it (i.e., more indented).
@@ -152,8 +154,9 @@ fn run(
     })?;
 
     let path = if let Some(path) = krate.path
-        && let Ok(path) = CrateName::prepare_source_path(path)
-        && CrateName::parse_relaxed(path).is_ok_and(|name| name.as_ref() == crate_name.as_ref())
+        && let Ok(Some(path)) = CrateName::prepare_source_path(path)
+        && CrateName::parse_relaxed(Some(path))
+            .is_ok_and(|name| name.as_ref() == crate_name.as_ref())
     {
         path
     } else {
@@ -163,7 +166,7 @@ fn run(
     let mut path = PathBuf::from_iter([".", path]);
     path.set_extension(std::env::consts::EXE_EXTENSION);
 
-    build::run(&path, run_v_opts, cx)
+    build::run(&path, &run_v_opts, cx)
         .map_err(|error| {
             self::error(fmt!("failed to run the built binary `{}`", path.display()))
                 .note(fmt!("{error}"))
@@ -189,13 +192,8 @@ fn document<'a>(
         DocMode::Default => build_default(&EngineOptions::Rustdoc(d_opts), krate, opts, cx)?,
         DocMode::CrossCrate => return document_cross_crate(krate, opts, d_opts, open, cx),
         DocMode::DirectiveDriven(dir_opts) => {
-            let (krate, opts, _) = build_directive_driven(
-                &mut EngineOptions::Rustdoc(d_opts),
-                krate,
-                dir_opts,
-                opts,
-                cx,
-            )?;
+            let (krate, opts, _) =
+                build_directive_driven(EngineOptions::Rustdoc(d_opts), krate, dir_opts, opts, cx)?;
             (krate, opts)
         }
     };
@@ -212,10 +210,10 @@ fn format(krate: Crate<'_, ExtEdition<'_>>, opts: Options<'_>, cx: Context<'_>) 
             .into());
     }
 
-    let e_opts = EngineOptions::Rustfmt;
-    let edition = krate.edition.unwrap_or(ExtEdition::LatestStable).resolve(e_opts.engine(), cx);
+    const E_OPTS: EngineOptions<'_> = EngineOptions::Rustfmt;
+    let edition = krate.edition.unwrap_or(ExtEdition::LatestStable).resolve(E_OPTS.engine(), cx);
     let krate = Crate { edition, ..krate };
-    build::perform(&e_opts, krate, &opts, ImplyUnstableOptions::No, cx)
+    build::perform(&E_OPTS, krate, &opts, ImplyUnstableOptions::No, cx)
 }
 
 fn open(krate: Crate<'_>, opts: &Options<'_>, cx: Context<'_>) -> Result {
@@ -229,7 +227,7 @@ fn open(krate: Crate<'_>, opts: &Options<'_>, cx: Context<'_>) -> Result {
     {
         artifact_path.push(path.with_extension("html").file_name().unwrap());
     } else {
-        let crate_name = build::query_crate_name(krate, opts, cx).map_err(|error| {
+        let crate_name = build::query_crate_name(krate, opts, default(), cx).map_err(|error| {
             // FIXME: Actually create a 'parent' error diagnostic with a message akin to
             //        "failed to open the generated docs (requested …)" and smh.
             //        'tuck' the QueryCrateNameError below it (i.e., more indented).
@@ -266,7 +264,7 @@ fn document_cross_crate(
     // FIXME: The clone is awful!
     let (krate, _) = build_default(&EngineOptions::Rustc(default()), krate, opts.clone(), cx)?;
 
-    let crate_name = build::query_crate_name(krate, &opts, cx).map_err(|error| {
+    let crate_name = build::query_crate_name(krate, &opts, default(), cx).map_err(|error| {
         // FIXME: Actually create a 'parent' error diagnostic with a message akin to
         //        "failed to XYZ (requested …)" and smh.
         //        'tuck' the QueryCrateNameError below it (i.e., more indented).
@@ -334,7 +332,7 @@ fn build_default<'a>(
 }
 
 fn build_directive_driven<'a>(
-    e_opts: &mut EngineOptions<'a>,
+    mut e_opts: EngineOptions<'a>,
     krate: Crate<'a, ExtEdition<'a>>,
     mut dir_opts: DirectiveOptions,
     mut opts: Options<'a>,
@@ -381,7 +379,7 @@ fn build_directive_driven<'a>(
 
     let directives = directive::gather(
         Spanned::sham(path),
-        scope(e_opts),
+        scope(&e_opts),
         directive::Role::Principal,
         dir_opts.flavor,
         dir_opts.revision.as_ref().map(|Revision(rev)| Revision(rev.as_str())),
@@ -402,7 +400,7 @@ fn build_directive_driven<'a>(
         compile_auxiliary(
             aux,
             &aux_base_path,
-            e_opts,
+            &e_opts,
             dir_opts.clone(),
             // FIXME: This awful!
             opts.clone(),
@@ -440,14 +438,16 @@ fn build_directive_driven<'a>(
     let krate = Crate { path: Some(path), edition, ..krate };
 
     opts.v_opts.extend(directives.v_opts);
-    match e_opts {
-        EngineOptions::Rustdoc(d_opts) => d_opts.v_opts.extend(directives.v_d_opts),
+    match &mut e_opts {
+        EngineOptions::Rustdoc(d_opts) => {
+            d_opts.v_opts.extend(directives.v_d_opts);
+        }
         // compiletest doesn't feature directives for exclusively
         // passing verbatim flags to these engines
         EngineOptions::ClippyDriver | EngineOptions::Rustc(..) | EngineOptions::Rustfmt => {}
-    }
+    };
 
-    build::perform(e_opts, krate, &opts, ImplyUnstableOptions::No, cx)?;
+    build::perform(&e_opts, krate, &opts, ImplyUnstableOptions::No, cx)?;
     Ok((krate, opts, directives.run_v_opts))
 }
 
@@ -524,7 +524,7 @@ fn compile_auxiliary<'a>(
             //        I suspect is doesn't because we need to s%/rlib/rmeta/
             EngineOptions::Rustc(..) => e_opts,
             EngineOptions::ClippyDriver | EngineOptions::Rustdoc(_) | EngineOptions::Rustfmt => {
-                const { &EngineOptions::Rustc(CompileOptions::default()) }
+                const { &EngineOptions::Rustc(default()) }
             }
         },
         krate,
@@ -533,10 +533,10 @@ fn compile_auxiliary<'a>(
         cx,
     )?;
 
-    if doc && let EngineOptions::Rustdoc(d_opts) = e_opts {
+    if doc && let EngineOptions::Rustdoc(_) = e_opts {
         build::perform(
             // FIXME: Do we actually want to forward these doc opts from the parent crate??
-            &EngineOptions::Rustdoc(d_opts.clone()),
+            e_opts,
             krate,
             &opts,
             ImplyUnstableOptions::No,

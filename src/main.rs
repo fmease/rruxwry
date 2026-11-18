@@ -10,6 +10,7 @@
 #![feature(exact_size_is_empty)]
 #![feature(exit_status_error)]
 #![feature(generic_const_items)]
+#![feature(import_trait_associated_functions)]
 #![feature(iter_collect_into)]
 #![feature(macro_derive)]
 #![feature(macro_metavar_expr)]

@@ -8,7 +8,6 @@ use crate::{
 use anstyle::{AnsiColor, Effects};
 use std::{
     ascii::Char,
-    borrow::Cow,
     ffi::{OsStr, OsString},
     fmt,
     io::{self, Write as _},
@@ -130,6 +129,10 @@ pub(crate) enum CrateType {
 #[cfg_attr(test, derive(Debug))]
 pub(crate) struct CrateName<S: AsRef<str>>(S);
 
+impl CrateName<&'static str> {
+    pub(crate) const FALLBACK: Self = Self("rust_out");
+}
+
 impl<S: AsRef<str>> CrateName<S> {
     pub(crate) const fn new_unchecked(name: S) -> Self {
         Self(name)
@@ -168,9 +171,9 @@ impl<S: AsRef<str>> CrateName<S> {
 }
 
 impl CrateName<String> {
-    const FALLBACK: &str = "rust_out";
+    pub(crate) fn parse_relaxed(source: Option<&str>) -> Result<Self, ()> {
+        let Some(source) = source else { return Ok(CrateName::FALLBACK.map(Into::into)) };
 
-    pub(crate) fn parse_relaxed(source: &str) -> Result<Self, ()> {
         // NB: See the comment over in `CrateName::parse` for why this makes sense.
         if !source.is_empty()
             && source.chars().all(|char| char.is_alphanumeric() || char == '_' || char == '-')
@@ -185,10 +188,10 @@ impl CrateName<String> {
         Self::parse_relaxed(Self::prepare_source_path(path)?)
     }
 
-    pub(crate) fn prepare_source_path(path: SourcePath<'_>) -> Result<&str, ()> {
+    pub(crate) fn prepare_source_path(path: SourcePath<'_>) -> Result<Option<&str>, ()> {
         match path {
-            SourcePath::Regular(path) => path.file_stem().ok_or(())?.to_str().ok_or(()),
-            SourcePath::Stdin => Ok(Self::FALLBACK),
+            SourcePath::Regular(path) => path.file_stem().ok_or(())?.to_str().ok_or(()).map(Some),
+            SourcePath::Stdin => Ok(None),
         }
     }
 }
@@ -196,18 +199,6 @@ impl CrateName<String> {
 impl<S: AsRef<str>> CrateName<S> {
     pub(crate) fn as_ref(&self) -> CrateName<&str> {
         CrateName(self.0.as_ref())
-    }
-}
-
-impl From<CrateName<String>> for CrateName<Cow<'_, str>> {
-    fn from(name: CrateName<String>) -> Self {
-        name.map(Cow::Owned)
-    }
-}
-
-impl<'a> From<CrateName<&'a str>> for CrateName<Cow<'a, str>> {
-    fn from(name: CrateName<&'a str>) -> Self {
-        name.map(Cow::Borrowed)
     }
 }
 

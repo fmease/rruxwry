@@ -1,5 +1,7 @@
-use crate::utility::default;
-use std::cell::{Ref, RefCell};
+use std::{
+    cell::{Ref, RefCell},
+    default::Default::default,
+};
 
 pub(crate) struct MonotonicVec<T> {
     items: RefCell<Vec<T>>,

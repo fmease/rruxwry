@@ -12,7 +12,7 @@ use crate::{
     error::Result,
     fmt,
     source::SourcePath,
-    utility::{default, small_fixed_map::SmallKey},
+    utility::small_fixed_map::SmallKey,
 };
 use anstyle::AnsiColor;
 use command::Command;
@@ -224,6 +224,7 @@ impl QueryEngineVersionError {
 pub(crate) fn query_crate_name<'a>(
     krate: Crate<'a>,
     opts: &Options<'_>,
+    c_opts: CompileOptions,
     cx: Context<'_>,
 ) -> Result<CrateName<Cow<'a, str>>, QueryCrateNameError> {
     use QueryCrateNameError as Error;
@@ -237,10 +238,15 @@ pub(crate) fn query_crate_name<'a>(
     // provided us with an invalid configuration (1); this allows them to quickly suppress
     // this query by manually providing an "overwrite".
     if let Some(name) = krate.name {
-        return Ok(name.into());
+        return Ok(name.map(Into::into));
     }
 
-    let e_opts = EngineOptions::Rustc(default());
+    // We wrap the source code in a main function so we *know* it can't override the crate name.
+    if let FragmentKind::Expr = c_opts.fragment {
+        return Ok(CrateName::FALLBACK.map(Into::into));
+    }
+
+    let e_opts = EngineOptions::Rustc(c_opts);
 
     let mut cmd = e_opts
         .engine()
@@ -276,7 +282,7 @@ pub(crate) fn query_crate_name<'a>(
     output.stdout.truncate_ascii_end();
     let name = String::from_utf8(output.stdout).map_err(Error::InvalidUtf8)?;
 
-    CrateName::parse(name).map(Into::into).map_err(Error::InvalidCrateName)
+    CrateName::parse(name).map(|name| name.map(Into::into)).map_err(Error::InvalidCrateName)
 }
 
 pub(crate) enum QueryCrateNameError {
@@ -1229,6 +1235,7 @@ mod palette {
 }
 
 #[derive_const(Default)]
+#[derive(Clone)] // FIXME: awful
 pub(crate) struct CompileOptions {
     pub(crate) fragment: FragmentKind,
     pub(crate) check_only: bool,
@@ -1237,6 +1244,7 @@ pub(crate) struct CompileOptions {
 }
 
 #[derive_const(Default)]
+#[derive(Clone, Copy)]
 pub(crate) enum FragmentKind {
     #[default]
     File,
@@ -1264,7 +1272,6 @@ pub(crate) enum Ir {
 }
 
 #[allow(clippy::struct_excessive_bools)] // not worth to address
-#[derive(Clone)]
 pub(crate) struct DocOptions<'a> {
     pub(crate) backend: DocBackend,
     pub(crate) crate_version: Option<String>,

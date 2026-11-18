@@ -11,9 +11,9 @@ use crate::{
     directive::{Flavor, Revision},
     operate::{Bless, CompileMode, DirectiveOptions, DocMode, Open, Operation, Run, Test},
     source::SourcePathBuf,
-    utility::{Conjunction, ListingExt as _, default, parse},
+    utility::{Conjunction, ListingExt as _, parse},
 };
-use std::ffi::OsString;
+use std::{default::Default::default, ffi::OsString};
 
 // Similar to `-h`, `-V` is compatible with all other flags and renders required arguments optional.
 // While there could be a world where `-V` is incompatible with flags like `-r` (run) or `-o` (open)
@@ -161,7 +161,13 @@ fn with_build_args(cmd: clap::Command) -> clap::Command {
                 .short('E')
                 .long("evaluate")
                 .action(clap::ArgAction::SetTrue)
-                .conflicts_with_all([id::run, id::PATH, id::compiletest])
+                .conflicts_with_all([
+                    id::run,
+                    id::check_only,
+                    id::PATH,
+                    id::shallow,
+                    id::compiletest,
+                ])
                 .help("Evaluate the given expression and print the result"),
         )
         .arg(
@@ -608,7 +614,7 @@ impl ExtEdition<'static> {
 
 impl CrateName<String> {
     fn parse_cli_style(source: &str) -> Result<Self, &'static str> {
-        Self::parse_relaxed(source).map_err(|()| "not a non-empty alphanumeric string")
+        Self::parse_relaxed(Some(source)).map_err(|()| "not a non-empty alphanumeric string")
     }
 }
 
